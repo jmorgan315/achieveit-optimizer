@@ -11,6 +11,21 @@ export interface PersonMapping {
   isResolved: boolean;
 }
 
+// Status options matching AchieveIt template
+export type PlanItemStatus = 'On Track' | 'At Risk' | 'Off Track' | 'Complete' | 'Not Started' | '';
+
+// Update frequency options matching AchieveIt template
+export type UpdateFrequency = 'Weekly' | 'Monthly' | 'Quarterly' | 'Not Required' | '';
+
+// Metric description types matching AchieveIt template
+export type MetricDescription = 'Track to Target' | 'Maintain' | 'Stay Above' | 'Stay Below' | '';
+
+// Metric unit types matching AchieveIt template
+export type MetricUnit = 'Number' | 'Dollar' | 'Percentage' | '';
+
+// Metric rollup types matching AchieveIt template
+export type MetricRollup = 'Manual' | 'Sum Children' | 'Average Children' | '';
+
 export interface PlanItem {
   id: string;
   order: string;
@@ -18,13 +33,20 @@ export interface PlanItem {
   levelDepth: number;
   name: string;
   description: string;
-  assignedTo: string;
-  members: string[];
+  status: PlanItemStatus;
   startDate: string;
   dueDate: string;
-  metricName: string;
+  assignedTo: string;
+  members: string[];
+  administrators: string[];
+  updateFrequency: UpdateFrequency;
+  metricDescription: MetricDescription;
+  metricUnit: MetricUnit;
+  metricRollup: MetricRollup;
+  metricBaseline: string;
   metricTarget: string;
-  metricDataType: 'Currency' | 'Number' | 'Percentage' | '';
+  currentValue: string;
+  tags: string[];
   parentId: string | null;
   children: PlanItem[];
   issues: PlanItemIssue[];
@@ -46,14 +68,15 @@ export interface PlanState {
 }
 
 export const DEFAULT_LEVELS: PlanLevel[] = [
-  { id: '1', name: 'Focus Area', depth: 1 },
-  { id: '2', name: 'Initiative', depth: 2 },
-  { id: '3', name: 'Goal', depth: 3 },
+  { id: '1', name: 'Milestone', depth: 1 },
+  { id: '2', name: 'Goal', depth: 2 },
+  { id: '3', name: 'Task', depth: 3 },
 ];
 
 export const SAMPLE_RAW_TEXT = `
 Strategic Priority 1: Digital Transformation
 Owner: John Smith, IT Department
+Status: On Track
 
 Objective 1.1: Modernize Core Systems
 Owner: Sarah Johnson
@@ -115,206 +138,229 @@ export function generateMockPlanItems(levels: PlanLevel[]): { items: PlanItem[],
     { id: '14', foundName: 'Tom Wilson', email: '', isResolved: false },
   ];
 
-  const level1 = levels[0]?.name || 'Focus Area';
-  const level2 = levels[1]?.name || 'Initiative';
-  const level3 = levels[2]?.name || 'Goal';
+  const level1 = levels[0]?.name || 'Milestone';
+  const level2 = levels[1]?.name || 'Goal';
+  const level3 = levels[2]?.name || 'Task';
+
+  const createDefaultItem = (overrides: Partial<PlanItem>): PlanItem => ({
+    id: '',
+    order: '',
+    levelName: level1,
+    levelDepth: 1,
+    name: '',
+    description: '',
+    status: 'On Track',
+    startDate: '',
+    dueDate: '',
+    assignedTo: '',
+    members: [],
+    administrators: [],
+    updateFrequency: 'Monthly',
+    metricDescription: '',
+    metricUnit: '',
+    metricRollup: 'Manual',
+    metricBaseline: '',
+    metricTarget: '',
+    currentValue: '',
+    tags: [],
+    parentId: null,
+    children: [],
+    issues: [],
+    ...overrides,
+  });
 
   const items: PlanItem[] = [
-    {
+    createDefaultItem({
       id: '1',
       order: '1',
       levelName: level1,
       levelDepth: 1,
       name: 'Digital Transformation',
       description: 'Lead the organization through comprehensive digital transformation',
-      assignedTo: '',
-      members: [],
-      startDate: '',
-      dueDate: '',
-      metricName: '',
-      metricTarget: '',
-      metricDataType: '',
-      parentId: null,
-      children: [],
+      status: 'On Track',
+      startDate: '2024-01-01',
+      dueDate: '2024-12-31',
+      updateFrequency: 'Weekly',
+      administrators: [],
       issues: [{ type: 'missing-owner', message: 'Missing assigned owner email' }],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '2',
       order: '1.1',
       levelName: level2,
       levelDepth: 2,
       name: 'Modernize Core Systems',
       description: 'Replace legacy systems with cloud-based solutions',
-      assignedTo: '',
-      members: [],
+      status: 'On Track',
       startDate: '2024-01-01',
       dueDate: '2024-12-31',
-      metricName: '',
-      metricTarget: '',
-      metricDataType: '',
       parentId: '1',
-      children: [],
+      updateFrequency: 'Monthly',
+      metricDescription: 'Track to Target',
+      metricUnit: 'Number',
+      metricRollup: 'Sum Children',
+      metricBaseline: '0',
+      metricTarget: '100',
+      tags: ['priority-1'],
       issues: [{ type: 'missing-owner', message: 'Missing assigned owner email' }],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '3',
       order: '1.1.1',
       levelName: level3,
       levelDepth: 3,
       name: 'Cloud Migration',
       description: 'Migrate all on-premise servers to AWS',
-      assignedTo: '',
-      members: [],
-      startDate: '',
-      dueDate: '',
-      metricName: 'Migration Percentage',
-      metricTarget: '80',
-      metricDataType: 'Percentage',
+      status: 'On Track',
       parentId: '2',
-      children: [],
+      updateFrequency: 'Quarterly',
+      metricDescription: 'Track to Target',
+      metricUnit: 'Percentage',
+      metricRollup: 'Manual',
+      metricBaseline: '0%',
+      metricTarget: '80%',
+      currentValue: '25%',
+      tags: ['priority-2'],
       issues: [
         { type: 'missing-owner', message: 'Missing assigned owner email' },
         { type: 'missing-dates', message: 'Missing start or due date' },
       ],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '4',
       order: '1.1.2',
       levelName: level3,
       levelDepth: 3,
       name: 'API Integration',
       description: 'Build REST APIs for all core services',
-      assignedTo: '',
-      members: [],
-      startDate: '',
-      dueDate: '',
-      metricName: 'Integrations',
-      metricTarget: '50',
-      metricDataType: 'Number',
+      status: 'On Track',
       parentId: '2',
-      children: [],
+      updateFrequency: 'Not Required',
+      metricDescription: 'Track to Target',
+      metricUnit: 'Number',
+      metricRollup: 'Manual',
+      metricBaseline: '0',
+      metricTarget: '50',
+      currentValue: '12',
+      tags: ['priority-1', 'focus-area'],
       issues: [
         { type: 'missing-owner', message: 'Missing assigned owner email' },
         { type: 'missing-dates', message: 'Missing start or due date' },
       ],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '5',
       order: '1.2',
       levelName: level2,
       levelDepth: 2,
       name: 'Enhance Customer Experience',
       description: 'Improve all customer touchpoints and satisfaction metrics',
-      assignedTo: '',
-      members: [],
+      status: 'On Track',
       startDate: '2024-04-01',
       dueDate: '2024-12-31',
-      metricName: '',
-      metricTarget: '',
-      metricDataType: '',
       parentId: '1',
-      children: [],
+      updateFrequency: 'Monthly',
       issues: [{ type: 'missing-owner', message: 'Missing assigned owner email' }],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '6',
       order: '1.2.1',
       levelName: level3,
       levelDepth: 3,
       name: 'Mobile App Launch',
       description: 'Launch iOS and Android apps',
-      assignedTo: '',
-      members: [],
-      startDate: '',
-      dueDate: '',
-      metricName: 'Downloads',
-      metricTarget: '100000',
-      metricDataType: 'Number',
+      status: 'On Track',
       parentId: '5',
-      children: [],
+      updateFrequency: 'Not Required',
+      metricDescription: 'Track to Target',
+      metricUnit: 'Number',
+      metricRollup: 'Manual',
+      metricBaseline: '0',
+      metricTarget: '100000',
+      currentValue: '0',
       issues: [
         { type: 'missing-owner', message: 'Missing assigned owner email' },
         { type: 'missing-dates', message: 'Missing start or due date' },
       ],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '7',
       order: '2',
       levelName: level1,
       levelDepth: 1,
       name: 'Revenue Growth',
       description: 'Drive sustainable revenue growth through market expansion',
-      assignedTo: '',
-      members: [],
-      startDate: '',
-      dueDate: '',
-      metricName: '',
-      metricTarget: '',
-      metricDataType: '',
-      parentId: null,
-      children: [],
+      status: 'On Track',
+      updateFrequency: 'Not Required',
+      metricDescription: 'Track to Target',
+      metricUnit: 'Dollar',
+      metricRollup: 'Manual',
+      metricBaseline: '$0',
+      metricTarget: '$50,000',
+      currentValue: '$0',
       issues: [{ type: 'missing-owner', message: 'Missing assigned owner email' }],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '8',
       order: '2.1',
       levelName: level2,
       levelDepth: 2,
       name: 'Expand Market Share',
       description: 'Increase market presence in key regions',
-      assignedTo: '',
-      members: [],
-      startDate: '2024-01-01',
-      dueDate: '2024-12-31',
-      metricName: '',
-      metricTarget: '',
-      metricDataType: '',
+      status: 'On Track',
+      startDate: '2024-08-01',
+      dueDate: '2024-08-31',
       parentId: '7',
-      children: [],
+      updateFrequency: 'Monthly',
+      metricDescription: 'Track to Target',
+      metricUnit: 'Percentage',
+      metricRollup: 'Manual',
+      metricBaseline: '0%',
+      metricTarget: '100%',
+      currentValue: '0%',
       issues: [{ type: 'missing-owner', message: 'Missing assigned owner email' }],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '9',
       order: '2.1.1',
       levelName: level3,
       levelDepth: 3,
       name: 'New Sales Channels',
       description: 'Open 3 new regional offices',
-      assignedTo: '',
-      members: [],
-      startDate: '',
-      dueDate: '',
-      metricName: 'Revenue',
-      metricTarget: '2000000',
-      metricDataType: 'Currency',
+      status: 'At Risk',
       parentId: '8',
-      children: [],
+      updateFrequency: 'Not Required',
+      metricDescription: 'Stay Below',
+      metricUnit: 'Number',
+      metricRollup: 'Manual',
+      metricTarget: '50',
+      currentValue: '45',
       issues: [
         { type: 'missing-owner', message: 'Missing assigned owner email' },
         { type: 'missing-dates', message: 'Missing start or due date' },
       ],
-    },
-    {
+    }),
+    createDefaultItem({
       id: '10',
       order: '2.1.2',
       levelName: level3,
       levelDepth: 3,
       name: 'Partnership Program',
       description: 'Establish strategic partnerships',
-      assignedTo: '',
-      members: [],
-      startDate: '',
-      dueDate: '',
-      metricName: 'Partners',
-      metricTarget: '25',
-      metricDataType: 'Number',
+      status: 'Off Track',
       parentId: '8',
-      children: [],
+      updateFrequency: 'Not Required',
+      metricDescription: 'Maintain',
+      metricUnit: 'Number',
+      metricRollup: 'Manual',
+      metricBaseline: '10',
+      metricTarget: '25',
+      currentValue: '11',
       issues: [
         { type: 'missing-owner', message: 'Missing assigned owner email' },
         { type: 'missing-dates', message: 'Missing start or due date' },
       ],
-    },
+    }),
   ];
 
   return { items, personMappings };
