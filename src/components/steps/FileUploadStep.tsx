@@ -15,10 +15,28 @@ export function FileUploadStep({ onTextSubmit }: FileUploadStepProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (file: File) => {
+    // Only process text files - binary formats (PDF, DOC, XLSX) need server-side processing
+    const textExtensions = ['.txt', '.csv', '.json', '.xml', '.md'];
+    const isTextFile = textExtensions.some(ext => file.name.toLowerCase().endsWith(ext)) 
+      || file.type.startsWith('text/');
+    
+    if (!isTextFile) {
+      // For non-text files, show a message and load sample data for demo
+      setText(`[File "${file.name}" uploaded - binary format detected]\n\nFor this demo, binary files (PDF, Word, Excel) would be processed server-side.\nLoading sample data to demonstrate the workflow:\n\n` + SAMPLE_RAW_TEXT);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
-      setText(content || SAMPLE_RAW_TEXT);
+      if (content && content.length > 0) {
+        setText(content);
+      } else {
+        setText(SAMPLE_RAW_TEXT);
+      }
+    };
+    reader.onerror = () => {
+      setText(SAMPLE_RAW_TEXT);
     };
     reader.readAsText(file);
   };
