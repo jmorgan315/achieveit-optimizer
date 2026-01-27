@@ -2,107 +2,124 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
+/* AchieveIt Brand Design System
+   Primary: Teal (#0A7B7D) 
+   Accent: Coral/Orange (#F26B3A)
+   Background: Light Mint/Seafoam
+   All colors MUST be HSL.
 */
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 212 50% 15%;
+    /* AchieveIt Teal/Seafoam palette */
+    --background: 168 35% 96%;
+    --foreground: 192 45% 15%;
 
     --card: 0 0% 100%;
-    --card-foreground: 212 50% 15%;
+    --card-foreground: 192 45% 15%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 212 50% 15%;
+    --popover-foreground: 192 45% 15%;
 
-    --primary: 210 100% 35%;
+    /* AchieveIt Teal Primary */
+    --primary: 181 85% 27%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 25% 93%;
-    --secondary-foreground: 210 100% 35%;
+    --secondary: 168 30% 92%;
+    --secondary-foreground: 181 85% 27%;
 
-    --muted: 210 20% 96%;
-    --muted-foreground: 215 16% 47%;
+    --muted: 168 25% 94%;
+    --muted-foreground: 192 20% 40%;
 
-    --accent: 210 60% 90%;
-    --accent-foreground: 210 100% 35%;
+    --accent: 168 50% 88%;
+    --accent-foreground: 181 85% 27%;
 
-    --destructive: 0 84% 60%;
+    /* AchieveIt Coral/Orange Accent for destructive/warning */
+    --destructive: 14 88% 59%;
     --destructive-foreground: 0 0% 100%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
 
-    --success: 142 71% 45%;
+    --success: 160 60% 40%;
     --success-foreground: 0 0% 100%;
 
-    --info: 199 89% 48%;
+    --info: 181 60% 45%;
     --info-foreground: 0 0% 100%;
 
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 210 100% 35%;
+    --border: 168 25% 88%;
+    --input: 168 25% 88%;
+    --ring: 181 85% 27%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5% 26%;
-    --sidebar-primary: 210 100% 35%;
+    --sidebar-background: 168 30% 97%;
+    --sidebar-foreground: 192 45% 15%;
+    --sidebar-primary: 181 85% 27%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 210 25% 93%;
-    --sidebar-accent-foreground: 210 100% 35%;
-    --sidebar-border: 214 32% 91%;
-    --sidebar-ring: 210 100% 35%;
+    --sidebar-accent: 168 30% 92%;
+    --sidebar-accent-foreground: 181 85% 27%;
+    --sidebar-border: 168 25% 88%;
+    --sidebar-ring: 181 85% 27%;
+
+    /* AchieveIt specific accent colors */
+    --coral: 14 88% 59%;
+    --coral-foreground: 0 0% 100%;
+    --teal-light: 168 40% 85%;
+    --teal-dark: 181 85% 22%;
   }
 
   .dark {
-    --background: 212 50% 8%;
-    --foreground: 210 20% 98%;
+    --background: 192 45% 8%;
+    --foreground: 168 35% 96%;
 
-    --card: 212 50% 12%;
-    --card-foreground: 210 20% 98%;
+    --card: 192 45% 12%;
+    --card-foreground: 168 35% 96%;
 
-    --popover: 212 50% 12%;
-    --popover-foreground: 210 20% 98%;
+    --popover: 192 45% 12%;
+    --popover-foreground: 168 35% 96%;
 
-    --primary: 210 100% 50%;
+    --primary: 181 70% 45%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 212 40% 20%;
-    --secondary-foreground: 210 20% 98%;
+    --secondary: 192 40% 20%;
+    --secondary-foreground: 168 35% 96%;
 
-    --muted: 212 40% 18%;
-    --muted-foreground: 215 20% 65%;
+    --muted: 192 40% 18%;
+    --muted-foreground: 168 20% 65%;
 
-    --accent: 212 40% 20%;
-    --accent-foreground: 210 100% 50%;
+    --accent: 192 40% 20%;
+    --accent-foreground: 181 70% 45%;
 
-    --destructive: 0 63% 31%;
+    --destructive: 14 70% 45%;
     --destructive-foreground: 0 0% 100%;
 
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
 
-    --success: 142 71% 45%;
+    --success: 160 60% 40%;
     --success-foreground: 0 0% 100%;
 
-    --info: 199 89% 48%;
+    --info: 181 60% 50%;
     --info-foreground: 0 0% 100%;
 
-    --border: 212 40% 20%;
-    --input: 212 40% 20%;
-    --ring: 210 100% 50%;
+    --border: 192 40% 20%;
+    --input: 192 40% 20%;
+    --ring: 181 70% 45%;
 
-    --sidebar-background: 212 50% 10%;
-    --sidebar-foreground: 210 20% 98%;
-    --sidebar-primary: 210 100% 50%;
+    --sidebar-background: 192 45% 10%;
+    --sidebar-foreground: 168 35% 96%;
+    --sidebar-primary: 181 70% 45%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 212 40% 18%;
-    --sidebar-accent-foreground: 210 100% 50%;
-    --sidebar-border: 212 40% 20%;
-    --sidebar-ring: 210 100% 50%;
+    --sidebar-accent: 192 40% 18%;
+    --sidebar-accent-foreground: 181 70% 45%;
+    --sidebar-border: 192 40% 20%;
+    --sidebar-ring: 181 70% 45%;
+
+    --coral: 14 70% 50%;
+    --coral-foreground: 0 0% 100%;
+    --teal-light: 181 50% 30%;
+    --teal-dark: 181 85% 35%;
   }
 }
 
@@ -113,5 +130,17 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+}
+
+/* AchieveIt branded gradient backgrounds */
+@layer utilities {
+  .bg-achieveit-gradient {
+    background: linear-gradient(135deg, hsl(168, 35%, 96%) 0%, hsl(168, 40%, 92%) 100%);
+  }
+  
+  .bg-achieveit-hero {
+    background: linear-gradient(180deg, hsl(168, 40%, 94%) 0%, hsl(168, 35%, 97%) 100%);
   }
 }

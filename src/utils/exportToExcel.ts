@@ -1,47 +1,88 @@
 import { PlanItem, PlanLevel } from '@/types/plan';
 
-export function exportToExcel(items: PlanItem[], levels: PlanLevel[]) {
-  // Prepare CSV content
+/**
+ * Exports plan items to a CSV file formatted exactly like the AchieveIt import template.
+ * Column order matches: Order, Level, Name, Description, Status, Start Date, Due Date,
+ * Assigned To, Members, Administrators, Update Frequency, Metric Description, Metric Unit,
+ * Metric Rollup, Metric Baseline, Metric Target, Current Value, Tags
+ */
+export function exportToExcel(items: PlanItem[], levels: PlanLevel[]): void {
+  // AchieveIt template headers - exact match
   const headers = [
     'Order',
     'Level',
     'Name',
     'Description',
-    'Assigned To',
-    'Members',
+    'Status',
     'Start Date',
     'Due Date',
-    'Metric Name',
+    'Assigned To',
+    'Members',
+    'Administrators',
+    'Update Frequency',
+    'Metric Description',
+    'Metric Unit',
+    'Metric Rollup',
+    'Metric Baseline',
     'Metric Target',
-    'Metric Data Type',
+    'Current Value',
+    'Tags',
   ];
 
-  const rows = items.map((item) => [
-    item.order,
-    item.levelName,
-    item.name,
-    item.description,
-    item.assignedTo,
-    item.members.join(', '),
-    item.startDate,
-    item.dueDate,
-    item.metricName,
-    item.metricTarget,
-    item.metricDataType,
-  ]);
+  // Helper to format dates as M/D/YY (matching AchieveIt format)
+  const formatDate = (dateStr: string): string => {
+    if (!dateStr) return '';
+    try {
+      const date = new Date(dateStr);
+      if (isNaN(date.getTime())) return dateStr;
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      const year = String(date.getFullYear()).slice(-2);
+      return `${month}/${day}/${year}`;
+    } catch {
+      return dateStr;
+    }
+  };
 
-  // Convert to CSV string
+  // Helper to escape CSV values
+  const escapeCSV = (value: string): string => {
+    if (value === null || value === undefined) return '';
+    const stringValue = String(value);
+    // If value contains comma, quote, or newline, wrap in quotes
+    if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+      return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+  };
+
+  // Convert items to rows matching AchieveIt template structure
+  const rows = items.map((item) => {
+    return [
+      item.order || '',                           // Order
+      item.levelName || '',                       // Level
+      item.name || '',                            // Name
+      item.description || '',                     // Description
+      item.status || '',                          // Status
+      formatDate(item.startDate),                 // Start Date
+      formatDate(item.dueDate),                   // Due Date
+      item.assignedTo || '',                      // Assigned To
+      item.members?.join(', ') || '',             // Members
+      item.administrators?.join(', ') || '',      // Administrators
+      item.updateFrequency || '',                 // Update Frequency
+      item.metricDescription || '',               // Metric Description
+      item.metricUnit || '',                      // Metric Unit
+      item.metricRollup || '',                    // Metric Rollup
+      item.metricBaseline || '',                  // Metric Baseline
+      item.metricTarget || '',                    // Metric Target
+      item.currentValue || '',                    // Current Value
+      item.tags?.join(',') || '',                 // Tags (comma-separated, no spaces per template)
+    ].map(escapeCSV);
+  });
+
+  // Build CSV content
   const csvContent = [
-    headers.join(','),
-    ...rows.map((row) =>
-      row.map((cell) => {
-        // Escape quotes and wrap in quotes if contains comma
-        const escaped = String(cell).replace(/"/g, '""');
-        return escaped.includes(',') || escaped.includes('"') || escaped.includes('\n')
-          ? `"${escaped}"`
-          : escaped;
-      }).join(',')
-    ),
+    headers.map(escapeCSV).join(','),
+    ...rows.map((row) => row.join(',')),
   ].join('\n');
 
   // Create and download file
@@ -50,10 +91,10 @@ export function exportToExcel(items: PlanItem[], levels: PlanLevel[]) {
   const url = URL.createObjectURL(blob);
   
   link.setAttribute('href', url);
-  link.setAttribute('download', `achieveit-import-${new Date().toISOString().split('T')[0]}.csv`);
+  link.setAttribute('download', 'achieveit-plan-import.csv');
   link.style.visibility = 'hidden';
-  
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }

@@ -239,14 +239,26 @@ export function PlanOptimizerStep({
 
             <div className="space-y-3">
               <div>
-                <label className="text-sm font-medium">Metric Name</label>
-                <Input
-                  value={selectedItem?.metricName || ''}
-                  onChange={(e) =>
-                    selectedItem && onUpdateItem(selectedItem.id, { metricName: e.target.value })
+                <label className="text-sm font-medium">Metric Description</label>
+                <Select
+                  value={selectedItem?.metricDescription || ''}
+                  onValueChange={(value) =>
+                    selectedItem &&
+                    onUpdateItem(selectedItem.id, {
+                      metricDescription: value as PlanItem['metricDescription'],
+                    })
                   }
-                  placeholder="e.g., Sales Growth"
-                />
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Track to Target">Track to Target</SelectItem>
+                    <SelectItem value="Maintain">Maintain</SelectItem>
+                    <SelectItem value="Stay Above">Stay Above</SelectItem>
+                    <SelectItem value="Stay Below">Stay Below</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <label className="text-sm font-medium">Target Value</label>
@@ -259,23 +271,23 @@ export function PlanOptimizerStep({
                 />
               </div>
               <div>
-                <label className="text-sm font-medium">Data Type</label>
+                <label className="text-sm font-medium">Metric Unit</label>
                 <Select
-                  value={selectedItem?.metricDataType || ''}
+                  value={selectedItem?.metricUnit || ''}
                   onValueChange={(value) =>
                     selectedItem &&
                     onUpdateItem(selectedItem.id, {
-                      metricDataType: value as PlanItem['metricDataType'],
+                      metricUnit: value as PlanItem['metricUnit'],
                     })
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
+                    <SelectValue placeholder="Select unit" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Percentage">Percentage</SelectItem>
                     <SelectItem value="Number">Number</SelectItem>
-                    <SelectItem value="Currency">Currency</SelectItem>
+                    <SelectItem value="Dollar">Dollar</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
