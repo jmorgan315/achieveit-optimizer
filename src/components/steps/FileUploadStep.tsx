@@ -1,53 +1,130 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { SAMPLE_RAW_TEXT } from '@/types/plan';
+import { toast } from '@/hooks/use-toast';
 
 interface FileUploadStepProps {
   onTextSubmit: (text: string) => void;
 }
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
 export function FileUploadStep({ onTextSubmit }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStatus, setProcessingStatus] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const parsePdfWithEdgeFunction = async (file: File): Promise<string> => {
+    setProcessingStatus('Uploading to Cloud...');
+    
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-pdf`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to parse PDF');
+    }
+
+    const result = await response.json();
+    
+    if (!result.success) {
+      throw new Error(result.error || 'PDF parsing failed');
+    }
+
+    setProcessingStatus(`Extracted ${result.pageCount} pages`);
+    return result.text;
+  };
 
   const handleFileUpload = async (file: File) => {
     setIsProcessing(true);
     setUploadedFile(file);
+    setProcessingStatus('Analyzing file...');
 
-    // Only process text files - binary formats (PDF, DOC, XLSX) need server-side processing
-    const textExtensions = ['.txt', '.csv', '.json', '.xml', '.md'];
-    const isTextFile = textExtensions.some(ext => file.name.toLowerCase().endsWith(ext)) 
-      || file.type.startsWith('text/');
-    
-    if (!isTextFile) {
-      // For non-text files, load sample data for demo (server-side processing would handle these)
-      setTimeout(() => {
+    try {
+      const fileName = file.name.toLowerCase();
+      const isPdf = fileName.endsWith('.pdf');
+      const isWord = fileName.endsWith('.doc') || fileName.endsWith('.docx');
+      const isExcel = fileName.endsWith('.xls') || fileName.endsWith('.xlsx');
+      
+      // Text-based files can be read directly
+      const textExtensions = ['.txt', '.csv', '.json', '.xml', '.md'];
+      const isTextFile = textExtensions.some(ext => fileName.endsWith(ext)) || file.type.startsWith('text/');
+
+      if (isPdf) {
+        // Use edge function for PDF parsing
+        const extractedText = await parsePdfWithEdgeFunction(file);
+        if (extractedText && extractedText.trim().length > 0) {
+          setFileContent(extractedText);
+          toast({
+            title: "PDF processed successfully",
+            description: "Text extracted and ready for analysis",
+          });
+        } else {
+          // Fallback to sample if no text extracted
+          setFileContent(SAMPLE_RAW_TEXT);
+          toast({
+            title: "Limited text extracted",
+            description: "Using sample data - PDF may be image-based",
+            variant: "destructive",
+          });
+        }
+      } else if (isWord || isExcel) {
+        // Binary office formats - would need server-side processing
+        // For now, inform user and use sample data
+        setProcessingStatus('Processing document...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
         setFileContent(SAMPLE_RAW_TEXT);
-        setIsProcessing(false);
-      }, 1000);
-      return;
-    }
+        toast({
+          title: "Document loaded",
+          description: "Using sample data for demo. Full Office support coming soon.",
+        });
+      } else if (isTextFile) {
+        // Read text files directly
+        setProcessingStatus('Reading file...');
+        const reader = new FileReader();
+        
+        const content = await new Promise<string>((resolve, reject) => {
+          reader.onload = (e) => resolve(e.target?.result as string || '');
+          reader.onerror = () => reject(new Error('Failed to read file'));
+          reader.readAsText(file);
+        });
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const content = e.target?.result as string;
-      if (content && content.length > 0) {
-        setFileContent(content);
+        if (content && content.length > 0) {
+          setFileContent(content);
+        } else {
+          setFileContent(SAMPLE_RAW_TEXT);
+        }
       } else {
+        // Unsupported format
         setFileContent(SAMPLE_RAW_TEXT);
+        toast({
+          title: "Unsupported format",
+          description: "Using sample data. Try PDF, TXT, or CSV files.",
+          variant: "destructive",
+        });
       }
-      setIsProcessing(false);
-    };
-    reader.onerror = () => {
+    } catch (error) {
+      console.error('File processing error:', error);
       setFileContent(SAMPLE_RAW_TEXT);
+      toast({
+        title: "Processing failed",
+        description: error instanceof Error ? error.message : "Using sample data instead",
+        variant: "destructive",
+      });
+    } finally {
       setIsProcessing(false);
-    };
-    reader.readAsText(file);
+      setProcessingStatus('');
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -171,16 +248,20 @@ export function FileUploadStep({ onTextSubmit }: FileUploadStepProps) {
               <div className="flex items-center justify-between p-4 rounded-lg bg-success/10 border border-success/20">
                 <div className="flex items-center gap-3">
                   <div className="h-10 w-10 rounded-full bg-success/20 flex items-center justify-center">
-                    <CheckCircle2 className="h-5 w-5 text-success" />
+                    {isProcessing ? (
+                      <Loader2 className="h-5 w-5 text-success animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-5 w-5 text-success" />
+                    )}
                   </div>
                   <div>
                     <p className="font-medium text-foreground">{uploadedFile.name}</p>
                     <p className="text-sm text-muted-foreground">
-                      {isProcessing ? 'Processing...' : 'Ready to analyze'}
+                      {isProcessing ? processingStatus || 'Processing...' : 'Ready to analyze'}
                     </p>
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" onClick={clearFile}>
+                <Button variant="ghost" size="sm" onClick={clearFile} disabled={isProcessing}>
                   Remove
                 </Button>
               </div>
@@ -204,7 +285,14 @@ export function FileUploadStep({ onTextSubmit }: FileUploadStepProps) {
             disabled={!fileContent.trim() || isProcessing}
             className="w-full h-12 text-base font-medium"
           >
-            {isProcessing ? 'Processing File...' : 'Continue to Level Verification'}
+            {isProcessing ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Processing File...
+              </>
+            ) : (
+              'Continue to Level Verification'
+            )}
           </Button>
         </CardContent>
       </Card>
