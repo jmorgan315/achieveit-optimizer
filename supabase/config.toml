@@ -1,0 +1,7 @@
+project_id = "yntqxpvmswpdviwwlsyy"
+
+[functions.parse-pdf]
+verify_jwt = false
+
+[functions.suggest-metrics]
+verify_jwt = false

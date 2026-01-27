@@ -6,8 +6,8 @@ import {
   PersonMapping,
   ProcessingPath,
   DEFAULT_LEVELS,
-  generateMockPlanItems,
 } from '@/types/plan';
+import { parseTextToPlanItems } from '@/utils/textParser';
 
 export function usePlanState() {
   const [state, setState] = useState<PlanState>({
@@ -27,9 +27,35 @@ export function usePlanState() {
   }, []);
 
   const processText = useCallback(() => {
-    const { items, personMappings } = generateMockPlanItems(state.levels);
+    const { items, personMappings } = parseTextToPlanItems(state.rawText, state.levels);
     setState((prev) => ({ ...prev, items, personMappings }));
-  }, [state.levels]);
+  }, [state.rawText, state.levels]);
+
+  const reorderSiblings = useCallback((itemId: string, newIndex: number) => {
+    setState((prev) => {
+      const item = prev.items.find((i) => i.id === itemId);
+      if (!item) return prev;
+
+      const siblings = prev.items.filter((i) => i.parentId === item.parentId);
+      const currentIndex = siblings.findIndex((s) => s.id === itemId);
+      if (currentIndex === -1 || currentIndex === newIndex) return prev;
+
+      // Reorder siblings
+      const reordered = [...siblings];
+      const [moved] = reordered.splice(currentIndex, 1);
+      reordered.splice(newIndex, 0, moved);
+
+      // Update orders
+      const siblingIds = new Set(reordered.map((s) => s.id));
+      const updatedItems = prev.items.map((i) => {
+        if (!siblingIds.has(i.id)) return i;
+        const idx = reordered.findIndex((s) => s.id === i.id);
+        return { ...i, order: String(idx + 1) };
+      });
+
+      return { ...prev, items: recalculateOrders(updatedItems) };
+    });
+  }, []);
 
   const setProcessingPath = useCallback((processingPath: ProcessingPath) => {
     setState((prev) => ({ ...prev, processingPath }));
@@ -135,6 +161,7 @@ export function usePlanState() {
     updateItem,
     updateItemIssues,
     moveItem,
+    reorderSiblings,
   };
 }
 

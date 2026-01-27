@@ -1,4 +1,20 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverEvent,
+  DragStartEvent,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,16 +35,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { PlanItem, PlanLevel } from '@/types/plan';
-import {
-  ChevronRight,
-  ChevronDown,
-  AlertCircle,
-  Calendar,
-  User,
-  Sparkles,
-  GripVertical,
-  Settings2,
-} from 'lucide-react';
+import { SortableTreeItem } from '@/components/plan-optimizer/SortableTreeItem';
+import { Sparkles, Loader2, RefreshCw } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 
 interface PlanOptimizerStepProps {
   items: PlanItem[];
@@ -38,15 +47,42 @@ interface PlanOptimizerStepProps {
   onExport: () => void;
 }
 
+interface MetricSuggestion {
+  suggestedName: string;
+  metricDescription: 'Track to Target' | 'Maintain' | 'Stay Above' | 'Stay Below';
+  metricUnit: 'Number' | 'Dollar' | 'Percentage';
+  metricTarget: string;
+  metricBaseline: string;
+  rationale: string;
+}
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
 export function PlanOptimizerStep({
   items,
   levels,
   onUpdateItem,
+  onMoveItem,
   onExport,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(items.map((i) => i.id)));
   const [selectedItem, setSelectedItem] = useState<PlanItem | null>(null);
   const [showMetricDialog, setShowMetricDialog] = useState(false);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  
+  // AI suggestion state
+  const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
+  const [suggestion, setSuggestion] = useState<MetricSuggestion | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor)
+  );
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedItems);
@@ -58,102 +94,140 @@ export function PlanOptimizerStep({
     setExpandedItems(next);
   };
 
-  const getIssueColor = (type: string) => {
-    switch (type) {
-      case 'missing-owner':
-        return 'bg-destructive/10 border-destructive/30 text-destructive';
-      case 'missing-dates':
-        return 'bg-warning/10 border-warning/30 text-warning';
-      case 'orphan':
-        return 'bg-info/10 border-info/30 text-info';
-      default:
-        return 'bg-muted';
+  const fetchSuggestion = useCallback(async (item: PlanItem) => {
+    setIsLoadingSuggestion(true);
+    setSuggestion(null);
+
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/suggest-metrics`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: item.name,
+          description: item.description,
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to get suggestion');
+      }
+
+      const data = await response.json();
+      if (data.success && data.suggestion) {
+        setSuggestion(data.suggestion);
+      } else {
+        throw new Error('Invalid response from AI');
+      }
+    } catch (error) {
+      console.error('Suggestion error:', error);
+      toast({
+        title: 'Suggestion failed',
+        description: error instanceof Error ? error.message : 'Could not generate suggestion',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingSuggestion(false);
     }
+  }, []);
+
+  const handleOptimize = (item: PlanItem) => {
+    setSelectedItem(item);
+    setShowMetricDialog(true);
+    setSuggestion(null);
+    fetchSuggestion(item);
+  };
+
+  const applySuggestion = () => {
+    if (!selectedItem || !suggestion) return;
+
+    onUpdateItem(selectedItem.id, {
+      metricDescription: suggestion.metricDescription,
+      metricUnit: suggestion.metricUnit,
+      metricTarget: suggestion.metricTarget,
+      metricBaseline: suggestion.metricBaseline,
+    });
+
+    toast({
+      title: 'Metric applied',
+      description: 'AI suggestion has been applied to the item',
+    });
+
+    setShowMetricDialog(false);
+    setSuggestion(null);
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    setActiveId(event.active.id as string);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    setOverId(event.over?.id as string | null);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveId(null);
+    setOverId(null);
+
+    if (!over || active.id === over.id) return;
+
+    const draggedId = active.id as string;
+    const targetId = over.id as string;
+
+    const draggedItem = items.find((i) => i.id === draggedId);
+    const targetItem = items.find((i) => i.id === targetId);
+
+    if (!draggedItem || !targetItem) return;
+
+    // Prevent dropping on own descendants
+    const isDescendant = (parentId: string, childId: string): boolean => {
+      const child = items.find((i) => i.id === childId);
+      if (!child || !child.parentId) return false;
+      if (child.parentId === parentId) return true;
+      return isDescendant(parentId, child.parentId);
+    };
+
+    if (isDescendant(draggedId, targetId)) {
+      toast({
+        title: 'Invalid move',
+        description: 'Cannot move an item into its own child',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Reparent: make dragged item a child of target item
+    onMoveItem(draggedId, targetId);
+
+    toast({
+      title: 'Item moved',
+      description: `"${draggedItem.name}" is now under "${targetItem.name}"`,
+    });
   };
 
   const rootItems = items.filter((i) => !i.parentId);
-
   const getChildren = (parentId: string) => items.filter((i) => i.parentId === parentId);
 
-  const renderItem = (item: PlanItem, depth: number = 0) => {
-    const children = getChildren(item.id);
-    const hasChildren = children.length > 0;
-    const isExpanded = expandedItems.has(item.id);
-    const hasIssues = item.issues.length > 0;
+  // Build flat list for sortable context
+  const buildFlatList = (parentId: string | null, depth: number): { item: PlanItem; depth: number }[] => {
+    const result: { item: PlanItem; depth: number }[] = [];
+    const children = parentId === null ? rootItems : getChildren(parentId);
 
-    return (
-      <div key={item.id}>
-        <div
-          className={`flex items-center gap-2 py-3 px-4 border-b hover:bg-muted/50 transition-colors ${
-            hasIssues ? 'bg-destructive/5' : ''
-          }`}
-          style={{ paddingLeft: `${depth * 24 + 16}px` }}
-        >
-          <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab opacity-50" />
+    for (const item of children) {
+      result.push({ item, depth });
+      if (expandedItems.has(item.id)) {
+        result.push(...buildFlatList(item.id, depth + 1));
+      }
+    }
 
-          {hasChildren ? (
-            <button
-              onClick={() => toggleExpand(item.id)}
-              className="p-1 hover:bg-muted rounded"
-            >
-              {isExpanded ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </button>
-          ) : (
-            <div className="w-6" />
-          )}
-
-          <Badge variant="outline" className="text-xs font-normal">
-            {item.order}
-          </Badge>
-
-          <Badge variant="secondary" className="text-xs">
-            {item.levelName}
-          </Badge>
-
-          <span className="font-medium flex-1 truncate">{item.name}</span>
-
-          {item.issues.map((issue, i) => (
-            <Badge
-              key={i}
-              variant="outline"
-              className={`text-xs ${getIssueColor(issue.type)}`}
-            >
-              {issue.type === 'missing-owner' && <User className="h-3 w-3 mr-1" />}
-              {issue.type === 'missing-dates' && <Calendar className="h-3 w-3 mr-1" />}
-              {issue.type === 'orphan' && <AlertCircle className="h-3 w-3 mr-1" />}
-              {issue.type.replace('missing-', '')}
-            </Badge>
-          ))}
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setSelectedItem(item);
-              setShowMetricDialog(true);
-            }}
-          >
-            <Sparkles className="h-4 w-4 mr-1" />
-            Optimize
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setSelectedItem(item)}
-          >
-            <Settings2 className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {isExpanded && children.map((child) => renderItem(child, depth + 1))}
-      </div>
-    );
+    return result;
   };
+
+  const flatList = buildFlatList(null, 0);
+  const activeItem = activeId ? items.find((i) => i.id === activeId) : null;
 
   const issueStats = {
     missingOwner: items.filter((i) => i.issues.some((is) => is.type === 'missing-owner')).length,
@@ -197,15 +271,50 @@ export function PlanOptimizerStep({
         </Card>
       </div>
 
-      {/* Tree View */}
+      {/* Tree View with Drag and Drop */}
       <Card>
         <CardHeader className="border-b">
           <CardTitle className="text-lg">Plan Structure</CardTitle>
+          <p className="text-sm text-muted-foreground">Drag items to reorganize hierarchy</p>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="divide-y">
-            {rootItems.map((item) => renderItem(item))}
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={flatList.map((f) => f.item.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="divide-y">
+                {flatList.map(({ item, depth }) => (
+                  <SortableTreeItem
+                    key={item.id}
+                    item={item}
+                    depth={depth}
+                    hasChildren={getChildren(item.id).length > 0}
+                    isExpanded={expandedItems.has(item.id)}
+                    onToggleExpand={toggleExpand}
+                    onOptimize={handleOptimize}
+                    onEdit={setSelectedItem}
+                    isOver={overId === item.id}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+
+            <DragOverlay>
+              {activeItem ? (
+                <div className="bg-card border rounded-lg shadow-lg p-3 opacity-90">
+                  <Badge variant="secondary" className="mr-2">{activeItem.order}</Badge>
+                  <span className="font-medium">{activeItem.name}</span>
+                </div>
+              ) : null}
+            </DragOverlay>
+          </DndContext>
         </CardContent>
       </Card>
 
@@ -216,91 +325,133 @@ export function PlanOptimizerStep({
 
       {/* Metric Suggestion Dialog */}
       <Dialog open={showMetricDialog} onOpenChange={setShowMetricDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
-              Generate Metric Suggestion
+              AI Metric Suggestion
             </DialogTitle>
             <DialogDescription>
-              AI-powered metric optimization for "{selectedItem?.name}"
+              Get intelligent metric recommendations for "{selectedItem?.name}"
             </DialogDescription>
           </DialogHeader>
 
           <div className="py-4 space-y-4">
-            <div className="p-4 rounded-lg bg-muted border">
-              <p className="text-sm font-medium mb-2">Current: {selectedItem?.name}</p>
-              <p className="text-sm text-primary font-medium">
-                Suggested: {selectedItem?.name.includes('Improve')
-                  ? selectedItem?.name.replace('Improve', 'Increase') + ' by 15%'
-                  : selectedItem?.name + ' - Target: +20%'}
-              </p>
-            </div>
+            {isLoadingSuggestion ? (
+              <div className="flex flex-col items-center justify-center py-8 gap-3">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Generating SMART metric suggestion...</p>
+              </div>
+            ) : suggestion ? (
+              <>
+                <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
+                  <p className="text-sm font-medium mb-1">Suggested Metric</p>
+                  <p className="text-primary font-medium">{suggestion.suggestedName}</p>
+                  <p className="text-xs text-muted-foreground mt-2">{suggestion.rationale}</p>
+                </div>
 
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium">Metric Description</label>
-                <Select
-                  value={selectedItem?.metricDescription || ''}
-                  onValueChange={(value) =>
-                    selectedItem &&
-                    onUpdateItem(selectedItem.id, {
-                      metricDescription: value as PlanItem['metricDescription'],
-                    })
-                  }
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-muted">
+                    <p className="text-xs text-muted-foreground">Description</p>
+                    <p className="font-medium">{suggestion.metricDescription}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted">
+                    <p className="text-xs text-muted-foreground">Unit</p>
+                    <p className="font-medium">{suggestion.metricUnit}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted">
+                    <p className="text-xs text-muted-foreground">Baseline</p>
+                    <p className="font-medium">{suggestion.metricBaseline}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted">
+                    <p className="text-xs text-muted-foreground">Target</p>
+                    <p className="font-medium">{suggestion.metricTarget}</p>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => selectedItem && fetchSuggestion(selectedItem)}
+                  className="w-full"
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Track to Target">Track to Target</SelectItem>
-                    <SelectItem value="Maintain">Maintain</SelectItem>
-                    <SelectItem value="Stay Above">Stay Above</SelectItem>
-                    <SelectItem value="Stay Below">Stay Below</SelectItem>
-                  </SelectContent>
-                </Select>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Regenerate Suggestion
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm font-medium">Metric Description</label>
+                  <Select
+                    value={selectedItem?.metricDescription || ''}
+                    onValueChange={(value) =>
+                      selectedItem &&
+                      onUpdateItem(selectedItem.id, {
+                        metricDescription: value as PlanItem['metricDescription'],
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Track to Target">Track to Target</SelectItem>
+                      <SelectItem value="Maintain">Maintain</SelectItem>
+                      <SelectItem value="Stay Above">Stay Above</SelectItem>
+                      <SelectItem value="Stay Below">Stay Below</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Target Value</label>
+                  <Input
+                    value={selectedItem?.metricTarget || ''}
+                    onChange={(e) =>
+                      selectedItem && onUpdateItem(selectedItem.id, { metricTarget: e.target.value })
+                    }
+                    placeholder="e.g., 15"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">Metric Unit</label>
+                  <Select
+                    value={selectedItem?.metricUnit || ''}
+                    onValueChange={(value) =>
+                      selectedItem &&
+                      onUpdateItem(selectedItem.id, {
+                        metricUnit: value as PlanItem['metricUnit'],
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Percentage">Percentage</SelectItem>
+                      <SelectItem value="Number">Number</SelectItem>
+                      <SelectItem value="Dollar">Dollar</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium">Target Value</label>
-                <Input
-                  value={selectedItem?.metricTarget || ''}
-                  onChange={(e) =>
-                    selectedItem && onUpdateItem(selectedItem.id, { metricTarget: e.target.value })
-                  }
-                  placeholder="e.g., 15"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Metric Unit</label>
-                <Select
-                  value={selectedItem?.metricUnit || ''}
-                  onValueChange={(value) =>
-                    selectedItem &&
-                    onUpdateItem(selectedItem.id, {
-                      metricUnit: value as PlanItem['metricUnit'],
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select unit" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Percentage">Percentage</SelectItem>
-                    <SelectItem value="Number">Number</SelectItem>
-                    <SelectItem value="Dollar">Dollar</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            )}
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowMetricDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={() => setShowMetricDialog(false)}>
-              Apply Suggestion
-            </Button>
+            {suggestion ? (
+              <Button onClick={applySuggestion}>
+                <Sparkles className="h-4 w-4 mr-2" />
+                Apply Suggestion
+              </Button>
+            ) : (
+              <Button onClick={() => setShowMetricDialog(false)}>
+                Save Changes
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
