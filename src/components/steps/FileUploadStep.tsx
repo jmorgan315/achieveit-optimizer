@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Brain } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Brain, Eye } from 'lucide-react';
 import { SAMPLE_RAW_TEXT, PlanItem, PersonMapping, PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
 import { toast } from '@/hooks/use-toast';
 import { AIExtractionResponse, convertAIResponseToPlanItems } from '@/utils/textParser';
+import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
 
 interface FileUploadStepProps {
   onTextSubmit: (text: string) => void;
@@ -23,9 +24,10 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
   const [extractedItems, setExtractedItems] = useState<PlanItem[] | null>(null);
   const [extractedMappings, setExtractedMappings] = useState<PersonMapping[] | null>(null);
   const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
+  const [useVisionAI, setUseVisionAI] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const parsePdfWithEdgeFunction = async (file: File): Promise<string> => {
+  const parsePdfWithEdgeFunction = async (file: File): Promise<{ text: string; pageCount: number }> => {
     setProcessingStatus('Uploading to Cloud...');
     
     const formData = new FormData();
@@ -48,7 +50,148 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
     }
 
     setProcessingStatus(`Extracted ${result.pageCount} pages`);
-    return result.text;
+    return { text: result.text, pageCount: result.pageCount };
+  };
+
+  const extractWithVisionAI = async (file: File): Promise<void> => {
+    setIsExtracting(true);
+    setUseVisionAI(true);
+    setProcessingStatus('Rendering PDF pages for visual analysis...');
+
+    try {
+      // Render PDF pages to images
+      const { images, pageCount } = await renderPDFToImages(file, 20, 1.5);
+      setProcessingStatus(`Rendered ${images.length} of ${pageCount} pages`);
+
+      // Batch pages for API calls (3 pages at a time for token limits)
+      const batches = batchPageImages(images, 3);
+      
+      let allItems: AIExtractionResponse['items'] = [];
+      let detectedLevelsFromVision: AIExtractionResponse['detectedLevels'] = [];
+      let previousContext = '';
+
+      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+        const batch = batches[batchIndex];
+        const startPage = batchIndex * 3 + 1;
+        const endPage = startPage + batch.length - 1;
+        
+        setProcessingStatus(`Vision AI analyzing pages ${startPage}-${endPage}...`);
+
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-vision`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            pageImages: batch.map(img => img.dataUrl),
+            previousContext 
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          if (response.status === 429) {
+            throw new Error('AI rate limit reached. Please wait a moment and try again.');
+          }
+          if (response.status === 402) {
+            throw new Error('AI credits exhausted. Please add credits to continue.');
+          }
+          throw new Error(error.error || 'Vision AI extraction failed');
+        }
+
+        const result = await response.json();
+
+        if (!result.success || !result.data) {
+          throw new Error(result.error || 'Vision AI returned no data');
+        }
+
+        // Merge results from this batch
+        if (result.data.items?.length > 0) {
+          allItems = mergeVisionResults(allItems, result.data.items);
+        }
+        
+        if (result.data.detectedLevels?.length > 0 && detectedLevelsFromVision.length === 0) {
+          detectedLevelsFromVision = result.data.detectedLevels;
+        }
+
+        // Update context for next batch
+        if (result.contextSummary) {
+          previousContext = result.contextSummary;
+        }
+      }
+
+      // Build final response
+      const aiResponse: AIExtractionResponse = {
+        items: allItems,
+        detectedLevels: detectedLevelsFromVision.length > 0 ? detectedLevelsFromVision : [
+          { depth: 1, name: 'Strategic Priority' },
+          { depth: 2, name: 'Objective' },
+          { depth: 3, name: 'Strategy' },
+          { depth: 4, name: 'KPI' },
+        ],
+      };
+
+      // Convert to standard levels
+      const levels: PlanLevel[] = aiResponse.detectedLevels.map((l, idx) => ({
+        id: String(idx + 1),
+        name: l.name,
+        depth: l.depth,
+      }));
+
+      // Convert AI response to PlanItems
+      const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
+
+      setExtractedItems(items);
+      setExtractedMappings(personMappings);
+      setDetectedLevels(levels);
+      setFileContent('__VISION_EXTRACTED__'); // Marker that content was extracted via vision
+      
+      const itemCount = items.length;
+      setProcessingStatus(`Vision AI found ${itemCount} trackable plan items`);
+      
+      toast({
+        title: "Vision AI Analysis Complete",
+        description: `Extracted ${itemCount} plan items from visual document analysis`,
+      });
+
+    } catch (error) {
+      console.error('Vision AI extraction error:', error);
+      toast({
+        title: "Vision AI Extraction Failed",
+        description: error instanceof Error ? error.message : "Please try again or use a different document format",
+        variant: "destructive",
+      });
+      setExtractedItems(null);
+      setExtractedMappings(null);
+      setDetectedLevels(null);
+      setUseVisionAI(false);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Merge items from multiple vision AI batches
+  const mergeVisionResults = (
+    existing: AIExtractionResponse['items'],
+    newItems: AIExtractionResponse['items']
+  ): AIExtractionResponse['items'] => {
+    if (existing.length === 0) return newItems;
+    
+    // For now, simple concatenation - the AI should handle continuity via context
+    // In the future, could implement smarter deduplication
+    const existingNames = new Set(existing.map(item => item.name.toLowerCase()));
+    
+    const uniqueNewItems = newItems.filter(item => {
+      if (!item?.name) return false;
+      const nameLower = item.name.toLowerCase();
+      if (existingNames.has(nameLower)) {
+        return false; // Skip duplicates
+      }
+      existingNames.add(nameLower);
+      return true;
+    });
+
+    return [...existing, ...uniqueNewItems];
   };
 
   const extractPlanItemsWithAI = async (text: string): Promise<void> => {
@@ -130,6 +273,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
     setExtractedItems(null);
     setExtractedMappings(null);
     setDetectedLevels(null);
+    setUseVisionAI(false);
 
     try {
       const fileName = file.name.toLowerCase();
@@ -142,18 +286,27 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       const isTextFile = textExtensions.some(ext => fileName.endsWith(ext)) || file.type.startsWith('text/');
 
       let extractedText = '';
+      let pageCount = 1;
 
       if (isPdf) {
-        // Use edge function for PDF parsing
-        extractedText = await parsePdfWithEdgeFunction(file);
-        if (!extractedText || extractedText.trim().length === 0) {
-          // Fallback to sample if no text extracted
-          extractedText = SAMPLE_RAW_TEXT;
-          toast({
-            title: "Limited text extracted",
-            description: "Using sample data - PDF may be image-based",
-            variant: "destructive",
-          });
+        // First try text extraction
+        try {
+          const result = await parsePdfWithEdgeFunction(file);
+          extractedText = result.text;
+          pageCount = result.pageCount;
+        } catch (error) {
+          console.log('Text extraction failed, will try vision AI', error);
+        }
+
+        // Check if text quality is poor - if so, use Vision AI
+        if (!extractedText || isTextQualityPoor(extractedText, pageCount)) {
+          console.log('Poor text quality detected, switching to Vision AI');
+          setProcessingStatus('Document has complex layout, using Vision AI...');
+          setIsProcessing(false);
+          
+          // Use Vision AI for this document
+          await extractWithVisionAI(file);
+          return; // Exit early - vision AI handles everything
         }
       } else if (isWord || isExcel) {
         // Binary office formats - would need server-side processing
@@ -231,7 +384,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
     // If we have AI-extracted items, use them via the callback
     if (extractedItems && extractedMappings && detectedLevels && onAIExtraction) {
       onAIExtraction(extractedItems, extractedMappings, detectedLevels);
-    } else if (fileContent.trim()) {
+    } else if (fileContent.trim() && fileContent !== '__VISION_EXTRACTED__') {
       // Fallback to basic text parsing
       onTextSubmit(fileContent);
     }
@@ -244,6 +397,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
     setExtractedMappings(null);
     setDetectedLevels(null);
     setProcessingStatus('');
+    setUseVisionAI(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -347,7 +501,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
                   <div>
                     <p className="font-medium text-foreground">{uploadedFile.name}</p>
                     <p className="text-sm text-muted-foreground">
-                      {isProcessing ? processingStatus || 'Extracting text...' : 'Text extracted'}
+                      {isProcessing ? processingStatus || 'Extracting text...' : 'Document processed'}
                     </p>
                   </div>
                 </div>
@@ -357,7 +511,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
               </div>
 
               {/* AI extraction status */}
-              {fileContent && (
+              {(fileContent || useVisionAI) && (
                 <div className={`flex items-center justify-between p-4 rounded-lg border ${
                   isExtracting 
                     ? 'bg-primary/5 border-primary/20' 
@@ -374,7 +528,11 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
                           : 'bg-muted'
                     }`}>
                       {isExtracting ? (
-                        <Brain className="h-5 w-5 text-primary animate-pulse" />
+                        useVisionAI ? (
+                          <Eye className="h-5 w-5 text-primary animate-pulse" />
+                        ) : (
+                          <Brain className="h-5 w-5 text-primary animate-pulse" />
+                        )
                       ) : extractedItems ? (
                         <CheckCircle2 className="h-5 w-5 text-success" />
                       ) : (
@@ -383,21 +541,30 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
                     </div>
                     <div>
                       <p className="font-medium text-foreground">
-                        {isExtracting ? 'AI Analysis' : extractedItems ? 'Plan Items Found' : 'Awaiting Analysis'}
+                        {isExtracting 
+                          ? (useVisionAI ? 'Vision AI Analysis' : 'AI Analysis')
+                          : extractedItems 
+                            ? 'Plan Items Found' 
+                            : 'Awaiting Analysis'
+                        }
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {isExtracting 
                           ? processingStatus || 'Identifying trackable items...'
                           : extractedItems 
-                            ? `${extractedItems.length} items extracted with AI`
+                            ? `${extractedItems.length} items extracted${useVisionAI ? ' with Vision AI' : ' with AI'}`
                             : 'Will use basic parsing'
                         }
                       </p>
                     </div>
                   </div>
                   {extractedItems && (
-                    <span className="px-2 py-1 text-xs font-medium rounded-full bg-success/20 text-success">
-                      AI Enhanced
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                      useVisionAI 
+                        ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400' 
+                        : 'bg-success/20 text-success'
+                    }`}>
+                      {useVisionAI ? 'Vision AI' : 'AI Enhanced'}
                     </span>
                   )}
                 </div>
@@ -427,17 +594,17 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
 
           <Button
             onClick={handleContinue}
-            disabled={!fileContent.trim() || isLoading}
+            disabled={(!fileContent.trim() && !extractedItems) || isLoading}
             className="w-full h-12 text-base font-medium"
           >
             {isLoading ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                {isExtracting ? 'AI Analyzing...' : 'Processing File...'}
+                {isExtracting ? (useVisionAI ? 'Vision AI Analyzing...' : 'AI Analyzing...') : 'Processing File...'}
               </>
             ) : extractedItems ? (
               <>
-                <Brain className="h-4 w-4 mr-2" />
+                {useVisionAI ? <Eye className="h-4 w-4 mr-2" /> : <Brain className="h-4 w-4 mr-2" />}
                 Continue with {extractedItems.length} Items
               </>
             ) : (

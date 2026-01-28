@@ -31,11 +31,23 @@ const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic plann
 
 Your task is to identify plan items that an organization would track progress on over time. 
 
+=== DOCUMENT TERMINOLOGY DETECTION (CRITICAL) ===
+
+Many documents define their own hierarchy terms. DETECT and MAP these to our standard levels:
+
+Common document terms → Standard mapping:
+- "Pillar", "Strategic Priority", "Theme", "Strategic Goal" → strategic_priority (depth 1)
+- "Objective", "Focus Area", "Goal Area", "Priority Area" → focus_area (depth 2)  
+- "Strategy", "Initiative", "Tactic", "Goal", "Program" → goal (depth 3)
+- "KPI", "Metric", "Measure", "Action", "Tollgate", "Key Result", "Target" → action_item (depth 4)
+
+Look for definition sections like "Terms definitions:", "Key terms:", "Glossary" that explain the document's terminology.
+
 EXTRACT these types of items (IN HIERARCHICAL ORDER):
-1. strategic_priority - Top-level themes (e.g., "Economic Security", "Climate Resilience") - ONLY these at root
+1. strategic_priority - Top-level themes (e.g., "Economic Security", "Climate Resilience", "Equity & Access")
 2. focus_area - Mid-level groupings under priorities (e.g., "Housing Access", "Workforce Development")
 3. goal - Specific trackable outcomes with targets (e.g., "Increase affordable units by 3%")
-4. action_item - Concrete work items (e.g., "Complete permit applications by Q2")
+4. action_item - Concrete work items, KPIs, metrics (e.g., "Complete permit applications by Q2", "Increase by 10%")
 
 SKIP these (do NOT include as plan items):
 - Table of contents, page numbers, headers, footers
@@ -45,6 +57,21 @@ SKIP these (do NOT include as plan items):
 - Image captions, chart titles, infographic descriptions
 - Achievements from previous years (unless they set baselines)
 - General descriptions without actionable outcomes
+
+=== TABULAR/MATRIX STRUCTURE HANDLING ===
+
+If the document text appears to come from a table or matrix format:
+1. Look for patterns like repeated column-style data
+2. Items on the same "row" share parent-child relationships
+3. KPIs/Metrics belong under their associated Strategy/Goal
+4. Extract ALL items including those that look like metrics or KPIs
+
+Example: If you see "Pillar: Equity | Objective: Access | Strategy: Expand | KPI: +10%"
+This should produce:
+- strategic_priority: "Equity"
+  - focus_area: "Access"
+    - goal: "Expand"
+      - action_item: "+10%" (with metricTarget)
 
 === CRITICAL HIERARCHY RULES (MUST FOLLOW) ===
 
