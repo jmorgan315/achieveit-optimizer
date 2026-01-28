@@ -57,7 +57,7 @@ export function usePlanState() {
         return { ...i, order: String(idx + 1) };
       });
 
-      return { ...prev, items: recalculateOrders(updatedItems) };
+      return { ...prev, items: recalculateOrders(updatedItems, prev.levels) };
     });
   }, []);
 
@@ -150,7 +150,27 @@ export function usePlanState() {
           : i
       );
 
-      return { ...prev, items: recalculateOrders(updatedItems) };
+      return { ...prev, items: recalculateOrders(updatedItems, prev.levels) };
+    });
+  }, []);
+
+  // Update levels and recalculate all items to match new level names
+  const updateLevelsAndRecalculate = useCallback((newLevels: PlanLevel[]) => {
+    setState((prev) => {
+      // Update level names on items based on their depth
+      const updatedItems = prev.items.map((item) => {
+        const matchingLevel = newLevels.find((l) => l.depth === item.levelDepth);
+        return {
+          ...item,
+          levelName: matchingLevel?.name || item.levelName,
+        };
+      });
+
+      return {
+        ...prev,
+        levels: newLevels,
+        items: recalculateOrders(updatedItems, newLevels),
+      };
     });
   }, []);
 
@@ -167,22 +187,23 @@ export function usePlanState() {
     updateItemIssues,
     moveItem,
     reorderSiblings,
+    updateLevelsAndRecalculate,
   };
 }
 
-function recalculateOrders(items: PlanItem[]): PlanItem[] {
-  const rootItems = items.filter((i) => !i.parentId);
+function recalculateOrders(items: PlanItem[], levels: PlanLevel[]): PlanItem[] {
   const result: PlanItem[] = [];
 
-  function processLevel(parentId: string | null, prefix: string) {
+  function processLevel(parentId: string | null, prefix: string, depth: number) {
     const children = items.filter((i) => i.parentId === parentId);
     children.forEach((child, index) => {
       const order = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
-      result.push({ ...child, order });
-      processLevel(child.id, order);
+      const levelName = levels.find((l) => l.depth === depth)?.name || child.levelName;
+      result.push({ ...child, order, levelDepth: depth, levelName });
+      processLevel(child.id, order, depth + 1);
     });
   }
 
-  processLevel(null, '');
+  processLevel(null, '', 1);
   return result;
 }

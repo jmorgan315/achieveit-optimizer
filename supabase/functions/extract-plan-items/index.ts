@@ -34,7 +34,47 @@ For each item you extract:
 6. Include relevant description if it adds actionable context
 
 IMPORTANT: Be selective. A 30-page strategic plan should yield 15-40 trackable items, not 100+.
-If something reads like narrative context rather than a trackable goal, skip it.`;
+If something reads like narrative context rather than a trackable goal, skip it.
+
+CRITICAL HIERARCHY RULES:
+1. The root level should ONLY contain Strategic Priorities (top-level themes). Typically 3-7 items.
+2. Focus Areas MUST be nested as children of Strategic Priorities.
+3. Goals MUST be nested as children of Focus Areas or Strategic Priorities.
+4. Action Items MUST be nested as children of Goals or Focus Areas.
+5. NEVER return goals or action items at the root level - they must be nested under a parent.
+
+BULLET POINT HANDLING:
+- If you see a list of bullets following a section header (e.g., "The county will:"), ALL bullets become children of that section.
+- Bullets prefixed with "•", "-", "*", "→", or similar should ALL be captured as the same level type.
+- If bullets appear at the same indent level, treat them ALL as the same item type (e.g., all as goals or all as action_items).
+- Do NOT skip bullet points - capture every actionable bullet under a heading.
+- Example: "For its part, the county will:" followed by 5 bullets = 5 goals/action_items under that focus area.
+
+NESTING EXAMPLES:
+Good structure:
+{
+  "name": "Economic Security",
+  "levelType": "strategic_priority",
+  "children": [
+    {
+      "name": "Housing Access",
+      "levelType": "focus_area", 
+      "children": [
+        { "name": "Increase affordable units by 3%", "levelType": "goal" },
+        { "name": "Support inclusionary housing initiatives", "levelType": "goal" },
+        { "name": "Invest in mobile home parks", "levelType": "goal" }
+      ]
+    }
+  ]
+}
+
+Bad structure (DO NOT DO THIS):
+[
+  { "name": "Economic Security", "levelType": "strategic_priority" },
+  { "name": "Housing Access", "levelType": "focus_area" },
+  { "name": "Increase affordable units by 3%", "levelType": "goal" }
+]
+// BAD: Items are flat instead of nested!`;
 
 const extractPlanItemsSchema = {
   type: "object",
