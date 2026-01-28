@@ -1,126 +1,113 @@
 
-# Plan: Fix AI Extraction Hierarchy and Level Mapping
 
-## Problem Analysis
+# Plan: Add Item-Level Editing for Levels, Dates, and Owners
 
-From the screenshots and code review, I've identified **three root causes**:
+## Problem Summary
 
-### Issue 1: AI Returns Flat Structure Despite Instructions
-The AI is returning all items at the same level (`focus_area`) without using the `children` array for nesting. Even with explicit prompt instructions, the AI is ignoring the nesting requirement and returning:
+The user needs to edit individual plan items with:
 
-```json
-[
-  { "name": "Economic Security", "levelType": "focus_area" },
-  { "name": "Housing Access", "levelType": "focus_area" },
-  { "name": "Increase BCHA units", "levelType": "focus_area" }
-]
-```
-
-Instead of:
-```json
-[
-  { 
-    "name": "Economic Security", 
-    "levelType": "strategic_priority",
-    "children": [
-      {
-        "name": "Housing Access",
-        "levelType": "focus_area",
-        "children": [...]
-      }
-    ]
-  }
-]
-```
-
-### Issue 2: Level Depth Determined Only by AI's levelType
-The current code in `textParser.ts` uses a static mapping:
-```typescript
-const LEVEL_TYPE_TO_DEPTH = {
-  'strategic_priority': 1,
-  'focus_area': 2,
-  'goal': 3,
-  'action_item': 4,
-};
-```
-
-If AI returns all items as `focus_area`, they ALL get `levelDepth: 2` and ALL show as "Focus Area" in the UI.
-
-### Issue 3: Order Strings Based on Parent Relationships
-The order calculation uses `parentId` to determine nesting. With flat AI response (no children = no parent relationships), all items become root level: 1, 2, 3, 4, 5...
+1. **Change individual item levels** - A dropdown to select which level (Strategic Priority, Focus Area, Goal, etc.) an item belongs to
+2. **Set start AND due dates** - Both dates are required for AchieveIt compatibility
+3. **Assign owners** - Text input for the assigned owner email
+4. **Make the gear icon functional** - Currently calls `onEdit(setSelectedItem)` but there's no edit dialog
 
 ---
 
 ## Solution
 
-### Part 1: Force AI to Use Proper Level Types
+Create a comprehensive **Edit Item Dialog** that opens when clicking the gear icon, with required validation for both dates.
 
-**File: `supabase/functions/extract-plan-items/index.ts`**
+---
 
-Strengthen the prompt to:
-- Use **specific examples** from common strategic plan formats
-- Add **validation rules** that the AI must follow
-- Include a **self-check** instruction to verify nesting before returning
+## Implementation Details
 
-Key prompt additions:
-```text
-VALIDATION BEFORE RETURNING:
-1. Count items at root level - should be 3-7 strategic priorities only
-2. Verify each strategic_priority has children (focus_areas)
-3. Verify bullet points under headings are nested as children, not siblings at root
-4. If you have more than 8 items at root level, your nesting is wrong - restructure
+### 1. Add Edit Item Dialog to PlanOptimizerStep
 
-OUTPUT VALIDATION:
-- strategic_priority items: ONLY at root level, typically 3-7 total
-- focus_area items: MUST be inside children[] of a strategic_priority
-- goal items: MUST be inside children[] of a focus_area or strategic_priority
-- action_item items: MUST be inside children[] of a goal or focus_area
-```
+**File: `src/components/steps/PlanOptimizerStep.tsx`**
 
-### Part 2: Add Post-Processing Fallback for Flat Responses
+Add a new dialog for editing individual items:
 
-**File: `src/utils/textParser.ts`**
+- Add `showEditDialog` state (boolean)
+- Create a form dialog with:
+  - **Level dropdown** - Select from configured levels (updates hierarchy position)
+  - **Start Date** (required) - Date picker using Calendar + Popover
+  - **Due Date** (required) - Date picker, must be after start date
+  - **Owner (Assigned To)** - Text input for email
+  - **Name** - Editable text
+  - **Description** - Editable textarea
 
-Add intelligent fallback logic that:
-1. **Detects flat responses** - if all items are at root level with same levelType
-2. **Rebuilds hierarchy** from levelType ordering - strategic_priority becomes parent of subsequent focus_areas
-3. **Recalculates order strings** based on rebuilt parent-child relationships
+**Validation rules:**
+- Start Date is required
+- Due Date is required
+- Due Date must be on or after Start Date
+- Save button disabled until both dates are set
 
-New function: `rebuildHierarchyFromFlatItems()`
-```text
-Algorithm:
-1. Sort items by original order
-2. Track "current parent" at each level
-3. When encountering strategic_priority -> set as Level 1 parent
-4. When encountering focus_area -> make child of current strategic_priority
-5. When encountering goal -> make child of current focus_area
-6. Rebuild order strings as 1, 1.1, 1.1.1, etc.
-```
+### 2. Update SortableTreeItem to Show Inline Info
 
-### Part 3: Fix Level Name Assignment
+**File: `src/components/plan-optimizer/SortableTreeItem.tsx`**
 
-**File: `src/utils/textParser.ts`**
+Update the row to show:
+- Start date and due date in small text (if set)
+- Owner email badge (if set)
+- Keep the gear icon for opening the edit dialog
 
-Change level assignment to use **actual tree depth** (based on parentId chain) rather than AI's levelType:
-
-```text
-Current (broken):
-  depth = LEVEL_TYPE_TO_DEPTH[aiItem.levelType]  // All focus_area = depth 2
-  levelName = levels.find(l => l.depth === depth)  // All show "Focus Area"
-
-Fixed:
-  treeDepth = countParentChain(parentId)  // 0 parents = depth 1, 1 parent = depth 2
-  levelName = levels.find(l => l.depth === treeDepth)  // Uses actual position in tree
-```
-
-### Part 4: Ensure Level Recalculation on User Confirmation
+### 3. Add changeItemLevel Function
 
 **File: `src/hooks/usePlanState.ts`**
 
-The `updateLevelsAndRecalculate` function needs to:
-1. Update all items' `levelName` based on their `parentId` chain
-2. Recalculate order strings for the entire tree
-3. Preserve the hierarchy structure
+Add a new function `changeItemLevel(itemId: string, newLevelDepth: number)` that:
+1. Updates the item's `levelDepth` and `levelName`
+2. Handles re-parenting based on new level:
+   - If moving to a higher level (e.g., Goal -> Focus Area), find an appropriate parent at the level above or make it a root item
+   - If moving to a lower level, find the previous sibling at the level above to become the parent
+3. Recalculates order strings for the entire tree
+
+---
+
+## Technical Details
+
+### Edit Dialog Layout
+
+```text
++------------------------------------------+
+|  Edit Plan Item                          |
++------------------------------------------+
+| Name:        [________________________]  |
+| Description: [________________________]  |
+|                                          |
+| Level:       [Dropdown: Focus Area   v]  |
+|                                          |
+| Start Date:  [Calendar Picker     ] *    |
+| Due Date:    [Calendar Picker     ] *    |
+|              * Both dates are required   |
+|                                          |
+| Owner Email: [________________________]  |
+|                                          |
+|               [Cancel]  [Save Changes]   |
++------------------------------------------+
+```
+
+### Level Change Logic
+
+When user changes an item from "Goal" (depth 3) to "Focus Area" (depth 2):
+1. Find the previous sibling at level 1 (Strategic Priority) to become the new parent
+2. If no parent found at the appropriate level, make it a root-level item
+3. Move all children of the item along with it (they become one level deeper)
+4. Recalculate all order strings
+
+### Date Validation
+
+```typescript
+const canSave = editFormData.startDate && editFormData.dueDate && 
+  new Date(editFormData.dueDate) >= new Date(editFormData.startDate);
+```
+
+### Issue Auto-Resolution
+
+When saving the edit dialog:
+- If owner email is set and valid, remove `missing-owner` issue
+- If both dates are set, remove `missing-dates` issue
+- Recalculate remaining issues
 
 ---
 
@@ -128,9 +115,9 @@ The `updateLevelsAndRecalculate` function needs to:
 
 | File | Changes |
 |------|---------|
-| `supabase/functions/extract-plan-items/index.ts` | Add stricter validation rules to prompt, add self-check instructions |
-| `src/utils/textParser.ts` | Add `rebuildHierarchyFromFlatItems()`, fix level depth calculation to use tree depth |
-| `src/hooks/usePlanState.ts` | Improve `recalculateOrders()` to properly assign levelName from tree depth |
+| `src/components/steps/PlanOptimizerStep.tsx` | Add Edit Item Dialog with level dropdown, required date pickers, owner field |
+| `src/components/plan-optimizer/SortableTreeItem.tsx` | Update to show dates/owner inline, connect gear icon to open dialog |
+| `src/hooks/usePlanState.ts` | Add `changeItemLevel()` function for level changes with re-parenting logic |
 
 ---
 
@@ -138,60 +125,10 @@ The `updateLevelsAndRecalculate` function needs to:
 
 After implementation:
 
-1. **AI returns properly nested structure** with strategic_priority > focus_area > goal > action_item
-2. **Fallback handles flat responses** by inferring hierarchy from levelType ordering
-3. **Level names match tree position** - root items = Level 1, their children = Level 2, etc.
-4. **Order strings reflect hierarchy** - 1, 1.1, 1.1.1 instead of 1, 2, 3, 4
+1. **Gear icon opens edit dialog** with all editable fields
+2. **Level dropdown** allows changing item level with automatic hierarchy adjustment
+3. **Required date pickers** for start and due dates (both must be set to save)
+4. **Owner field** for entering/editing the assigned email
+5. **Issue badges auto-update** when dates/owner are added
+6. **Hierarchy recalculates** automatically when level changes
 
-Example result for Boulder County document:
-```text
-1     Strategic Priority  Economic Security and Social Stability
-1.1   Focus Area          Housing Access and Affordability
-1.1.1 Goal                Increase BCHA affordable units by 3% in 2025
-1.1.2 Goal                Net 600+ housing units within planning period
-1.1.3 Goal                Support inclusionary housing initiatives
-1.1.4 Goal                Complete Willoughby Corner project phases
-1.2   Focus Area          Employment and Income Security
-...
-```
-
----
-
-## Technical Implementation Details
-
-### Hierarchy Rebuild Algorithm
-
-```text
-function rebuildHierarchyFromFlatItems(items):
-  parentStack = {1: null, 2: null, 3: null, 4: null}
-  
-  for each item in items:
-    levelDepth = LEVEL_TYPE_TO_DEPTH[item.levelType]
-    
-    # Find parent at level above
-    parentDepth = levelDepth - 1
-    item.parentId = parentStack[parentDepth]
-    
-    # Set this item as parent for deeper levels
-    parentStack[levelDepth] = item.id
-    
-    # Clear deeper levels (they need new parents)
-    for d in range(levelDepth + 1, 5):
-      parentStack[d] = null
-  
-  return recalculateOrders(items)
-```
-
-### Tree Depth Calculation
-
-```text
-function getTreeDepth(itemId, items):
-  depth = 1
-  item = items.find(i => i.id === itemId)
-  
-  while item.parentId:
-    depth++
-    item = items.find(i => i.id === item.parentId)
-  
-  return depth
-```
