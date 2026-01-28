@@ -1,172 +1,217 @@
 
-# Plan: AI-Powered Intelligent Document Extraction
 
-## Problem Analysis
+# Plan: Fix AI Extraction Hierarchy, Level Verification, and Bullet Point Detection
 
-The current `src/utils/textParser.ts` uses regex patterns to detect plan items based on:
-- Numbering patterns (1.1.1)
-- Label keywords ("Strategic Priority", "Objective")
-- Indentation levels
+## Problem Summary
 
-This approach fails because real strategic plans contain significant narrative content that shouldn't be tracked. The Boulder County example has:
-- 70% narrative/context (demographics, introductions, achievements)
-- 30% actual trackable items (goals, initiatives, metrics)
+Based on the screenshots and feedback, there are four distinct issues:
 
-## Solution: AI-Powered Extraction Edge Function
+1. **Flat numbering**: Items are displayed as 1, 2, 3, 4, 5, 6... instead of proper hierarchy (1, 1.1, 1.1.1)
+2. **Skipped level verification**: The AI extraction path bypasses the level configuration modal
+3. **Missing bullet points**: Same-level bullet items (e.g., all the "For its part, the county will:" bullets) are not being extracted
+4. **No level adjustment in optimizer**: Users cannot modify plan levels once in the Plan Optimizer step
 
-Replace the regex parser with an intelligent AI extraction step that can distinguish between narrative and actionable plan items.
+---
 
-### Architecture
+## Root Cause Analysis
 
+### Issue 1: Flat Numbering
+The AI is returning items with a `children` array for nesting, but when items are at the same visual level in a document (like a list of goals), the AI places them as siblings at the root level. The `convertAIResponseToPlanItems()` function then assigns sequential numbers (1, 2, 3...) instead of respecting the user-defined level hierarchy.
+
+**Current behavior**:
 ```text
-User uploads PDF
-       |
-       v
-parse-pdf edge function (existing)
-       |
-       v
-Raw text extracted
-       |
-       v
-extract-plan-items edge function (NEW)
-       |
-       v
-AI analyzes text, identifies:
-  - Strategic priorities (top level)
-  - Goals/Objectives (mid level)  
-  - Initiatives/Actions (low level)
-       |
-       v
-Structured JSON with hierarchy
-       |
-       v
-Display in Plan Optimizer
+AI returns: [item1, item2, item3, item4, item5]  // All at root
+Result:     1, 2, 3, 4, 5, 6...                  // Flat numbers
 ```
 
-### New Edge Function: extract-plan-items
+**Expected behavior**:
+```text
+AI returns: [strategic_priority with children]
+Result:     1, 1.1, 1.1.1, 1.2, 2, 2.1...       // Nested numbers
+```
+
+### Issue 2: Skipped Level Verification
+In `Index.tsx`, the `handleAIExtraction` callback goes directly to step 1:
+```typescript
+const handleAIExtraction = (items, personMappings, levels) => {
+  setLevels(levels);
+  setItems(items, personMappings);
+  setCurrentStep(1); // Skips level verification modal!
+};
+```
+
+### Issue 3: Missing Bullet Points
+The AI prompt doesn't explicitly instruct to capture all bullet points at the same indent level. Looking at the Boulder County document, bullets like:
+- "Support inclusionary housing initiatives..."
+- "Invest in mobile home parks..."
+- "Study methods creating and retaining affordable housing..."
+
+...should all be captured as goals or action items.
+
+### Issue 4: No Level Adjustment in Optimizer
+The `PlanOptimizerStep` component doesn't include any UI to modify the plan levels.
+
+---
+
+## Solution
+
+### Part 1: Update AI Prompt for Better Extraction
 
 **File: `supabase/functions/extract-plan-items/index.ts`**
 
-This function will:
-1. Accept the raw text from a document
-2. Use Lovable AI (Gemini 3 Flash) to analyze and extract only trackable items
-3. Return structured JSON with:
-   - Hierarchical plan items
-   - Detected owners/departments
-   - Any dates or metrics found
-   - Confidence scores for uncertain extractions
+Enhance the system prompt to:
+- Explicitly capture ALL bullet points at the same indent level as the same type of item
+- Ensure proper hierarchical nesting based on document structure
+- Add guidance about treating indented content as children of the preceding item
 
-### AI Prompt Engineering
+Key prompt additions:
+- "If a section has bullet points at the same indentation level, treat ALL bullets as the same level type (e.g., all as 'goal' or all as 'action_item')"
+- "Nest items under their logical parent based on document structure - bullet points under a heading should be children of that heading"
+- "Do not leave items as orphans at the root level unless they truly are top-level strategic priorities"
 
-The prompt will instruct the model to:
+### Part 2: Show Level Verification After AI Extraction
 
-1. **Identify trackable items** - Goals with measurable outcomes, not background narrative
-2. **Detect hierarchy** - Which items are parent priorities vs child initiatives
-3. **Extract metadata** - Owners, dates, metrics embedded in text
-4. **Skip noise** - Table of contents, page numbers, image captions, introductory paragraphs
+**File: `src/pages/Index.tsx`**
 
-Example extraction from the Boulder County document:
+Modify `handleAIExtraction` to:
+1. Store AI-extracted data temporarily
+2. Show the `LevelVerificationModal` with AI-detected levels pre-populated
+3. After user confirms levels, recalculate order strings based on confirmed hierarchy
 
-```json
-{
-  "items": [
-    {
-      "name": "Economic Security and Social Stability",
-      "levelType": "strategic_priority",
-      "description": "Ensuring residents have resources for health and wellbeing",
-      "children": [
-        {
-          "name": "Housing access and affordability",
-          "levelType": "focus_area",
-          "children": [
-            {
-              "name": "Increase BCHA affordable units by 3% in 2025",
-              "levelType": "goal",
-              "metricTarget": "3%",
-              "metricUnit": "Percentage",
-              "dueDate": "2025-12-31"
-            },
-            {
-              "name": "Net 600+ housing units within planning period",
-              "levelType": "goal",
-              "metricTarget": "600",
-              "metricUnit": "Number"
-            }
-          ]
-        }
-      ]
-    }
-  ]
+New state variables:
+```typescript
+const [pendingAIData, setPendingAIData] = useState<{
+  items: PlanItem[];
+  personMappings: PersonMapping[];
+  detectedLevels: PlanLevel[];
+} | null>(null);
+```
+
+Flow change:
+```text
+AI Extraction Complete
+        |
+        v
+Store in pendingAIData
+        |
+        v
+Show LevelVerificationModal (with detected levels)
+        |
+        v
+User confirms/adjusts levels
+        |
+        v
+Recalculate item hierarchy with confirmed levels
+        |
+        v
+Proceed to next step
+```
+
+### Part 3: Fix Order Calculation Based on User-Defined Levels
+
+**File: `src/utils/textParser.ts`**
+
+Update `convertAIResponseToPlanItems()` to:
+1. Accept the user-confirmed levels
+2. Map AI level types to user level depths correctly
+3. Ensure order strings reflect the hierarchy (1, 1.1, 1.1.1 pattern)
+
+The current mapping:
+```typescript
+const LEVEL_TYPE_TO_DEPTH = {
+  'strategic_priority': 1,
+  'focus_area': 2,
+  'goal': 3,
+  'action_item': 4,
+};
+```
+
+Should dynamically use the user's level configuration to assign depths, and recalculate all order strings after items are placed in hierarchy.
+
+### Part 4: Add Level Configuration to Plan Optimizer
+
+**File: `src/components/steps/PlanOptimizerStep.tsx`**
+
+Add a "Configure Levels" button that opens the `LevelVerificationModal`, allowing users to:
+- Rename levels
+- Add/remove levels
+- Reorder levels
+
+When levels change, items need their `levelName` updated to match the new level configuration.
+
+**New prop needed**: `onUpdateLevels: (levels: PlanLevel[]) => void`
+
+---
+
+## Files to Modify
+
+| File | Changes |
+|------|---------|
+| `supabase/functions/extract-plan-items/index.ts` | Enhance AI prompt for bullet point capture and proper nesting |
+| `src/pages/Index.tsx` | Add pending AI data state, show level modal for AI extraction path |
+| `src/utils/textParser.ts` | Fix `convertAIResponseToPlanItems` to respect user levels and calculate proper order strings |
+| `src/components/steps/PlanOptimizerStep.tsx` | Add "Configure Levels" button and integrate `LevelVerificationModal` |
+| `src/hooks/usePlanState.ts` | Add `updateLevelsAndRecalculate()` function to update items when levels change |
+
+---
+
+## Technical Details
+
+### AI Prompt Enhancement (Key Additions)
+
+```text
+CRITICAL HIERARCHY RULES:
+1. Bullet points at the same indentation level MUST be the same item type
+2. Content under a heading or title should be nested as children
+3. Strategic Priorities are ONLY top-level themes - there should typically be 3-7
+4. Goals and Action Items should ALWAYS be nested under Focus Areas or Priorities
+5. Never return more than 5-8 items at the root level
+
+BULLET POINT HANDLING:
+- If you see a list of bullets following a section header, ALL bullets become children of that section
+- Bullets prefixed with "•", "-", "*", or similar should all be captured
+- Example: "The county will:" followed by 5 bullets = 5 goals under that focus area
+```
+
+### Order Recalculation Logic
+
+```typescript
+function recalculateOrderStrings(items: PlanItem[]): PlanItem[] {
+  // Group items by parentId
+  const byParent = new Map<string | null, PlanItem[]>();
+  
+  items.forEach(item => {
+    const parentId = item.parentId;
+    if (!byParent.has(parentId)) byParent.set(parentId, []);
+    byParent.get(parentId)!.push(item);
+  });
+  
+  // Recursively assign order strings
+  function assignOrders(parentId: string | null, prefix: string): PlanItem[] {
+    const children = byParent.get(parentId) || [];
+    return children.flatMap((child, idx) => {
+      const order = prefix ? `${prefix}.${idx + 1}` : String(idx + 1);
+      const updated = { ...child, order };
+      return [updated, ...assignOrders(child.id, order)];
+    });
+  }
+  
+  return assignOrders(null, '');
 }
 ```
 
-### Changes Required
+### Level Configuration in Optimizer UI
 
-| File | Action | Purpose |
-|------|--------|---------|
-| `supabase/functions/extract-plan-items/index.ts` | Create | AI extraction endpoint using Lovable AI |
-| `supabase/config.toml` | Modify | Add new function configuration |
-| `src/components/steps/FileUploadStep.tsx` | Modify | Chain PDF parsing with AI extraction |
-| `src/utils/textParser.ts` | Modify | Add function to convert AI response to PlanItem format |
-| `src/hooks/usePlanState.ts` | Modify | Handle async AI extraction flow |
+The "Configure Levels" button will be placed in the header area of the Plan Optimizer step, next to the "Plan Structure" title. When clicked, it opens the existing `LevelVerificationModal` component. On confirm, items are updated to use the new level names.
 
-### User Experience Flow
+---
 
-1. User uploads PDF
-2. Show "Extracting text from document..." (existing)
-3. Show "AI analyzing document for plan items..." (new)
-4. Display extracted items with confidence indicators
-5. User can review and adjust before proceeding
+## Expected Outcome
 
-### Edge Cases Handled
+After implementation:
 
-- Documents with no clear hierarchy - AI will infer based on context
-- Multiple unrelated plans in one document - AI will group logically
-- Heavily narrative documents - AI will extract only actionable items
-- Mixed languages - Gemini supports multilingual extraction
+1. **Hierarchy displays correctly**: Items show as 1, 1.1, 1.1.1, 1.2, 2, 2.1, etc.
+2. **Level verification always shown**: Users can always confirm/adjust levels before proceeding
+3. **All bullet points captured**: Same-level bullets like housing initiatives are extracted as goals/actions
+4. **Levels adjustable in optimizer**: Users can modify level names and structure at any time
 
-### Technical Implementation Details
-
-**AI Request Structure:**
-```typescript
-const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${LOVABLE_API_KEY}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    model: "google/gemini-3-flash-preview",
-    messages: [
-      { role: "system", content: EXTRACTION_PROMPT },
-      { role: "user", content: documentText }
-    ],
-    tools: [{
-      type: "function",
-      function: {
-        name: "extract_plan_items",
-        parameters: { /* structured output schema */ }
-      }
-    }],
-    tool_choice: { type: "function", function: { name: "extract_plan_items" } }
-  }),
-});
-```
-
-**Extraction Prompt (key points):**
-- You are analyzing a strategic planning document
-- Extract ONLY items that would be tracked over time (goals, initiatives, KPIs)
-- Skip: table of contents, demographics, historical achievements, mission statements
-- Preserve hierarchy: Strategic Priority > Focus Area > Goal/Initiative > Action Item
-- Extract any embedded metrics, dates, or owners
-
-### Cost and Performance
-
-- Single AI call per document (not per item)
-- Gemini 3 Flash is fast and cost-effective
-- Typical strategic plan (20-30 pages): 2-5 seconds processing
-- Token usage: ~2000 input + ~1000 output per document
-
-## Summary
-
-This plan replaces the naive regex parser with intelligent AI extraction that understands document context and extracts only meaningful, trackable plan items while preserving hierarchy.
