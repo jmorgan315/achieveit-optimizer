@@ -68,9 +68,11 @@ export interface PlanState {
 }
 
 export const DEFAULT_LEVELS: PlanLevel[] = [
-  { id: '1', name: 'Milestone', depth: 1 },
-  { id: '2', name: 'Goal', depth: 2 },
-  { id: '3', name: 'Task', depth: 3 },
+  { id: '1', name: 'Strategic Priority', depth: 1 },
+  { id: '2', name: 'Objective', depth: 2 },
+  { id: '3', name: 'Goal', depth: 3 },
+  { id: '4', name: 'Strategy', depth: 4 },
+  { id: '5', name: 'KPI', depth: 5 },
 ];
 
 export const SAMPLE_RAW_TEXT = `
