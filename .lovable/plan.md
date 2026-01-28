@@ -1,134 +1,149 @@
 
 
-# Plan: Add Item-Level Editing for Levels, Dates, and Owners
+# Plan: Date Validation Tweak and Drag-and-Drop Reordering
 
-## Problem Summary
+## Summary
 
-The user needs to edit individual plan items with:
+Two focused changes to improve the Plan Optimizer experience:
 
-1. **Change individual item levels** - A dropdown to select which level (Strategic Priority, Focus Area, Goal, etc.) an item belongs to
-2. **Set start AND due dates** - Both dates are required for AchieveIt compatibility
-3. **Assign owners** - Text input for the assigned owner email
-4. **Make the gear icon functional** - Currently calls `onEdit(setSelectedItem)` but there's no edit dialog
+1. **Date Validation**: Change from "both dates required" to "both or neither" - if one date is set, the other must be set too
+2. **Drag-and-Drop Reordering**: Add the ability to reorder items at the same level, not just nest them under other items
 
 ---
 
-## Solution
+## Change 1: Relaxed Date Validation
 
-Create a comprehensive **Edit Item Dialog** that opens when clicking the gear icon, with required validation for both dates.
+### Current Behavior
+The Edit Item Dialog requires BOTH start and due dates to be filled before saving. The Save button is disabled unless both dates are set.
+
+### New Behavior
+- If neither date is set: Save is allowed
+- If only one date is set: Save is blocked with a message
+- If both dates are set: Validate that due date is on/after start date
+
+### File to Modify
+
+**`src/components/plan-optimizer/EditItemDialog.tsx`**
+
+Update the validation logic and messaging:
+
+```text
+Current:
+  canSave = startDate && dueDate && dueDate >= startDate
+
+New:
+  bothDatesEmpty = !startDate && !dueDate
+  bothDatesFilled = startDate && dueDate
+  datesValid = bothDatesFilled ? dueDate >= startDate : true
+  canSave = (bothDatesEmpty || (bothDatesFilled && datesValid))
+```
+
+Also update:
+- Remove the `*` required indicators from date labels
+- Update the description text to explain the "both or neither" rule
+- Update validation messages to reflect the new logic
 
 ---
 
-## Implementation Details
+## Change 2: Drag-and-Drop Reordering
 
-### 1. Add Edit Item Dialog to PlanOptimizerStep
+### Current Behavior
+When dragging an item over another item, it nests the dragged item as a child of the target. There's no way to reorder items at the same level (e.g., move item 1.2 before 1.1).
 
-**File: `src/components/steps/PlanOptimizerStep.tsx`**
+### New Behavior
+The UI will show drop indicators between items (not just on items) so users can:
+- **Drop ON an item**: Nest the dragged item as a child (existing behavior)
+- **Drop BETWEEN items**: Reorder the dragged item within its siblings
 
-Add a new dialog for editing individual items:
+### Implementation Approach
 
-- Add `showEditDialog` state (boolean)
-- Create a form dialog with:
-  - **Level dropdown** - Select from configured levels (updates hierarchy position)
-  - **Start Date** (required) - Date picker using Calendar + Popover
-  - **Due Date** (required) - Date picker, must be after start date
-  - **Owner (Assigned To)** - Text input for email
-  - **Name** - Editable text
-  - **Description** - Editable textarea
+Use `@dnd-kit/sortable` with drop zones that detect whether the user is hovering on the top/bottom edge of an item (reorder) or the center (nest).
 
-**Validation rules:**
-- Start Date is required
-- Due Date is required
-- Due Date must be on or after Start Date
-- Save button disabled until both dates are set
+### Files to Modify
 
-### 2. Update SortableTreeItem to Show Inline Info
+**`src/components/steps/PlanOptimizerStep.tsx`**
 
-**File: `src/components/plan-optimizer/SortableTreeItem.tsx`**
+1. Add state to track drop position (`'before' | 'after' | 'inside' | null`)
+2. Update `handleDragOver` to calculate drop position based on mouse Y position relative to the hovered item
+3. Update `handleDragEnd` to:
+   - If drop position is `'inside'`: Use existing `onMoveItem` to nest
+   - If drop position is `'before'` or `'after'`: Call new `onReorderSiblings` to reorder
 
-Update the row to show:
-- Start date and due date in small text (if set)
-- Owner email badge (if set)
-- Keep the gear icon for opening the edit dialog
+**`src/components/plan-optimizer/SortableTreeItem.tsx`**
 
-### 3. Add changeItemLevel Function
+1. Add visual indicators for drop zones:
+   - Top edge highlight for "drop before"
+   - Bottom edge highlight for "drop after"
+   - Center/full highlight for "nest inside"
+2. Pass `dropPosition` prop to show appropriate indicator
 
-**File: `src/hooks/usePlanState.ts`**
+**`src/pages/Index.tsx`**
 
-Add a new function `changeItemLevel(itemId: string, newLevelDepth: number)` that:
-1. Updates the item's `levelDepth` and `levelName`
-2. Handles re-parenting based on new level:
-   - If moving to a higher level (e.g., Goal -> Focus Area), find an appropriate parent at the level above or make it a root item
-   - If moving to a lower level, find the previous sibling at the level above to become the parent
-3. Recalculates order strings for the entire tree
+1. Pass `reorderSiblings` function to `PlanOptimizerStep` as `onReorderSiblings` prop
 
 ---
 
 ## Technical Details
 
-### Edit Dialog Layout
+### Drop Position Detection
 
 ```text
-+------------------------------------------+
-|  Edit Plan Item                          |
-+------------------------------------------+
-| Name:        [________________________]  |
-| Description: [________________________]  |
-|                                          |
-| Level:       [Dropdown: Focus Area   v]  |
-|                                          |
-| Start Date:  [Calendar Picker     ] *    |
-| Due Date:    [Calendar Picker     ] *    |
-|              * Both dates are required   |
-|                                          |
-| Owner Email: [________________________]  |
-|                                          |
-|               [Cancel]  [Save Changes]   |
-+------------------------------------------+
+function getDropPosition(event, element):
+  rect = element.getBoundingClientRect()
+  mouseY = event.clientY
+  
+  topThreshold = rect.top + rect.height * 0.25
+  bottomThreshold = rect.bottom - rect.height * 0.25
+  
+  if mouseY < topThreshold:
+    return 'before'
+  else if mouseY > bottomThreshold:
+    return 'after'
+  else:
+    return 'inside'
 ```
 
-### Level Change Logic
+### Reorder Logic
 
-When user changes an item from "Goal" (depth 3) to "Focus Area" (depth 2):
-1. Find the previous sibling at level 1 (Strategic Priority) to become the new parent
-2. If no parent found at the appropriate level, make it a root-level item
-3. Move all children of the item along with it (they become one level deeper)
-4. Recalculate all order strings
+When dropping "before" or "after" an item:
+1. Get the target item's parent (this determines which sibling group we're reordering)
+2. If dragged item has a different parent, first move it to the target's parent
+3. Calculate the new index based on the target's position and drop direction
+4. Call `reorderSiblings(draggedItemId, newIndex)`
 
-### Date Validation
+### Visual Indicators
 
-```typescript
-const canSave = editFormData.startDate && editFormData.dueDate && 
-  new Date(editFormData.dueDate) >= new Date(editFormData.startDate);
+```text
+Drop Before:  [===== blue line =====]
+              [      Item Row      ]
+
+Drop Inside:  [  light blue bg     ]
+              [      Item Row      ]
+
+Drop After:   [      Item Row      ]
+              [===== blue line =====]
 ```
-
-### Issue Auto-Resolution
-
-When saving the edit dialog:
-- If owner email is set and valid, remove `missing-owner` issue
-- If both dates are set, remove `missing-dates` issue
-- Recalculate remaining issues
 
 ---
 
-## Files to Modify
+## Files Summary
 
 | File | Changes |
 |------|---------|
-| `src/components/steps/PlanOptimizerStep.tsx` | Add Edit Item Dialog with level dropdown, required date pickers, owner field |
-| `src/components/plan-optimizer/SortableTreeItem.tsx` | Update to show dates/owner inline, connect gear icon to open dialog |
-| `src/hooks/usePlanState.ts` | Add `changeItemLevel()` function for level changes with re-parenting logic |
+| `src/components/plan-optimizer/EditItemDialog.tsx` | Update date validation: "both or neither" rule, update messaging |
+| `src/components/steps/PlanOptimizerStep.tsx` | Add drop position detection, update drag handlers for reorder vs nest |
+| `src/components/plan-optimizer/SortableTreeItem.tsx` | Add drop zone indicators (before/after lines, inside highlight) |
+| `src/pages/Index.tsx` | Pass `reorderSiblings` handler to `PlanOptimizerStep` |
 
 ---
 
 ## Expected Outcome
 
-After implementation:
+1. **Date Editing**: Users can save items with no dates, or with both dates set. If only one date is entered, they'll see a clear message explaining both are needed.
 
-1. **Gear icon opens edit dialog** with all editable fields
-2. **Level dropdown** allows changing item level with automatic hierarchy adjustment
-3. **Required date pickers** for start and due dates (both must be set to save)
-4. **Owner field** for entering/editing the assigned email
-5. **Issue badges auto-update** when dates/owner are added
-6. **Hierarchy recalculates** automatically when level changes
+2. **Drag and Drop**: 
+   - Hovering near the top edge of an item shows a blue line above it (drop before)
+   - Hovering near the bottom edge shows a blue line below it (drop after)
+   - Hovering in the center highlights the item (nest inside)
+   - The reordering respects the hierarchy - items reorder within their sibling group
 
