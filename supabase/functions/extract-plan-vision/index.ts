@@ -31,6 +31,23 @@ const VISION_EXTRACTION_PROMPT = `You are an expert document analyst specializin
 
 You are looking at page images from a strategic planning document. Your task is to extract ALL trackable plan items regardless of the document's visual format (tables, infographics, lists, matrices, etc.).
 
+=== LEFT-TO-RIGHT COLUMN HIERARCHY (CRITICAL FOR TABLES) ===
+
+When you see a table with headers across the top, the columns define the hierarchy levels:
+1. The LEFT-MOST column = HIGHEST level (depth 1)
+2. Each column to the RIGHT = one level DEEPER
+3. The RIGHT-MOST column = LOWEST level (deepest)
+
+Example table headers: "Pillar | Objective | Outcome KPI | Strategy | Strategy KPI"
+This means:
+- Pillar = depth 1 (strategic_priority)
+- Objective = depth 2 (focus_area)  
+- Outcome KPI = depth 3 (goal)
+- Strategy = depth 4 (action_item)
+- Strategy KPI = depth 5 (sub_action)
+
+CRITICAL: When you detect table headers, return them in the documentTerminology.columnHierarchy array in LEFT-TO-RIGHT order.
+
 === DOCUMENT TERMINOLOGY DETECTION ===
 
 Many documents define their own hierarchy terms. DETECT and MAP these to our standard levels:
@@ -38,8 +55,9 @@ Many documents define their own hierarchy terms. DETECT and MAP these to our sta
 Common document terms → Standard mapping:
 - "Pillar", "Strategic Priority", "Theme" → strategic_priority (depth 1)
 - "Objective", "Focus Area", "Goal Area" → focus_area (depth 2)  
-- "Strategy", "Initiative", "Tactic", "Goal" → goal (depth 3)
-- "KPI", "Metric", "Measure", "Action", "Tollgate" → action_item (depth 4)
+- "Outcome KPI", "Goal", "Target" → goal (depth 3)
+- "Strategy", "Initiative", "Tactic" → action_item (depth 4)
+- "Strategy KPI", "Metric", "Measure", "Tollgate" → sub_action (depth 5)
 
 Look for definition sections that explain the document's terminology and use those definitions.
 
@@ -48,18 +66,19 @@ Look for definition sections that explain the document's terminology and use tho
 When content is in tables or matrices:
 1. Identify column headers (e.g., "Pillar | Objective | Outcome KPIs | Strategies | Strategy KPIs")
 2. Each row represents related items across hierarchy levels
-3. Items in the same row share a parent-child relationship
+3. Items in the same row share a parent-child relationship LEFT-TO-RIGHT
 4. Extract ALL items from ALL columns - don't skip KPIs or metrics
 
 Example table structure:
-| Pillar | Objective | Strategies | KPIs |
-| Equity | Improve Access | Expand services | Increase by 10% |
+| Pillar | Objective | Outcome KPI | Strategy | Strategy KPI |
+| Equity | Improve Access | Increase by 10% | Expand services | Track monthly |
 
 This should produce:
 - strategic_priority: "Equity"
   - focus_area: "Improve Access"
-    - goal: "Expand services"
-      - action_item: "Increase by 10%" (with metricTarget: "10%")
+    - goal: "Increase by 10%" (with metricTarget: "10%")
+      - action_item: "Expand services"
+        - sub_action: "Track monthly"
 
 === HIERARCHY FROM VISUAL LAYOUT ===
 
@@ -100,7 +119,7 @@ Detect hierarchy from:
 
 Return properly nested items with:
 - name: The item text (concise, <100 chars)
-- levelType: strategic_priority | focus_area | goal | action_item
+- levelType: strategic_priority | focus_area | goal | action_item | sub_action
 - description: Additional context if available
 - owner: Person/department name if visible
 - metricTarget: Numeric target if this is a KPI (e.g., "10%", "500", "$2M")
@@ -117,7 +136,7 @@ const extractPlanItemsSchema = {
         type: "object",
         properties: {
           name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
-          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item"], description: "The hierarchy level of this item" },
+          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"], description: "The hierarchy level of this item" },
           description: { type: "string", description: "Brief description adding actionable context (optional)" },
           owner: { type: "string", description: "Person, role, or department responsible (if mentioned)" },
           metricTarget: { type: "string", description: "Target value if this is a measurable goal (e.g., '3%', '600', '$2M')" },
@@ -145,10 +164,16 @@ const extractPlanItemsSchema = {
       type: "object",
       description: "Custom terminology found in the document",
       properties: {
+        columnHierarchy: { 
+          type: "array", 
+          items: { type: "string" },
+          description: "Column headers in left-to-right order representing hierarchy depth (e.g., ['Pillar', 'Objective', 'Outcome KPI', 'Strategy', 'Strategy KPI'])"
+        },
         level1Term: { type: "string", description: "Document's term for top level (e.g., 'Pillar')" },
         level2Term: { type: "string", description: "Document's term for second level (e.g., 'Objective')" },
-        level3Term: { type: "string", description: "Document's term for third level (e.g., 'Strategy')" },
-        level4Term: { type: "string", description: "Document's term for fourth level (e.g., 'KPI')" }
+        level3Term: { type: "string", description: "Document's term for third level (e.g., 'Outcome KPI')" },
+        level4Term: { type: "string", description: "Document's term for fourth level (e.g., 'Strategy')" },
+        level5Term: { type: "string", description: "Document's term for fifth level (e.g., 'Strategy KPI')" }
       }
     }
   },
