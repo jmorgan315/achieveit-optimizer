@@ -5,6 +5,28 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Validation constants
+const MAX_TEXT_LENGTH = 100000;
+const MIN_TEXT_LENGTH = 50;
+
+// Safe error helper
+function createSafeError(
+  status: number,
+  publicMessage: string,
+  internalDetails?: unknown
+): Response {
+  if (internalDetails) {
+    console.error('[Extract Plan Items Error]', {
+      timestamp: new Date().toISOString(),
+      details: internalDetails,
+    });
+  }
+  return new Response(
+    JSON.stringify({ success: false, error: publicMessage }),
+    { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
 const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
 
 Your task is to identify plan items that an organization would track progress on over time. 
@@ -100,47 +122,15 @@ const extractPlanItemsSchema = {
       items: {
         type: "object",
         properties: {
-          name: {
-            type: "string",
-            description: "Concise name for the plan item (max 100 chars)"
-          },
-          levelType: {
-            type: "string",
-            enum: ["strategic_priority", "focus_area", "goal", "action_item"],
-            description: "The hierarchy level of this item"
-          },
-          description: {
-            type: "string",
-            description: "Brief description adding actionable context (optional)"
-          },
-          owner: {
-            type: "string",
-            description: "Person, role, or department responsible (if mentioned)"
-          },
-          metricTarget: {
-            type: "string",
-            description: "Target value if this is a measurable goal (e.g., '3%', '600', '$2M')"
-          },
-          metricUnit: {
-            type: "string",
-            enum: ["Number", "Dollar", "Percentage", "None"],
-            description: "Unit type for the metric (use 'None' if not applicable)"
-          },
-          startDate: {
-            type: "string",
-            description: "Start date in YYYY-MM-DD format (if mentioned)"
-          },
-          dueDate: {
-            type: "string",
-            description: "Due/target date in YYYY-MM-DD format (if mentioned)"
-          },
-          children: {
-            type: "array",
-            description: "Nested child items under this item",
-            items: {
-              $ref: "#/properties/items/items"
-            }
-          }
+          name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
+          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item"], description: "The hierarchy level of this item" },
+          description: { type: "string", description: "Brief description adding actionable context (optional)" },
+          owner: { type: "string", description: "Person, role, or department responsible (if mentioned)" },
+          metricTarget: { type: "string", description: "Target value if this is a measurable goal (e.g., '3%', '600', '$2M')" },
+          metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage", "None"], description: "Unit type for the metric (use 'None' if not applicable)" },
+          startDate: { type: "string", description: "Start date in YYYY-MM-DD format (if mentioned)" },
+          dueDate: { type: "string", description: "Due/target date in YYYY-MM-DD format (if mentioned)" },
+          children: { type: "array", description: "Nested child items under this item", items: { $ref: "#/properties/items/items" } }
         },
         required: ["name", "levelType"]
       }
@@ -162,37 +152,37 @@ const extractPlanItemsSchema = {
 };
 
 serve(async (req) => {
-  // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { documentText } = await req.json();
-
-    if (!documentText || typeof documentText !== "string") {
-      return new Response(
-        JSON.stringify({ success: false, error: "Missing or invalid documentText" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      console.error("LOVABLE_API_KEY is not configured");
-      return new Response(
-        JSON.stringify({ success: false, error: "AI service not configured" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'LOVABLE_API_KEY not set');
     }
 
-    console.log(`Processing document with ${documentText.length} characters`);
+    const body = await req.json();
+    const { documentText } = body;
 
-    // Truncate very long documents to avoid token limits
-    const maxChars = 100000;
-    const truncatedText = documentText.length > maxChars 
-      ? documentText.slice(0, maxChars) + "\n\n[Document truncated for processing]"
-      : documentText;
+    // Validate documentText exists and is a string
+    if (!documentText || typeof documentText !== "string") {
+      return createSafeError(400, "Document text is required and must be a string.");
+    }
+
+    const trimmedText = documentText.trim();
+
+    // Validate minimum length
+    if (trimmedText.length < MIN_TEXT_LENGTH) {
+      return createSafeError(400, `Document text too short. Minimum ${MIN_TEXT_LENGTH} characters required.`);
+    }
+
+    // Reject if too long (instead of silent truncation)
+    if (trimmedText.length > MAX_TEXT_LENGTH) {
+      return createSafeError(413, `Document text too long. Maximum ${MAX_TEXT_LENGTH} characters allowed.`);
+    }
+
+    console.log(`Processing document with ${trimmedText.length} characters`);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -204,7 +194,7 @@ serve(async (req) => {
         model: "google/gemini-3-flash-preview",
         messages: [
           { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
-          { role: "user", content: `Please analyze this strategic planning document and extract only the trackable plan items:\n\n${truncatedText}` }
+          { role: "user", content: `Please analyze this strategic planning document and extract only the trackable plan items:\n\n${trimmedText}` }
         ],
         tools: [{
           type: "function",
@@ -219,60 +209,30 @@ serve(async (req) => {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI gateway error:", response.status, errorText);
-      
       if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Rate limit exceeded. Please try again in a moment." }),
-          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return createSafeError(429, 'Service temporarily busy. Please try again in a moment.');
       }
       if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ success: false, error: "AI credits exhausted. Please add credits to continue." }),
-          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+        return createSafeError(503, 'Service temporarily unavailable. Please try again later.');
       }
-      
-      return new Response(
-        JSON.stringify({ success: false, error: "AI processing failed" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return createSafeError(500, 'Document processing failed. Please try again.', await response.text());
     }
 
     const aiResponse = await response.json();
-    
-    // Extract the tool call result
     const toolCall = aiResponse.choices?.[0]?.message?.tool_calls?.[0];
+    
     if (!toolCall || toolCall.function?.name !== "extract_plan_items") {
-      console.error("Unexpected AI response format:", JSON.stringify(aiResponse));
-      return new Response(
-        JSON.stringify({ success: false, error: "AI returned unexpected response format" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return createSafeError(500, 'Unable to extract plan items. Please try again.', 'Unexpected AI response format');
     }
 
     const extractedData = JSON.parse(toolCall.function.arguments);
-    
     console.log(`Extracted ${extractedData.items?.length || 0} top-level items`);
 
     return new Response(
-      JSON.stringify({
-        success: true,
-        data: extractedData
-      }),
+      JSON.stringify({ success: true, data: extractedData }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
-
   } catch (error) {
-    console.error("Extract plan items error:", error);
-    return new Response(
-      JSON.stringify({ 
-        success: false, 
-        error: error instanceof Error ? error.message : "Unknown error" 
-      }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return createSafeError(500, 'Unable to process document. Please try again.', error);
   }
 });
