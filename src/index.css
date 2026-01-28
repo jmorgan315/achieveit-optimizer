@@ -1,125 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* AchieveIt Brand Design System
-   Primary: Teal (#0A7B7D) 
-   Accent: Coral/Orange (#F26B3A)
-   Background: Light Mint/Seafoam
-   All colors MUST be HSL.
+/* AchieveIt Brand Design System 2023
+   Primary Green: #1caf7b (154, 59%, 43% HSL)
+   Primary Blue: #006697 (200, 100%, 30% HSL)
+   Logo Gray: #58595b (210, 2%, 35% HSL)
+   Paragraph Gray: #666666 (0, 0%, 40% HSL)
+   Orange CTA: #f6b267 (32, 89%, 68% HSL)
+   Secondary Light Green: #d2efe5 (158, 48%, 88% HSL)
+   Secondary Light Blue: #cce0ea (200, 40%, 86% HSL)
+   Font: Poppins
 */
 
 @layer base {
   :root {
-    /* AchieveIt Teal/Seafoam palette */
-    --background: 168 35% 96%;
-    --foreground: 192 45% 15%;
+    /* Light neutral background */
+    --background: 0 0% 98%;
+    --foreground: 210 2% 35%;
 
     --card: 0 0% 100%;
-    --card-foreground: 192 45% 15%;
+    --card-foreground: 210 2% 35%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 192 45% 15%;
+    --popover-foreground: 210 2% 35%;
 
-    /* AchieveIt Teal Primary */
-    --primary: 181 85% 27%;
+    /* AchieveIt Primary Green #1caf7b */
+    --primary: 154 59% 43%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 168 30% 92%;
-    --secondary-foreground: 181 85% 27%;
+    /* AchieveIt Secondary Blue #006697 */
+    --secondary: 200 40% 94%;
+    --secondary-foreground: 200 100% 30%;
 
-    --muted: 168 25% 94%;
-    --muted-foreground: 192 20% 40%;
+    --muted: 200 20% 96%;
+    --muted-foreground: 0 0% 40%;
 
-    --accent: 168 50% 88%;
-    --accent-foreground: 181 85% 27%;
+    --accent: 158 48% 92%;
+    --accent-foreground: 154 59% 38%;
 
-    /* AchieveIt Coral/Orange Accent for destructive/warning */
-    --destructive: 14 88% 59%;
+    /* AchieveIt Orange #f6b267 for CTAs/warnings */
+    --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 100%;
+    --warning: 32 89% 68%;
+    --warning-foreground: 0 0% 20%;
 
-    --success: 160 60% 40%;
+    --success: 154 59% 43%;
     --success-foreground: 0 0% 100%;
 
-    --info: 181 60% 45%;
+    --info: 200 100% 30%;
     --info-foreground: 0 0% 100%;
 
-    --border: 168 25% 88%;
-    --input: 168 25% 88%;
-    --ring: 181 85% 27%;
+    --border: 200 20% 90%;
+    --input: 200 20% 90%;
+    --ring: 154 59% 43%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 168 30% 97%;
-    --sidebar-foreground: 192 45% 15%;
-    --sidebar-primary: 181 85% 27%;
+    --sidebar-background: 0 0% 99%;
+    --sidebar-foreground: 210 2% 35%;
+    --sidebar-primary: 154 59% 43%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 168 30% 92%;
-    --sidebar-accent-foreground: 181 85% 27%;
-    --sidebar-border: 168 25% 88%;
-    --sidebar-ring: 181 85% 27%;
+    --sidebar-accent: 158 48% 94%;
+    --sidebar-accent-foreground: 154 59% 38%;
+    --sidebar-border: 200 20% 90%;
+    --sidebar-ring: 154 59% 43%;
 
-    /* AchieveIt specific accent colors */
-    --coral: 14 88% 59%;
-    --coral-foreground: 0 0% 100%;
-    --teal-light: 168 40% 85%;
-    --teal-dark: 181 85% 22%;
+    /* AchieveIt specific brand colors */
+    --achieveit-green: 154 59% 43%;
+    --achieveit-blue: 200 100% 30%;
+    --achieveit-gray: 210 2% 35%;
+    --achieveit-orange: 32 89% 68%;
+    --achieveit-light-green: 158 48% 88%;
+    --achieveit-light-blue: 200 40% 86%;
   }
 
   .dark {
-    --background: 192 45% 8%;
-    --foreground: 168 35% 96%;
+    --background: 210 10% 10%;
+    --foreground: 0 0% 95%;
 
-    --card: 192 45% 12%;
-    --card-foreground: 168 35% 96%;
+    --card: 210 10% 14%;
+    --card-foreground: 0 0% 95%;
 
-    --popover: 192 45% 12%;
-    --popover-foreground: 168 35% 96%;
+    --popover: 210 10% 14%;
+    --popover-foreground: 0 0% 95%;
 
-    --primary: 181 70% 45%;
+    --primary: 154 55% 48%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 192 40% 20%;
-    --secondary-foreground: 168 35% 96%;
+    --secondary: 200 30% 20%;
+    --secondary-foreground: 200 40% 80%;
 
-    --muted: 192 40% 18%;
-    --muted-foreground: 168 20% 65%;
+    --muted: 210 10% 20%;
+    --muted-foreground: 0 0% 65%;
 
-    --accent: 192 40% 20%;
-    --accent-foreground: 181 70% 45%;
+    --accent: 154 30% 20%;
+    --accent-foreground: 154 55% 60%;
 
-    --destructive: 14 70% 45%;
+    --destructive: 0 70% 45%;
     --destructive-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
+    --warning: 32 80% 55%;
     --warning-foreground: 0 0% 100%;
 
-    --success: 160 60% 40%;
+    --success: 154 55% 45%;
     --success-foreground: 0 0% 100%;
 
-    --info: 181 60% 50%;
+    --info: 200 70% 50%;
     --info-foreground: 0 0% 100%;
 
-    --border: 192 40% 20%;
-    --input: 192 40% 20%;
-    --ring: 181 70% 45%;
+    --border: 210 10% 25%;
+    --input: 210 10% 25%;
+    --ring: 154 55% 48%;
 
-    --sidebar-background: 192 45% 10%;
-    --sidebar-foreground: 168 35% 96%;
-    --sidebar-primary: 181 70% 45%;
+    --sidebar-background: 210 10% 12%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-primary: 154 55% 48%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 192 40% 18%;
-    --sidebar-accent-foreground: 181 70% 45%;
-    --sidebar-border: 192 40% 20%;
-    --sidebar-ring: 181 70% 45%;
+    --sidebar-accent: 154 30% 18%;
+    --sidebar-accent-foreground: 154 55% 60%;
+    --sidebar-border: 210 10% 25%;
+    --sidebar-ring: 154 55% 48%;
 
-    --coral: 14 70% 50%;
-    --coral-foreground: 0 0% 100%;
-    --teal-light: 181 50% 30%;
-    --teal-dark: 181 85% 35%;
+    --achieveit-green: 154 55% 48%;
+    --achieveit-blue: 200 70% 45%;
+    --achieveit-gray: 0 0% 65%;
+    --achieveit-orange: 32 80% 60%;
+    --achieveit-light-green: 154 30% 25%;
+    --achieveit-light-blue: 200 30% 25%;
   }
 }
 
@@ -130,17 +141,33 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    font-family: 'Poppins', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', system-ui, sans-serif;
   }
 }
 
 /* AchieveIt branded gradient backgrounds */
 @layer utilities {
   .bg-achieveit-gradient {
-    background: linear-gradient(135deg, hsl(168, 35%, 96%) 0%, hsl(168, 40%, 92%) 100%);
+    background: linear-gradient(135deg, hsl(158 48% 96%) 0%, hsl(200 40% 96%) 100%);
   }
   
   .bg-achieveit-hero {
-    background: linear-gradient(180deg, hsl(168, 40%, 94%) 0%, hsl(168, 35%, 97%) 100%);
+    background: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(158 48% 97%) 100%);
+  }
+  
+  .text-achieveit-blue {
+    color: hsl(200 100% 30%);
+  }
+  
+  .text-achieveit-green {
+    color: hsl(154 59% 43%);
+  }
+  
+  .text-achieveit-gray {
+    color: hsl(210 2% 35%);
   }
 }

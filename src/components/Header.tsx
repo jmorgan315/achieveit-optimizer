@@ -1,4 +1,5 @@
 import { ExternalLink } from 'lucide-react';
+import achieveitLogo from '@/assets/achieveit-logo.png';
 
 export function Header() {
   return (
@@ -11,10 +12,11 @@ export function Header() {
             rel="noopener noreferrer"
             className="flex items-center gap-3 hover:opacity-90 transition-opacity"
           >
-            <div className="flex items-center">
-              <span className="text-2xl font-semibold text-primary">achieve</span>
-              <span className="text-2xl font-semibold text-coral">it</span>
-            </div>
+            <img 
+              src={achieveitLogo} 
+              alt="AchieveIt - Let's actually do this." 
+              className="h-10 w-auto"
+            />
             <div className="hidden sm:block h-6 w-px bg-border mx-2" />
             <span className="hidden sm:block text-sm font-medium text-muted-foreground">
               Plan Import Assistant

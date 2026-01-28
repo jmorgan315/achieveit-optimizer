@@ -70,13 +70,13 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
         },
         // AchieveIt brand colors
-        coral: {
-          DEFAULT: "hsl(var(--coral))",
-          foreground: "hsl(var(--coral-foreground))",
-        },
-        teal: {
-          light: "hsl(var(--teal-light))",
-          dark: "hsl(var(--teal-dark))",
+        achieveit: {
+          green: "hsl(var(--achieveit-green))",
+          blue: "hsl(var(--achieveit-blue))",
+          gray: "hsl(var(--achieveit-gray))",
+          orange: "hsl(var(--achieveit-orange))",
+          "light-green": "hsl(var(--achieveit-light-green))",
+          "light-blue": "hsl(var(--achieveit-light-blue))",
         },
       },
       borderRadius: {
