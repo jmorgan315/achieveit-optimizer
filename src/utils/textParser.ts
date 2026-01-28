@@ -300,11 +300,17 @@ export function convertAIResponseToPlanItems(
   let itemId = 1;
 
   function processItem(
-    aiItem: AIExtractedItem,
+    aiItem: AIExtractedItem | null | undefined,
     parentId: string | null,
     orderPrefix: string,
     siblingIndex: number
   ): void {
+    // Skip null/undefined items
+    if (!aiItem || !aiItem.levelType) {
+      console.warn('Skipping invalid AI item:', aiItem);
+      return;
+    }
+
     const depth = LEVEL_TYPE_TO_DEPTH[aiItem.levelType] || 1;
     const levelName = levels.find(l => l.depth === depth)?.name || 
       aiItem.levelType.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -331,7 +337,7 @@ export function convertAIResponseToPlanItems(
       order,
       levelName,
       levelDepth: depth,
-      name: aiItem.name,
+      name: aiItem.name || 'Untitled Item',
       description: aiItem.description || '',
       status: 'Not Started',
       startDate: aiItem.startDate || '',
@@ -354,17 +360,25 @@ export function convertAIResponseToPlanItems(
 
     items.push(item);
 
-    // Process children recursively
-    if (aiItem.children && aiItem.children.length > 0) {
-      aiItem.children.forEach((child, idx) => {
-        processItem(child, id, order, idx);
+    // Process children recursively, filtering out null/invalid items
+    if (aiItem.children && Array.isArray(aiItem.children) && aiItem.children.length > 0) {
+      let validChildIndex = 0;
+      aiItem.children.forEach((child) => {
+        if (child && child.levelType) {
+          processItem(child, id, order, validChildIndex);
+          validChildIndex++;
+        }
       });
     }
   }
 
-  // Process all top-level items
-  aiResponse.items.forEach((item, idx) => {
-    processItem(item, null, '', idx);
+  // Process all top-level items, filtering out null/invalid items
+  let validTopLevelIndex = 0;
+  aiResponse.items.forEach((item) => {
+    if (item && item.levelType) {
+      processItem(item, null, '', validTopLevelIndex);
+      validTopLevelIndex++;
+    }
   });
 
   // Create person mappings
