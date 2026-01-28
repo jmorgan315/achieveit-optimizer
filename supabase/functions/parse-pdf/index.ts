@@ -1,32 +1,20 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import * as pdfjs from "https://esm.sh/pdfjs-dist@4.0.379/build/pdf.min.mjs";
+import { extractText } from "https://esm.sh/unpdf@0.12.1";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Use fake worker for Deno environment
-pdfjs.GlobalWorkerOptions.workerSrc = "";
-
 async function extractTextFromPdf(pdfBuffer: ArrayBuffer): Promise<{ text: string; pageCount: number }> {
-  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(pdfBuffer) });
-  const pdf = await loadingTask.promise;
+  const { text, totalPages } = await extractText(new Uint8Array(pdfBuffer));
   
-  const textParts: string[] = [];
-  
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-    const page = await pdf.getPage(pageNum);
-    const textContent = await page.getTextContent();
-    const pageText = textContent.items
-      .map((item: { str?: string }) => item.str || '')
-      .join(' ');
-    textParts.push(pageText);
-  }
+  // text is an array of strings (one per page), join them
+  const fullText = Array.isArray(text) ? text.join('\n\n') : text;
   
   return {
-    text: textParts.join('\n\n'),
-    pageCount: pdf.numPages
+    text: fullText,
+    pageCount: totalPages
   };
 }
 
