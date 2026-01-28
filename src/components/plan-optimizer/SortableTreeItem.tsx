@@ -1,5 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PlanItem } from '@/types/plan';
@@ -66,6 +67,15 @@ export function SortableTreeItem({
 
   const hasIssues = item.issues.length > 0;
 
+  const formatDateRange = () => {
+    if (!item.startDate && !item.dueDate) return null;
+    const start = item.startDate ? format(new Date(item.startDate), 'MMM d') : '?';
+    const due = item.dueDate ? format(new Date(item.dueDate), 'MMM d, yyyy') : '?';
+    return `${start} - ${due}`;
+  };
+
+  const dateRange = formatDateRange();
+
   return (
     <div
       ref={setNodeRef}
@@ -109,6 +119,22 @@ export function SortableTreeItem({
 
       <span className="font-medium flex-1 truncate">{item.name}</span>
 
+      {/* Inline date display */}
+      {dateRange && (
+        <span className="text-xs text-muted-foreground flex items-center gap-1">
+          <Calendar className="h-3 w-3" />
+          {dateRange}
+        </span>
+      )}
+
+      {/* Inline owner display */}
+      {item.assignedTo && (
+        <Badge variant="outline" className="text-xs font-normal max-w-[150px] truncate">
+          <User className="h-3 w-3 mr-1" />
+          {item.assignedTo}
+        </Badge>
+      )}
+
       {item.issues.map((issue, i) => (
         <Badge
           key={i}
@@ -135,6 +161,7 @@ export function SortableTreeItem({
         variant="ghost"
         size="icon"
         onClick={() => onEdit(item)}
+        title="Edit item details"
       >
         <Settings2 className="h-4 w-4" />
       </Button>
