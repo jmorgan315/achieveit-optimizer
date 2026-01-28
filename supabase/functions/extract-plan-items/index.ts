@@ -38,16 +38,18 @@ Many documents define their own hierarchy terms. DETECT and MAP these to our sta
 Common document terms → Standard mapping:
 - "Pillar", "Strategic Priority", "Theme", "Strategic Goal" → strategic_priority (depth 1)
 - "Objective", "Focus Area", "Goal Area", "Priority Area" → focus_area (depth 2)  
-- "Strategy", "Initiative", "Tactic", "Goal", "Program" → goal (depth 3)
-- "KPI", "Metric", "Measure", "Action", "Tollgate", "Key Result", "Target" → action_item (depth 4)
+- "Outcome KPI", "Goal", "Target", "Key Result" → goal (depth 3)
+- "Strategy", "Initiative", "Tactic", "Program", "Action" → action_item (depth 4)
+- "Strategy KPI", "Metric", "Measure", "Tollgate", "Sub-metric" → sub_action (depth 5)
 
 Look for definition sections like "Terms definitions:", "Key terms:", "Glossary" that explain the document's terminology.
 
 EXTRACT these types of items (IN HIERARCHICAL ORDER):
 1. strategic_priority - Top-level themes (e.g., "Economic Security", "Climate Resilience", "Equity & Access")
 2. focus_area - Mid-level groupings under priorities (e.g., "Housing Access", "Workforce Development")
-3. goal - Specific trackable outcomes with targets (e.g., "Increase affordable units by 3%")
-4. action_item - Concrete work items, KPIs, metrics (e.g., "Complete permit applications by Q2", "Increase by 10%")
+3. goal - Outcome KPIs with targets (e.g., "Increase affordable units by 3%")
+4. action_item - Strategies and initiatives (e.g., "Expand services", "Complete permit applications by Q2")
+5. sub_action - Strategy KPIs, metrics, tollgates (e.g., "Track monthly", "Increase by 10%")
 
 SKIP these (do NOT include as plan items):
 - Table of contents, page numbers, headers, footers
@@ -150,7 +152,7 @@ const extractPlanItemsSchema = {
         type: "object",
         properties: {
           name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
-          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item"], description: "The hierarchy level of this item" },
+          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"], description: "The hierarchy level of this item" },
           description: { type: "string", description: "Brief description adding actionable context (optional)" },
           owner: { type: "string", description: "Person, role, or department responsible (if mentioned)" },
           metricTarget: { type: "string", description: "Target value if this is a measurable goal (e.g., '3%', '600', '$2M')" },

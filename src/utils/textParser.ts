@@ -267,7 +267,7 @@ export interface ParseResult {
 // Types for AI extraction response
 export interface AIExtractedItem {
   name: string;
-  levelType: 'strategic_priority' | 'focus_area' | 'goal' | 'action_item';
+  levelType: 'strategic_priority' | 'focus_area' | 'goal' | 'action_item' | 'sub_action';
   description?: string;
   owner?: string;
   metricTarget?: string;
@@ -277,9 +277,19 @@ export interface AIExtractedItem {
   children?: AIExtractedItem[];
 }
 
+export interface AIDocumentTerminology {
+  columnHierarchy?: string[];
+  level1Term?: string;
+  level2Term?: string;
+  level3Term?: string;
+  level4Term?: string;
+  level5Term?: string;
+}
+
 export interface AIExtractionResponse {
   items: AIExtractedItem[];
   detectedLevels: { depth: number; name: string }[];
+  documentTerminology?: AIDocumentTerminology;
 }
 
 // Map AI level types to depth
@@ -288,6 +298,7 @@ const LEVEL_TYPE_TO_DEPTH: Record<string, number> = {
   'focus_area': 2,
   'goal': 3,
   'action_item': 4,
+  'sub_action': 5,
 };
 
 // Detect if AI response is flat (all items at root with no children)
@@ -330,9 +341,9 @@ function rebuildHierarchyFromFlatItems(
   const personSet = new Set<string>();
   let itemId = 1;
   
-  // Parent stack: tracks current parent at each depth level
-  const parentStack: Record<number, string | null> = { 1: null, 2: null, 3: null, 4: null };
-  
+  // Parent stack: tracks current parent at each depth level (now supports 5 levels)
+  const parentStack: Record<number, string | null> = { 1: null, 2: null, 3: null, 4: null, 5: null };
+
   flatItems.forEach((aiItem) => {
     if (!aiItem || !aiItem.levelType) return;
     
@@ -396,7 +407,7 @@ function rebuildHierarchyFromFlatItems(
     parentStack[depth] = id;
     
     // Clear deeper levels (they need new parents when we encounter a new item at this depth)
-    for (let d = depth + 1; d <= 4; d++) {
+    for (let d = depth + 1; d <= 5; d++) {
       parentStack[d] = null;
     }
   });

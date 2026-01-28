@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Brain, Eye } from 'lucide-react';
 import { SAMPLE_RAW_TEXT, PlanItem, PersonMapping, PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
 import { toast } from '@/hooks/use-toast';
-import { AIExtractionResponse, convertAIResponseToPlanItems } from '@/utils/textParser';
+import { AIExtractionResponse, AIDocumentTerminology, convertAIResponseToPlanItems } from '@/utils/textParser';
 import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
 
 interface FileUploadStepProps {
@@ -110,7 +110,16 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
           allItems = mergeVisionResults(allItems, result.data.items);
         }
         
-        if (result.data.detectedLevels?.length > 0 && detectedLevelsFromVision.length === 0) {
+        // Check for columnHierarchy in documentTerminology (first batch only)
+        if (batchIndex === 0 && result.data.documentTerminology?.columnHierarchy?.length > 0) {
+          // Build detected levels from column hierarchy order
+          detectedLevelsFromVision = result.data.documentTerminology.columnHierarchy.map(
+            (name: string, idx: number) => ({
+              depth: idx + 1,
+              name: name // Use actual column name like "Outcome KPI"
+            })
+          );
+        } else if (result.data.detectedLevels?.length > 0 && detectedLevelsFromVision.length === 0) {
           detectedLevelsFromVision = result.data.detectedLevels;
         }
 
