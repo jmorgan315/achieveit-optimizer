@@ -123,8 +123,8 @@ const extractPlanItemsSchema = {
           },
           metricUnit: {
             type: "string",
-            enum: ["Number", "Dollar", "Percentage", ""],
-            description: "Unit type for the metric"
+            enum: ["Number", "Dollar", "Percentage", "None"],
+            description: "Unit type for the metric (use 'None' if not applicable)"
           },
           startDate: {
             type: "string",
