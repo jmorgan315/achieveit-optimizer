@@ -1,149 +1,152 @@
 
+# Plan: Universal Document Structure Extraction with Vision AI
 
-# Plan: Date Validation Tweak and Drag-and-Drop Reordering
+## Overview
+The current extraction fails on documents with tabular layouts, graphics, or non-standard text positioning because the PDF text extraction only captures raw text (which is fragmented for complex layouts). The solution is to use a multimodal AI model that can "see" and understand document pages as images, enabling extraction from any document format.
 
-## Summary
+## Root Cause Analysis
+1. **Text extraction limitation**: The `unpdf` library extracts only embedded text strings, not content from images or complex visual layouts
+2. **Your document's structure**: The Strategic Vision PDF uses a table format where content is in a 5-column matrix (Pillar, Objective, Outcome KPIs, Strategies, Strategy KPIs)
+3. **Extracted text was corrupted**: Pages 2-9 show mostly "20 20 20..." fragments - the actual content is rendered as graphics/images, not selectable text
+4. **Custom terminology**: The document defines its own hierarchy (Pillar > Objective > Strategy > KPI > Tollgate) which the AI needs to recognize
 
-Two focused changes to improve the Plan Optimizer experience:
-
-1. **Date Validation**: Change from "both dates required" to "both or neither" - if one date is set, the other must be set too
-2. **Drag-and-Drop Reordering**: Add the ability to reorder items at the same level, not just nest them under other items
-
----
-
-## Change 1: Relaxed Date Validation
-
-### Current Behavior
-The Edit Item Dialog requires BOTH start and due dates to be filled before saving. The Save button is disabled unless both dates are set.
-
-### New Behavior
-- If neither date is set: Save is allowed
-- If only one date is set: Save is blocked with a message
-- If both dates are set: Validate that due date is on/after start date
-
-### File to Modify
-
-**`src/components/plan-optimizer/EditItemDialog.tsx`**
-
-Update the validation logic and messaging:
+## Solution Architecture
 
 ```text
-Current:
-  canSave = startDate && dueDate && dueDate >= startDate
-
-New:
-  bothDatesEmpty = !startDate && !dueDate
-  bothDatesFilled = startDate && dueDate
-  datesValid = bothDatesFilled ? dueDate >= startDate : true
-  canSave = (bothDatesEmpty || (bothDatesFilled && datesValid))
+                      +------------------+
+                      |   User Uploads   |
+                      |       PDF        |
+                      +--------+---------+
+                               |
+               +---------------+---------------+
+               |                               |
+      +--------v--------+             +--------v--------+
+      |   parse-pdf     |             |   NEW: Vision   |
+      | (text extract)  |             |   AI Analysis   |
+      +--------+--------+             +--------+--------+
+               |                               |
+               |                               |
+      +--------v--------+                      |
+      | Has meaningful  |                      |
+      | text content?   |                      |
+      +--------+--------+                      |
+               |                               |
+          +----+----+                          |
+          |         |                          |
+         Yes       No                          |
+          |         |                          |
+          |    +----v----+                     |
+          |    | Fallback+---------------------+
+          |    +---------+
+          |
+      +---v---------------+
+      | extract-plan-items|
+      | (enhanced prompt) |
+      +-------------------+
 ```
 
-Also update:
-- Remove the `*` required indicators from date labels
-- Update the description text to explain the "both or neither" rule
-- Update validation messages to reflect the new logic
+## Implementation Tasks
 
----
+### Task 1: Create New Vision-Based Extraction Edge Function
+**File**: `supabase/functions/extract-plan-vision/index.ts`
 
-## Change 2: Drag-and-Drop Reordering
+Create a new edge function that:
+- Accepts base64-encoded page images from the frontend
+- Uses Gemini 2.5 Pro (multimodal) to analyze page images
+- Extracts structured plan items from visual content
+- Handles tabular data, infographics, and custom document layouts
 
-### Current Behavior
-When dragging an item over another item, it nests the dragged item as a child of the target. There's no way to reorder items at the same level (e.g., move item 1.2 before 1.1).
+Key prompt elements:
+- Detect document-specific terminology from definition pages
+- Extract items from tables, columns, and matrices
+- Identify hierarchy from visual position, indentation, or explicit labels
+- Handle multiple pages with continuity tracking
 
-### New Behavior
-The UI will show drop indicators between items (not just on items) so users can:
-- **Drop ON an item**: Nest the dragged item as a child (existing behavior)
-- **Drop BETWEEN items**: Reorder the dragged item within its siblings
+### Task 2: Update Frontend to Capture Page Images
+**File**: `src/components/steps/FileUploadStep.tsx`
 
-### Implementation Approach
+Modify the file upload logic to:
+1. First try text extraction with `parse-pdf`
+2. Detect if extracted text is meaningful (not fragmented/corrupted)
+3. If text is poor quality, use a PDF-to-image library or request page screenshots
+4. Send page images to the new vision extraction endpoint
 
-Use `@dnd-kit/sortable` with drop zones that detect whether the user is hovering on the top/bottom edge of an item (reorder) or the center (nest).
+Add a quality detection function:
+```typescript
+function isTextQualityPoor(text: string): boolean {
+  // Check for repetitive patterns like "20 20 20"
+  // Check for low unique word ratio
+  // Check for missing expected content
+}
+```
 
-### Files to Modify
+### Task 3: Enhance AI Extraction Prompt for Document Flexibility
+**File**: `supabase/functions/extract-plan-items/index.ts`
 
-**`src/components/steps/PlanOptimizerStep.tsx`**
+Update the system prompt to:
+- Explicitly detect document-defined terminology (Pillar, Objective, etc.)
+- Map custom terms to the standard hierarchy levels
+- Handle both hierarchical AND tabular structures in text
+- Be more aggressive about extracting items even from partial text
 
-1. Add state to track drop position (`'before' | 'after' | 'inside' | null`)
-2. Update `handleDragOver` to calculate drop position based on mouse Y position relative to the hovered item
-3. Update `handleDragEnd` to:
-   - If drop position is `'inside'`: Use existing `onMoveItem` to nest
-   - If drop position is `'before'` or `'after'`: Call new `onReorderSiblings` to reorder
-
-**`src/components/plan-optimizer/SortableTreeItem.tsx`**
-
-1. Add visual indicators for drop zones:
-   - Top edge highlight for "drop before"
-   - Bottom edge highlight for "drop after"
-   - Center/full highlight for "nest inside"
-2. Pass `dropPosition` prop to show appropriate indicator
-
-**`src/pages/Index.tsx`**
-
-1. Pass `reorderSiblings` function to `PlanOptimizerStep` as `onReorderSiblings` prop
-
----
-
-## Technical Details
-
-### Drop Position Detection
-
+Add to prompt:
 ```text
-function getDropPosition(event, element):
-  rect = element.getBoundingClientRect()
-  mouseY = event.clientY
-  
-  topThreshold = rect.top + rect.height * 0.25
-  bottomThreshold = rect.bottom - rect.height * 0.25
-  
-  if mouseY < topThreshold:
-    return 'before'
-  else if mouseY > bottomThreshold:
-    return 'after'
-  else:
-    return 'inside'
+DOCUMENT TERMINOLOGY DETECTION:
+Look for definition sections like "Terms definitions:", "Key terms:", etc.
+Map the document's terms to standard hierarchy:
+- If document defines "Pillar" = map to strategic_priority
+- If document defines "Objective" = map to focus_area
+- If document defines "Strategy/Tactic" = map to goal
+- If document defines "KPI/Metric/Measure" = map to action_item
 ```
 
-### Reorder Logic
+### Task 4: Add PDF Page Image Extraction
+**File**: `supabase/functions/parse-pdf/index.ts`
 
-When dropping "before" or "after" an item:
-1. Get the target item's parent (this determines which sibling group we're reordering)
-2. If dragged item has a different parent, first move it to the target's parent
-3. Calculate the new index based on the target's position and drop direction
-4. Call `reorderSiblings(draggedItemId, newIndex)`
+Enhance the parse-pdf function to:
+- Optionally render PDF pages as images using pdf.js or similar
+- Return both extracted text AND base64 page images
+- Let the frontend decide which extraction method to use based on text quality
 
-### Visual Indicators
+### Task 5: Update Type Definitions
+**File**: `src/utils/textParser.ts`
 
-```text
-Drop Before:  [===== blue line =====]
-              [      Item Row      ]
+Add new types and handlers for:
+- Vision extraction response format
+- Document terminology mapping
+- Tabular data conversion to hierarchy
 
-Drop Inside:  [  light blue bg     ]
-              [      Item Row      ]
+## Technical Considerations
 
-Drop After:   [      Item Row      ]
-              [===== blue line =====]
-```
+### AI Model Selection
+- **Text extraction**: `google/gemini-3-flash-preview` (fast, cost-effective)
+- **Vision extraction**: `google/gemini-2.5-pro` (best multimodal, handles complex layouts)
 
----
+### Token Limits and Pagination
+- For multi-page documents, process 2-3 pages at a time
+- Maintain context about previous pages (e.g., "continuing from Pillar: Equity & Access")
+- Merge results across page batches
 
-## Files Summary
+### Error Handling
+- Graceful fallback from vision to text extraction
+- Clear user feedback when document cannot be parsed
+- Suggest document format improvements if extraction fails
 
-| File | Changes |
-|------|---------|
-| `src/components/plan-optimizer/EditItemDialog.tsx` | Update date validation: "both or neither" rule, update messaging |
-| `src/components/steps/PlanOptimizerStep.tsx` | Add drop position detection, update drag handlers for reorder vs nest |
-| `src/components/plan-optimizer/SortableTreeItem.tsx` | Add drop zone indicators (before/after lines, inside highlight) |
-| `src/pages/Index.tsx` | Pass `reorderSiblings` handler to `PlanOptimizerStep` |
+## File Changes Summary
 
----
+| File | Change Type | Description |
+|------|-------------|-------------|
+| `supabase/functions/extract-plan-vision/index.ts` | Create | New vision-based extraction endpoint |
+| `supabase/functions/extract-plan-items/index.ts` | Modify | Enhanced prompt for document flexibility |
+| `supabase/functions/parse-pdf/index.ts` | Modify | Add page image rendering capability |
+| `src/components/steps/FileUploadStep.tsx` | Modify | Add text quality detection, vision fallback |
+| `src/utils/textParser.ts` | Modify | Add vision response handler |
+| `src/types/plan.ts` | Modify | Add types for vision extraction |
 
 ## Expected Outcome
-
-1. **Date Editing**: Users can save items with no dates, or with both dates set. If only one date is entered, they'll see a clear message explaining both are needed.
-
-2. **Drag and Drop**: 
-   - Hovering near the top edge of an item shows a blue line above it (drop before)
-   - Hovering near the bottom edge shows a blue line below it (drop after)
-   - Hovering in the center highlights the item (nest inside)
-   - The reordering respects the hierarchy - items reorder within their sibling group
-
+After implementation, the application will:
+1. Successfully extract plan items from the "Strategic Vision" PDF (and similar documents)
+2. Detect document-specific terminology (Pillar, Objective, Strategy, KPI)
+3. Convert tabular/matrix layouts into proper hierarchical structures
+4. Fall back gracefully between extraction methods
+5. Handle any document format regardless of visual complexity
