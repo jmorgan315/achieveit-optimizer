@@ -5,15 +5,15 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items.
+const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
 
 Your task is to identify plan items that an organization would track progress on over time. 
 
-EXTRACT these types of items:
-- Strategic Priorities / Pillars (top-level themes like "Economic Security", "Climate Resilience")
-- Focus Areas / Objectives (mid-level groupings under priorities)
-- Goals / Initiatives / KPIs (specific trackable outcomes with targets)
-- Action Items / Tasks (concrete work items)
+EXTRACT these types of items (IN HIERARCHICAL ORDER):
+1. strategic_priority - Top-level themes (e.g., "Economic Security", "Climate Resilience") - ONLY these at root
+2. focus_area - Mid-level groupings under priorities (e.g., "Housing Access", "Workforce Development")
+3. goal - Specific trackable outcomes with targets (e.g., "Increase affordable units by 3%")
+4. action_item - Concrete work items (e.g., "Complete permit applications by Q2")
 
 SKIP these (do NOT include as plan items):
 - Table of contents, page numbers, headers, footers
@@ -23,58 +23,73 @@ SKIP these (do NOT include as plan items):
 - Image captions, chart titles, infographic descriptions
 - Achievements from previous years (unless they set baselines)
 - General descriptions without actionable outcomes
-- Repeated content or summaries
 
-For each item you extract:
-1. Identify its level in the hierarchy (strategic_priority > focus_area > goal > action_item)
-2. Extract any metrics, targets, or KPIs mentioned
-3. Extract any owners, departments, or responsible parties mentioned
-4. Extract any dates or timeframes mentioned
-5. Keep the name concise but descriptive
-6. Include relevant description if it adds actionable context
+=== CRITICAL HIERARCHY RULES (MUST FOLLOW) ===
 
-IMPORTANT: Be selective. A 30-page strategic plan should yield 15-40 trackable items, not 100+.
-If something reads like narrative context rather than a trackable goal, skip it.
+1. ROOT LEVEL: ONLY strategic_priority items. If you find yourself putting focus_area, goal, or action_item at root, STOP and restructure.
 
-CRITICAL HIERARCHY RULES:
-1. The root level should ONLY contain Strategic Priorities (top-level themes). Typically 3-7 items.
-2. Focus Areas MUST be nested as children of Strategic Priorities.
-3. Goals MUST be nested as children of Focus Areas or Strategic Priorities.
-4. Action Items MUST be nested as children of Goals or Focus Areas.
-5. NEVER return goals or action items at the root level - they must be nested under a parent.
+2. EVERY ITEM MUST USE children[] FOR NESTING:
+   - strategic_priority -> children: [focus_area items]
+   - focus_area -> children: [goal items]
+   - goal -> children: [action_item items]
 
-BULLET POINT HANDLING:
-- If you see a list of bullets following a section header (e.g., "The county will:"), ALL bullets become children of that section.
-- Bullets prefixed with "•", "-", "*", "→", or similar should ALL be captured as the same level type.
-- If bullets appear at the same indent level, treat them ALL as the same item type (e.g., all as goals or all as action_items).
-- Do NOT skip bullet points - capture every actionable bullet under a heading.
-- Example: "For its part, the county will:" followed by 5 bullets = 5 goals/action_items under that focus area.
+3. VALIDATION BEFORE RETURNING:
+   - Count root items: Should be 3-7 strategic priorities MAXIMUM
+   - If you have >8 root items, your nesting is WRONG
+   - Each strategic_priority SHOULD have focus_area children
+   - Goals should be nested under focus_areas, not at root
 
-NESTING EXAMPLES:
-Good structure:
+=== BULLET POINT HANDLING (CRITICAL) ===
+
+When you see bullet points under a heading:
+- ALL bullets at the same indent level = SAME levelType
+- Bullets under "Housing Access" heading = children of that focus_area
+- Example: "The county will:" followed by 5 bullets = 5 goals nested under that section
+
+DO NOT:
+- Put bullets as siblings at root level
+- Skip bullet points
+- Mix bullet types (if 5 bullets, all should be same levelType)
+
+=== CORRECT NESTING EXAMPLE ===
+
+INPUT:
+"Economic Security and Social Stability
+  Housing Access and Affordability
+    • Increase affordable units by 3%
+    • Support inclusionary housing
+    • Invest in mobile home parks"
+
+OUTPUT:
 {
-  "name": "Economic Security",
+  "name": "Economic Security and Social Stability",
   "levelType": "strategic_priority",
   "children": [
     {
-      "name": "Housing Access",
-      "levelType": "focus_area", 
+      "name": "Housing Access and Affordability",
+      "levelType": "focus_area",
       "children": [
         { "name": "Increase affordable units by 3%", "levelType": "goal" },
-        { "name": "Support inclusionary housing initiatives", "levelType": "goal" },
+        { "name": "Support inclusionary housing", "levelType": "goal" },
         { "name": "Invest in mobile home parks", "levelType": "goal" }
       ]
     }
   ]
 }
 
-Bad structure (DO NOT DO THIS):
+=== WRONG (FLAT) OUTPUT - DO NOT DO THIS ===
 [
   { "name": "Economic Security", "levelType": "strategic_priority" },
   { "name": "Housing Access", "levelType": "focus_area" },
-  { "name": "Increase affordable units by 3%", "levelType": "goal" }
+  { "name": "Increase affordable units", "levelType": "goal" }
 ]
-// BAD: Items are flat instead of nested!`;
+// WRONG: Everything is at root level with no children arrays!
+
+=== SELF-CHECK BEFORE RESPONDING ===
+1. Are there more than 7 items at root? → Restructure into nested hierarchy
+2. Do root items have empty children arrays? → Move subsequent items into children
+3. Are focus_area items at root? → They should be children of strategic_priority
+4. Are goal items at root? → They should be children of focus_area or strategic_priority`;
 
 const extractPlanItemsSchema = {
   type: "object",

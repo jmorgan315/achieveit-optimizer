@@ -191,16 +191,23 @@ export function usePlanState() {
   };
 }
 
+// Recalculate orders and assign level names based on actual tree position
 function recalculateOrders(items: PlanItem[], levels: PlanLevel[]): PlanItem[] {
   const result: PlanItem[] = [];
 
-  function processLevel(parentId: string | null, prefix: string, depth: number) {
+  function processLevel(parentId: string | null, prefix: string, treeDepth: number) {
     const children = items.filter((i) => i.parentId === parentId);
     children.forEach((child, index) => {
       const order = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
-      const levelName = levels.find((l) => l.depth === depth)?.name || child.levelName;
-      result.push({ ...child, order, levelDepth: depth, levelName });
-      processLevel(child.id, order, depth + 1);
+      // Assign level name based on actual tree depth, not the original levelDepth
+      const levelName = levels.find((l) => l.depth === treeDepth)?.name || `Level ${treeDepth}`;
+      result.push({ 
+        ...child, 
+        order, 
+        levelDepth: treeDepth, 
+        levelName 
+      });
+      processLevel(child.id, order, treeDepth + 1);
     });
   }
 

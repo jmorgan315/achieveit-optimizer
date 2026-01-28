@@ -290,20 +290,195 @@ const LEVEL_TYPE_TO_DEPTH: Record<string, number> = {
   'action_item': 4,
 };
 
+// Detect if AI response is flat (all items at root with no children)
+function isFlatResponse(items: AIExtractedItem[]): boolean {
+  if (items.length <= 3) return false; // Small number could be correct
+  
+  // Check if most items have no children and are all the same type
+  const typeCounts: Record<string, number> = {};
+  let itemsWithChildren = 0;
+  
+  items.forEach(item => {
+    if (item?.levelType) {
+      typeCounts[item.levelType] = (typeCounts[item.levelType] || 0) + 1;
+    }
+    if (item?.children && item.children.length > 0) {
+      itemsWithChildren++;
+    }
+  });
+  
+  // If >8 items at root and few have children, it's flat
+  if (items.length > 8 && itemsWithChildren < items.length * 0.3) {
+    return true;
+  }
+  
+  // If most items are the same type (e.g., all focus_area), it's flat
+  const maxTypeCount = Math.max(...Object.values(typeCounts));
+  if (maxTypeCount > items.length * 0.7) {
+    return true;
+  }
+  
+  return false;
+}
+
+// Rebuild hierarchy from flat AI response using levelType ordering
+function rebuildHierarchyFromFlatItems(
+  flatItems: AIExtractedItem[],
+  levels: PlanLevel[]
+): PlanItem[] {
+  const items: PlanItem[] = [];
+  const personSet = new Set<string>();
+  let itemId = 1;
+  
+  // Parent stack: tracks current parent at each depth level
+  const parentStack: Record<number, string | null> = { 1: null, 2: null, 3: null, 4: null };
+  
+  flatItems.forEach((aiItem) => {
+    if (!aiItem || !aiItem.levelType) return;
+    
+    const depth = LEVEL_TYPE_TO_DEPTH[aiItem.levelType] || 1;
+    
+    // Find parent from the level above
+    let parentId: string | null = null;
+    for (let d = depth - 1; d >= 1; d--) {
+      if (parentStack[d]) {
+        parentId = parentStack[d];
+        break;
+      }
+    }
+    
+    const id = String(itemId++);
+    
+    // Track owner
+    if (aiItem.owner) {
+      personSet.add(aiItem.owner);
+    }
+    
+    // Build issues list
+    const issues: PlanItem['issues'] = [];
+    if (!aiItem.owner) {
+      issues.push({ type: 'missing-owner', message: 'Missing assigned owner email' });
+    }
+    if (!aiItem.startDate || !aiItem.dueDate) {
+      issues.push({ type: 'missing-dates', message: 'Missing start or due date' });
+    }
+    
+    const item: PlanItem = {
+      id,
+      order: '', // Will be recalculated
+      levelName: levels.find(l => l.depth === depth)?.name || 
+        aiItem.levelType.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      levelDepth: depth,
+      name: aiItem.name || 'Untitled Item',
+      description: aiItem.description || '',
+      status: 'Not Started',
+      startDate: aiItem.startDate || '',
+      dueDate: aiItem.dueDate || '',
+      assignedTo: aiItem.owner || '',
+      members: [],
+      administrators: [],
+      updateFrequency: 'Monthly',
+      metricDescription: aiItem.metricTarget ? 'Track to Target' : '',
+      metricUnit: aiItem.metricUnit || '',
+      metricRollup: 'Manual',
+      metricBaseline: '',
+      metricTarget: aiItem.metricTarget || '',
+      currentValue: '',
+      tags: [],
+      parentId,
+      children: [],
+      issues,
+    };
+    
+    items.push(item);
+    
+    // Set this item as potential parent for deeper items
+    parentStack[depth] = id;
+    
+    // Clear deeper levels (they need new parents when we encounter a new item at this depth)
+    for (let d = depth + 1; d <= 4; d++) {
+      parentStack[d] = null;
+    }
+  });
+  
+  return items;
+}
+
+// Calculate tree depth based on parent chain
+function getTreeDepth(itemId: string, items: PlanItem[]): number {
+  let depth = 1;
+  let current = items.find(i => i.id === itemId);
+  
+  while (current?.parentId) {
+    depth++;
+    current = items.find(i => i.id === current!.parentId);
+    if (depth > 10) break; // Safety limit
+  }
+  
+  return depth;
+}
+
+// Recalculate orders and level names based on actual tree structure
+function recalculateItemsWithTreeDepth(items: PlanItem[], levels: PlanLevel[]): PlanItem[] {
+  const result: PlanItem[] = [];
+  
+  function processLevel(parentId: string | null, prefix: string, expectedDepth: number) {
+    const children = items.filter(i => i.parentId === parentId);
+    children.forEach((child, index) => {
+      const order = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
+      const levelName = levels.find(l => l.depth === expectedDepth)?.name || `Level ${expectedDepth}`;
+      
+      result.push({ 
+        ...child, 
+        order, 
+        levelDepth: expectedDepth,
+        levelName 
+      });
+      
+      processLevel(child.id, order, expectedDepth + 1);
+    });
+  }
+  
+  processLevel(null, '', 1);
+  return result;
+}
+
 // Convert AI extraction response to PlanItems
 export function convertAIResponseToPlanItems(
   aiResponse: AIExtractionResponse,
   levels: PlanLevel[]
 ): ParseResult {
-  const items: PlanItem[] = [];
   const personSet = new Set<string>();
   let itemId = 1;
+  
+  // Check if AI returned a flat response
+  if (isFlatResponse(aiResponse.items)) {
+    console.log('Detected flat AI response, rebuilding hierarchy from levelType ordering');
+    const rebuiltItems = rebuildHierarchyFromFlatItems(aiResponse.items, levels);
+    const finalItems = recalculateItemsWithTreeDepth(rebuiltItems, levels);
+    
+    // Extract person mappings
+    finalItems.forEach(item => {
+      if (item.assignedTo) personSet.add(item.assignedTo);
+    });
+    
+    const personMappings: PersonMapping[] = Array.from(personSet).map((name, idx) => ({
+      id: String(idx + 1),
+      foundName: name,
+      email: '',
+      isResolved: false,
+    }));
+    
+    return { items: finalItems, personMappings };
+  }
+  
+  // Process properly nested AI response
+  const items: PlanItem[] = [];
 
   function processItem(
     aiItem: AIExtractedItem | null | undefined,
     parentId: string | null,
-    orderPrefix: string,
-    siblingIndex: number
+    treeDepth: number
   ): void {
     // Skip null/undefined items
     if (!aiItem || !aiItem.levelType) {
@@ -311,11 +486,10 @@ export function convertAIResponseToPlanItems(
       return;
     }
 
-    const depth = LEVEL_TYPE_TO_DEPTH[aiItem.levelType] || 1;
-    const levelName = levels.find(l => l.depth === depth)?.name || 
+    // Use tree depth (based on nesting position) instead of AI's levelType
+    const levelName = levels.find(l => l.depth === treeDepth)?.name || 
       aiItem.levelType.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
     
-    const order = orderPrefix ? `${orderPrefix}.${siblingIndex + 1}` : `${siblingIndex + 1}`;
     const id = String(itemId++);
 
     // Track owners
@@ -334,9 +508,9 @@ export function convertAIResponseToPlanItems(
 
     const item: PlanItem = {
       id,
-      order,
+      order: '', // Will be recalculated
       levelName,
-      levelDepth: depth,
+      levelDepth: treeDepth,
       name: aiItem.name || 'Untitled Item',
       description: aiItem.description || '',
       status: 'Not Started',
@@ -360,26 +534,25 @@ export function convertAIResponseToPlanItems(
 
     items.push(item);
 
-    // Process children recursively, filtering out null/invalid items
+    // Process children recursively at next tree depth
     if (aiItem.children && Array.isArray(aiItem.children) && aiItem.children.length > 0) {
-      let validChildIndex = 0;
       aiItem.children.forEach((child) => {
         if (child && child.levelType) {
-          processItem(child, id, order, validChildIndex);
-          validChildIndex++;
+          processItem(child, id, treeDepth + 1);
         }
       });
     }
   }
 
-  // Process all top-level items, filtering out null/invalid items
-  let validTopLevelIndex = 0;
+  // Process all top-level items at tree depth 1
   aiResponse.items.forEach((item) => {
     if (item && item.levelType) {
-      processItem(item, null, '', validTopLevelIndex);
-      validTopLevelIndex++;
+      processItem(item, null, 1);
     }
   });
+
+  // Recalculate order strings based on hierarchy
+  const finalItems = recalculateItemsWithTreeDepth(items, levels);
 
   // Create person mappings
   const personMappings: PersonMapping[] = Array.from(personSet).map((name, idx) => ({
@@ -389,7 +562,7 @@ export function convertAIResponseToPlanItems(
     isResolved: false,
   }));
 
-  return { items, personMappings };
+  return { items: finalItems, personMappings };
 }
 
 export function parseTextToPlanItems(rawText: string, levels: PlanLevel[]): ParseResult {
