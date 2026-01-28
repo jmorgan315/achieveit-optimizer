@@ -274,7 +274,7 @@ export interface AIExtractedItem {
   metricUnit?: 'Number' | 'Dollar' | 'Percentage' | '';
   startDate?: string;
   dueDate?: string;
-  children?: AIExtractedItem[];
+  children?: AIExtractedItem[] | string[]; // Can be objects or strings (malformed AI response)
 }
 
 export interface AIDocumentTerminology {
@@ -290,6 +290,93 @@ export interface AIExtractionResponse {
   items: AIExtractedItem[];
   detectedLevels: { depth: number; name: string }[];
   documentTerminology?: AIDocumentTerminology;
+}
+
+// Clean corrupted terminology (e.g., "6130Pillar" -> "Pillar")
+function cleanTerminology(term: string): string {
+  if (!term) return term;
+  // Remove leading numbers
+  return term.replace(/^\d+/, '').trim();
+}
+
+// Normalize AI response - fix malformed children arrays and clean terminology
+export function normalizeAIResponse(response: AIExtractionResponse): AIExtractionResponse {
+  // Clean column hierarchy
+  if (response.documentTerminology?.columnHierarchy) {
+    response.documentTerminology.columnHierarchy = response.documentTerminology.columnHierarchy.map(cleanTerminology);
+  }
+  
+  // Clean level terms
+  if (response.documentTerminology) {
+    if (response.documentTerminology.level1Term) {
+      response.documentTerminology.level1Term = cleanTerminology(response.documentTerminology.level1Term);
+    }
+    if (response.documentTerminology.level2Term) {
+      response.documentTerminology.level2Term = cleanTerminology(response.documentTerminology.level2Term);
+    }
+    if (response.documentTerminology.level3Term) {
+      response.documentTerminology.level3Term = cleanTerminology(response.documentTerminology.level3Term);
+    }
+    if (response.documentTerminology.level4Term) {
+      response.documentTerminology.level4Term = cleanTerminology(response.documentTerminology.level4Term);
+    }
+    if (response.documentTerminology.level5Term) {
+      response.documentTerminology.level5Term = cleanTerminology(response.documentTerminology.level5Term);
+    }
+  }
+  
+  // Clean detected levels
+  if (response.detectedLevels) {
+    response.detectedLevels = response.detectedLevels.map(level => ({
+      ...level,
+      name: cleanTerminology(level.name)
+    }));
+  }
+  
+  // Fix string children in items (convert to proper objects if they're strings)
+  response.items = normalizeItemChildren(response.items);
+  
+  return response;
+}
+
+// Recursively normalize item children - if children are strings, convert to objects
+function normalizeItemChildren(items: AIExtractedItem[]): AIExtractedItem[] {
+  return items.map(item => {
+    if (!item) return item;
+    
+    if (item.children && Array.isArray(item.children) && item.children.length > 0) {
+      // Check if children are strings (malformed response)
+      const firstChild = item.children[0];
+      if (typeof firstChild === 'string') {
+        // Convert string children to objects
+        const stringChildren = item.children as unknown as string[];
+        item.children = stringChildren.map(childName => {
+          // Determine levelType based on parent's levelType
+          const childLevelType = getNextLevelType(item.levelType);
+          return {
+            name: childName,
+            levelType: childLevelType,
+            children: []
+          } as AIExtractedItem;
+        });
+      } else {
+        // Recursively normalize nested children
+        item.children = normalizeItemChildren(item.children as AIExtractedItem[]);
+      }
+    }
+    
+    return item;
+  });
+}
+
+// Get the next level type in the hierarchy
+function getNextLevelType(currentType: string): AIExtractedItem['levelType'] {
+  const hierarchy: AIExtractedItem['levelType'][] = ['strategic_priority', 'focus_area', 'goal', 'action_item', 'sub_action'];
+  const currentIndex = hierarchy.indexOf(currentType as AIExtractedItem['levelType']);
+  if (currentIndex === -1 || currentIndex >= hierarchy.length - 1) {
+    return 'sub_action';
+  }
+  return hierarchy[currentIndex + 1];
 }
 
 // Map AI level types to depth
@@ -459,13 +546,16 @@ export function convertAIResponseToPlanItems(
   aiResponse: AIExtractionResponse,
   levels: PlanLevel[]
 ): ParseResult {
+  // First normalize the AI response to fix any malformed data
+  const normalizedResponse = normalizeAIResponse(aiResponse);
+  
   const personSet = new Set<string>();
   let itemId = 1;
   
   // Check if AI returned a flat response
-  if (isFlatResponse(aiResponse.items)) {
+  if (isFlatResponse(normalizedResponse.items)) {
     console.log('Detected flat AI response, rebuilding hierarchy from levelType ordering');
-    const rebuiltItems = rebuildHierarchyFromFlatItems(aiResponse.items, levels);
+    const rebuiltItems = rebuildHierarchyFromFlatItems(normalizedResponse.items, levels);
     const finalItems = recalculateItemsWithTreeDepth(rebuiltItems, levels);
     
     // Extract person mappings
@@ -556,7 +646,7 @@ export function convertAIResponseToPlanItems(
   }
 
   // Process all top-level items at tree depth 1
-  aiResponse.items.forEach((item) => {
+  normalizedResponse.items.forEach((item) => {
     if (item && item.levelType) {
       processItem(item, null, 1);
     }

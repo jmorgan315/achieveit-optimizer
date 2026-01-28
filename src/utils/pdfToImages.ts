@@ -24,7 +24,7 @@ export interface PDFRenderResult {
 export async function renderPDFToImages(
   file: File,
   maxPages: number = 20,
-  scale: number = 1.5
+  scale: number = 1.0
 ): Promise<PDFRenderResult> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -54,8 +54,8 @@ export async function renderPDFToImages(
       viewport: viewport,
     }).promise;
 
-    // Convert to data URL (JPEG for smaller size)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    // Convert to data URL (JPEG for smaller size, lower quality for faster transfer)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
 
     images.push({
       pageNumber: pageNum,

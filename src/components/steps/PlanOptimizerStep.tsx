@@ -1,9 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
   DndContext,
   DragEndEvent,
   DragOverEvent,
   DragStartEvent,
+  DragMoveEvent,
   closestCenter,
   KeyboardSensor,
   PointerSensor,
@@ -82,6 +83,9 @@ export function PlanOptimizerStep({
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
+  
+  // Track live pointer position for accurate drop detection
+  const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
   // AI suggestion state
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
@@ -186,20 +190,38 @@ export function PlanOptimizerStep({
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
+    // Initialize pointer position from activator event
+    const mouseEvent = event.activatorEvent as MouseEvent;
+    if (mouseEvent) {
+      pointerPositionRef.current = { x: mouseEvent.clientX, y: mouseEvent.clientY };
+    }
   };
 
-  const getDropPosition = useCallback((event: DragOverEvent): DropPosition => {
-    if (!event.over) return null;
+  // Track live pointer position during drag
+  const handleDragMove = (event: DragMoveEvent) => {
+    // Use delta to calculate current position from initial position
+    const mouseEvent = event.activatorEvent as MouseEvent;
+    if (mouseEvent && event.delta) {
+      pointerPositionRef.current = {
+        x: mouseEvent.clientX + event.delta.x,
+        y: mouseEvent.clientY + event.delta.y,
+      };
+    }
+  };
+
+  const getDropPosition = useCallback((): DropPosition => {
+    const activeIdValue = activeId;
+    if (!activeIdValue || !dropInfo?.itemId) return null;
     
-    const overElement = document.querySelector(`[data-id="${event.over.id}"]`);
+    const overElement = document.querySelector(`[data-id="${dropInfo.itemId}"]`);
     if (!overElement) return 'inside';
     
     const rect = overElement.getBoundingClientRect();
-    const mouseY = (event.activatorEvent as MouseEvent)?.clientY || 0;
+    const mouseY = pointerPositionRef.current.y;
     
-    // Calculate thresholds (25% from top and bottom)
-    const topThreshold = rect.top + rect.height * 0.25;
-    const bottomThreshold = rect.bottom - rect.height * 0.25;
+    // Calculate thresholds (20% from top and bottom for before/after, middle 60% for inside)
+    const topThreshold = rect.top + rect.height * 0.2;
+    const bottomThreshold = rect.bottom - rect.height * 0.2;
     
     if (mouseY < topThreshold) {
       return 'before';
@@ -208,13 +230,43 @@ export function PlanOptimizerStep({
     } else {
       return 'inside';
     }
-  }, []);
+  }, [activeId, dropInfo?.itemId]);
 
   const handleDragOver = (event: DragOverEvent) => {
     const overId = event.over?.id as string | null;
+    
+    // Update pointer position from drag over event
+    const mouseEvent = event.activatorEvent as MouseEvent;
+    if (mouseEvent && event.delta) {
+      pointerPositionRef.current = {
+        x: mouseEvent.clientX + event.delta.x,
+        y: mouseEvent.clientY + event.delta.y,
+      };
+    }
+    
     if (overId) {
-      const position = getDropPosition(event);
-      setDropInfo({ itemId: overId, position });
+      // Calculate position based on current pointer position
+      const overElement = document.querySelector(`[data-id="${overId}"]`);
+      if (overElement) {
+        const rect = overElement.getBoundingClientRect();
+        const mouseY = pointerPositionRef.current.y;
+        
+        const topThreshold = rect.top + rect.height * 0.2;
+        const bottomThreshold = rect.bottom - rect.height * 0.2;
+        
+        let position: DropPosition;
+        if (mouseY < topThreshold) {
+          position = 'before';
+        } else if (mouseY > bottomThreshold) {
+          position = 'after';
+        } else {
+          position = 'inside';
+        }
+        
+        setDropInfo({ itemId: overId, position });
+      } else {
+        setDropInfo({ itemId: overId, position: 'inside' });
+      }
     } else {
       setDropInfo(null);
     }
@@ -379,6 +431,7 @@ export function PlanOptimizerStep({
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragStart={handleDragStart}
+            onDragMove={handleDragMove}
             onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >

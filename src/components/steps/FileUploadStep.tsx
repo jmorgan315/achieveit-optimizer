@@ -59,12 +59,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
     setProcessingStatus('Rendering PDF pages for visual analysis...');
 
     try {
-      // Render PDF pages to images
-      const { images, pageCount } = await renderPDFToImages(file, 20, 1.5);
+      // Render PDF pages to images with optimized settings
+      const { images, pageCount } = await renderPDFToImages(file, 20, 1.0);
       setProcessingStatus(`Rendered ${images.length} of ${pageCount} pages`);
 
-      // Batch pages for API calls (3 pages at a time for token limits)
-      const batches = batchPageImages(images, 3);
+      // Batch pages for API calls (5 pages at a time for faster processing)
+      const batches = batchPageImages(images, 5);
       
       let allItems: AIExtractionResponse['items'] = [];
       let detectedLevelsFromVision: AIExtractionResponse['detectedLevels'] = [];
@@ -72,7 +72,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
-        const startPage = batchIndex * 3 + 1;
+        const startPage = batchIndex * 5 + 1;
         const endPage = startPage + batch.length - 1;
         
         setProcessingStatus(`Vision AI analyzing pages ${startPage}-${endPage}...`);
