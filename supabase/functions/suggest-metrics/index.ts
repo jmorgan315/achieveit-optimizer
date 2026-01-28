@@ -5,7 +5,27 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+// Validation constants
+const MAX_NAME_LENGTH = 500;
+const MAX_DESC_LENGTH = 2000;
+
+// Safe error helper
+function createSafeError(
+  status: number,
+  publicMessage: string,
+  internalDetails?: unknown
+): Response {
+  if (internalDetails) {
+    console.error('[Suggest Metrics Error]', {
+      timestamp: new Date().toISOString(),
+      details: internalDetails,
+    });
+  }
+  return new Response(
+    JSON.stringify({ error: publicMessage }),
+    { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
 
 const systemPrompt = `You are an expert strategic planning consultant specializing in creating SMART metrics for AchieveIt plans.
 
@@ -32,24 +52,41 @@ serve(async (req) => {
   }
 
   try {
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
-      return new Response(
-        JSON.stringify({ error: 'LOVABLE_API_KEY is not configured' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'LOVABLE_API_KEY not set');
     }
 
-    const { name, description } = await req.json();
+    const body = await req.json();
+    const { name, description } = body;
 
-    if (!name) {
-      return new Response(
-        JSON.stringify({ error: 'Item name is required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    // Validate name
+    if (!name || typeof name !== 'string') {
+      return createSafeError(400, 'Item name is required and must be a string.');
     }
 
-    const userPrompt = `Plan Item: "${name}"
-${description ? `Description: "${description}"` : ''}
+    const trimmedName = name.trim();
+    if (trimmedName.length === 0) {
+      return createSafeError(400, 'Item name cannot be empty.');
+    }
+    if (trimmedName.length > MAX_NAME_LENGTH) {
+      return createSafeError(400, `Item name must be under ${MAX_NAME_LENGTH} characters.`);
+    }
+
+    // Validate description if provided
+    let trimmedDescription = '';
+    if (description !== undefined && description !== null) {
+      if (typeof description !== 'string') {
+        return createSafeError(400, 'Description must be a string.');
+      }
+      trimmedDescription = description.trim();
+      if (trimmedDescription.length > MAX_DESC_LENGTH) {
+        return createSafeError(400, `Description must be under ${MAX_DESC_LENGTH} characters.`);
+      }
+    }
+
+    const userPrompt = `Plan Item: "${trimmedName}"
+${trimmedDescription ? `Description: "${trimmedDescription}"` : ''}
 
 Generate a SMART metric suggestion for this strategic plan item.`;
 
@@ -74,32 +111,12 @@ Generate a SMART metric suggestion for this strategic plan item.`;
               parameters: {
                 type: "object",
                 properties: {
-                  suggestedName: {
-                    type: "string",
-                    description: "A more specific, measurable version of the item name"
-                  },
-                  metricDescription: {
-                    type: "string",
-                    enum: ["Track to Target", "Maintain", "Stay Above", "Stay Below"],
-                    description: "The type of metric tracking"
-                  },
-                  metricUnit: {
-                    type: "string",
-                    enum: ["Number", "Dollar", "Percentage"],
-                    description: "The unit of measurement"
-                  },
-                  metricTarget: {
-                    type: "string",
-                    description: "The target value (numeric only, no symbols)"
-                  },
-                  metricBaseline: {
-                    type: "string",
-                    description: "The baseline/starting value (numeric only, no symbols)"
-                  },
-                  rationale: {
-                    type: "string",
-                    description: "Brief explanation of why this metric is appropriate"
-                  }
+                  suggestedName: { type: "string", description: "A more specific, measurable version of the item name" },
+                  metricDescription: { type: "string", enum: ["Track to Target", "Maintain", "Stay Above", "Stay Below"], description: "The type of metric tracking" },
+                  metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage"], description: "The unit of measurement" },
+                  metricTarget: { type: "string", description: "The target value (numeric only, no symbols)" },
+                  metricBaseline: { type: "string", description: "The baseline/starting value (numeric only, no symbols)" },
+                  rationale: { type: "string", description: "Brief explanation of why this metric is appropriate" }
                 },
                 required: ["suggestedName", "metricDescription", "metricUnit", "metricTarget", "metricBaseline", "rationale"],
                 additionalProperties: false
@@ -113,29 +130,19 @@ Generate a SMART metric suggestion for this strategic plan item.`;
 
     if (!response.ok) {
       if (response.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Rate limit exceeded. Please try again later.' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return createSafeError(429, 'Service temporarily busy. Please try again in a moment.');
       }
       if (response.status === 402) {
-        return new Response(
-          JSON.stringify({ error: 'AI credits exhausted. Please add funds to continue.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return createSafeError(503, 'Service temporarily unavailable. Please try again later.');
       }
-      
-      const errorText = await response.text();
-      console.error('AI gateway error:', response.status, errorText);
-      throw new Error('AI service temporarily unavailable');
+      return createSafeError(500, 'Unable to generate suggestion. Please try again.', await response.text());
     }
 
     const data = await response.json();
-    
-    // Extract the tool call result
     const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    
     if (!toolCall) {
-      throw new Error('No suggestion generated');
+      return createSafeError(500, 'Unable to generate suggestion. Please try again.', 'No tool call in response');
     }
 
     const suggestion = JSON.parse(toolCall.function.arguments);
@@ -145,13 +152,6 @@ Generate a SMART metric suggestion for this strategic plan item.`;
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
-    console.error('Suggest metrics error:', error);
-    
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : 'Failed to generate suggestion',
-      }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    return createSafeError(500, 'Unable to process request. Please try again.', error);
   }
 });
