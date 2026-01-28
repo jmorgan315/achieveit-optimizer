@@ -40,6 +40,7 @@ const Index = () => {
     updateItem,
     moveItem,
     updateLevelsAndRecalculate,
+    changeItemLevel,
   } = usePlanState();
 
   const handleTextSubmit = (text: string) => {
@@ -127,6 +128,7 @@ const Index = () => {
               levels={state.levels}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
+              onChangeLevel={changeItemLevel}
               onExport={handleExport}
               onUpdateLevels={handleUpdateLevels}
             />

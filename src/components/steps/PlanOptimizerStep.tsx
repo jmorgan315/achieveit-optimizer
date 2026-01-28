@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/select';
 import { PlanItem, PlanLevel } from '@/types/plan';
 import { SortableTreeItem } from '@/components/plan-optimizer/SortableTreeItem';
+import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { Sparkles, Loader2, RefreshCw, Settings } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
@@ -45,6 +46,7 @@ interface PlanOptimizerStepProps {
   levels: PlanLevel[];
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
+  onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
   onExport: () => void;
   onUpdateLevels?: (levels: PlanLevel[]) => void;
 }
@@ -65,12 +67,14 @@ export function PlanOptimizerStep({
   levels,
   onUpdateItem,
   onMoveItem,
+  onChangeLevel,
   onExport,
   onUpdateLevels,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(items.map((i) => i.id)));
   const [selectedItem, setSelectedItem] = useState<PlanItem | null>(null);
   const [showMetricDialog, setShowMetricDialog] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -142,6 +146,19 @@ export function PlanOptimizerStep({
     setShowMetricDialog(true);
     setSuggestion(null);
     fetchSuggestion(item);
+  };
+
+  const handleEdit = (item: PlanItem) => {
+    setSelectedItem(item);
+    setShowEditDialog(true);
+  };
+
+  const handleSaveEdit = (id: string, updates: Partial<PlanItem>) => {
+    onUpdateItem(id, updates);
+    toast({
+      title: 'Item updated',
+      description: 'Changes have been saved',
+    });
   };
 
   const applySuggestion = () => {
@@ -317,7 +334,7 @@ export function PlanOptimizerStep({
                     isExpanded={expandedItems.has(item.id)}
                     onToggleExpand={toggleExpand}
                     onOptimize={handleOptimize}
-                    onEdit={setSelectedItem}
+                    onEdit={handleEdit}
                     isOver={overId === item.id}
                   />
                 ))}
@@ -489,6 +506,16 @@ export function PlanOptimizerStep({
           }}
         />
       )}
+
+      {/* Edit Item Dialog */}
+      <EditItemDialog
+        open={showEditDialog}
+        onOpenChange={setShowEditDialog}
+        item={selectedItem}
+        levels={levels}
+        onSave={handleSaveEdit}
+        onChangeLevel={onChangeLevel}
+      />
     </div>
   );
 }

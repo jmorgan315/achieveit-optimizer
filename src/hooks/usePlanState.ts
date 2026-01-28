@@ -174,6 +174,88 @@ export function usePlanState() {
     });
   }, []);
 
+  // Change an item's level and handle re-parenting
+  const changeItemLevel = useCallback((itemId: string, newLevelDepth: number) => {
+    setState((prev) => {
+      const item = prev.items.find((i) => i.id === itemId);
+      if (!item) return prev;
+
+      const currentDepth = item.levelDepth;
+      if (currentDepth === newLevelDepth) return prev;
+
+      let newParentId: string | null = null;
+
+      if (newLevelDepth === 1) {
+        // Moving to root level - no parent needed
+        newParentId = null;
+      } else if (newLevelDepth > currentDepth) {
+        // Moving to a lower level (deeper) - find a sibling at the previous level to become parent
+        // Look for the previous sibling at the same level to become parent
+        const siblings = prev.items.filter((i) => i.parentId === item.parentId && i.id !== itemId);
+        const itemOrderParts = item.order.split('.').map(Number);
+        
+        // Find the closest sibling that comes before this item
+        let closestSibling: PlanItem | null = null;
+        for (const sibling of siblings) {
+          const siblingOrderParts = sibling.order.split('.').map(Number);
+          // Check if sibling comes before item
+          const siblingOrderNum = siblingOrderParts[siblingOrderParts.length - 1];
+          const itemOrderNum = itemOrderParts[itemOrderParts.length - 1];
+          if (siblingOrderNum < itemOrderNum) {
+            if (!closestSibling) {
+              closestSibling = sibling;
+            } else {
+              const closestOrderParts = closestSibling.order.split('.').map(Number);
+              const closestOrderNum = closestOrderParts[closestOrderParts.length - 1];
+              if (siblingOrderNum > closestOrderNum) {
+                closestSibling = sibling;
+              }
+            }
+          }
+        }
+        
+        newParentId = closestSibling?.id || item.parentId;
+      } else {
+        // Moving to a higher level (shallower) - find appropriate parent
+        // Walk up the tree to find a parent at the correct level
+        let currentParentId = item.parentId;
+        let targetParentDepth = newLevelDepth - 1;
+        
+        while (currentParentId) {
+          const parent = prev.items.find((i) => i.id === currentParentId);
+          if (!parent) break;
+          
+          if (parent.levelDepth === targetParentDepth) {
+            newParentId = parent.id;
+            break;
+          } else if (parent.levelDepth < targetParentDepth) {
+            // We've gone too high, use this parent
+            newParentId = parent.id;
+            break;
+          }
+          
+          currentParentId = parent.parentId;
+        }
+        
+        // If targetParentDepth is 0, we want root level
+        if (targetParentDepth === 0) {
+          newParentId = null;
+        }
+      }
+
+      // Update the item with new parent and level
+      const levelName = prev.levels.find((l) => l.depth === newLevelDepth)?.name || `Level ${newLevelDepth}`;
+      
+      const updatedItems = prev.items.map((i) =>
+        i.id === itemId
+          ? { ...i, parentId: newParentId, levelDepth: newLevelDepth, levelName }
+          : i
+      );
+
+      return { ...prev, items: recalculateOrders(updatedItems, prev.levels) };
+    });
+  }, []);
+
   return {
     state,
     setLevels,
@@ -188,6 +270,7 @@ export function usePlanState() {
     moveItem,
     reorderSiblings,
     updateLevelsAndRecalculate,
+    changeItemLevel,
   };
 }
 
