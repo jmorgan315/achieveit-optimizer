@@ -264,6 +264,120 @@ export interface ParseResult {
   personMappings: PersonMapping[];
 }
 
+// Types for AI extraction response
+export interface AIExtractedItem {
+  name: string;
+  levelType: 'strategic_priority' | 'focus_area' | 'goal' | 'action_item';
+  description?: string;
+  owner?: string;
+  metricTarget?: string;
+  metricUnit?: 'Number' | 'Dollar' | 'Percentage' | '';
+  startDate?: string;
+  dueDate?: string;
+  children?: AIExtractedItem[];
+}
+
+export interface AIExtractionResponse {
+  items: AIExtractedItem[];
+  detectedLevels: { depth: number; name: string }[];
+}
+
+// Map AI level types to depth
+const LEVEL_TYPE_TO_DEPTH: Record<string, number> = {
+  'strategic_priority': 1,
+  'focus_area': 2,
+  'goal': 3,
+  'action_item': 4,
+};
+
+// Convert AI extraction response to PlanItems
+export function convertAIResponseToPlanItems(
+  aiResponse: AIExtractionResponse,
+  levels: PlanLevel[]
+): ParseResult {
+  const items: PlanItem[] = [];
+  const personSet = new Set<string>();
+  let itemId = 1;
+
+  function processItem(
+    aiItem: AIExtractedItem,
+    parentId: string | null,
+    orderPrefix: string,
+    siblingIndex: number
+  ): void {
+    const depth = LEVEL_TYPE_TO_DEPTH[aiItem.levelType] || 1;
+    const levelName = levels.find(l => l.depth === depth)?.name || 
+      aiItem.levelType.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+    
+    const order = orderPrefix ? `${orderPrefix}.${siblingIndex + 1}` : `${siblingIndex + 1}`;
+    const id = String(itemId++);
+
+    // Track owners
+    if (aiItem.owner) {
+      personSet.add(aiItem.owner);
+    }
+
+    // Build issues list
+    const issues: PlanItem['issues'] = [];
+    if (!aiItem.owner) {
+      issues.push({ type: 'missing-owner', message: 'Missing assigned owner email' });
+    }
+    if (!aiItem.startDate || !aiItem.dueDate) {
+      issues.push({ type: 'missing-dates', message: 'Missing start or due date' });
+    }
+
+    const item: PlanItem = {
+      id,
+      order,
+      levelName,
+      levelDepth: depth,
+      name: aiItem.name,
+      description: aiItem.description || '',
+      status: 'Not Started',
+      startDate: aiItem.startDate || '',
+      dueDate: aiItem.dueDate || '',
+      assignedTo: aiItem.owner || '',
+      members: [],
+      administrators: [],
+      updateFrequency: 'Monthly',
+      metricDescription: aiItem.metricTarget ? 'Track to Target' : '',
+      metricUnit: aiItem.metricUnit || '',
+      metricRollup: 'Manual',
+      metricBaseline: '',
+      metricTarget: aiItem.metricTarget || '',
+      currentValue: '',
+      tags: [],
+      parentId,
+      children: [],
+      issues,
+    };
+
+    items.push(item);
+
+    // Process children recursively
+    if (aiItem.children && aiItem.children.length > 0) {
+      aiItem.children.forEach((child, idx) => {
+        processItem(child, id, order, idx);
+      });
+    }
+  }
+
+  // Process all top-level items
+  aiResponse.items.forEach((item, idx) => {
+    processItem(item, null, '', idx);
+  });
+
+  // Create person mappings
+  const personMappings: PersonMapping[] = Array.from(personSet).map((name, idx) => ({
+    id: String(idx + 1),
+    foundName: name,
+    email: '',
+    isResolved: false,
+  }));
+
+  return { items, personMappings };
+}
+
 export function parseTextToPlanItems(rawText: string, levels: PlanLevel[]): ParseResult {
   if (!rawText || !rawText.trim()) {
     return { items: [], personMappings: [] };

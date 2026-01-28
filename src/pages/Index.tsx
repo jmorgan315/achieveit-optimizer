@@ -7,7 +7,7 @@ import { PathSelectorStep } from '@/components/steps/PathSelectorStep';
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
 import { usePlanState } from '@/hooks/usePlanState';
-import { ProcessingPath } from '@/types/plan';
+import { ProcessingPath, PlanItem, PersonMapping, PlanLevel } from '@/types/plan';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 
@@ -26,6 +26,7 @@ const Index = () => {
     state,
     setLevels,
     setRawText,
+    setItems,
     processText,
     setProcessingPath,
     updatePersonMapping,
@@ -37,6 +38,13 @@ const Index = () => {
   const handleTextSubmit = (text: string) => {
     setRawText(text);
     setShowLevelModal(true);
+  };
+
+  // Handle AI-extracted items - skip level verification since AI already detected them
+  const handleAIExtraction = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
+    setLevels(levels);
+    setItems(items, personMappings);
+    setCurrentStep(1); // Go directly to path selection
   };
 
   const handleLevelConfirm = (levels: typeof state.levels) => {
@@ -72,7 +80,10 @@ const Index = () => {
 
         <div className="mt-8">
           {currentStep === 0 && (
-            <FileUploadStep onTextSubmit={handleTextSubmit} />
+            <FileUploadStep 
+              onTextSubmit={handleTextSubmit} 
+              onAIExtraction={handleAIExtraction}
+            />
           )}
 
           {currentStep === 1 && (

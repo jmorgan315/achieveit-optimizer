@@ -26,6 +26,10 @@ export function usePlanState() {
     setState((prev) => ({ ...prev, rawText }));
   }, []);
 
+  const setItems = useCallback((items: PlanItem[], personMappings: PersonMapping[]) => {
+    setState((prev) => ({ ...prev, items, personMappings }));
+  }, []);
+
   const processText = useCallback(() => {
     const { items, personMappings } = parseTextToPlanItems(state.rawText, state.levels);
     setState((prev) => ({ ...prev, items, personMappings }));
@@ -154,6 +158,7 @@ export function usePlanState() {
     state,
     setLevels,
     setRawText,
+    setItems,
     processText,
     setProcessingPath,
     updatePersonMapping,
