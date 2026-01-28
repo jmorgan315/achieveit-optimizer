@@ -36,7 +36,8 @@ import {
 } from '@/components/ui/select';
 import { PlanItem, PlanLevel } from '@/types/plan';
 import { SortableTreeItem } from '@/components/plan-optimizer/SortableTreeItem';
-import { Sparkles, Loader2, RefreshCw } from 'lucide-react';
+import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
+import { Sparkles, Loader2, RefreshCw, Settings } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
 interface PlanOptimizerStepProps {
@@ -45,6 +46,7 @@ interface PlanOptimizerStepProps {
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onExport: () => void;
+  onUpdateLevels?: (levels: PlanLevel[]) => void;
 }
 
 interface MetricSuggestion {
@@ -64,10 +66,12 @@ export function PlanOptimizerStep({
   onUpdateItem,
   onMoveItem,
   onExport,
+  onUpdateLevels,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(items.map((i) => i.id)));
   const [selectedItem, setSelectedItem] = useState<PlanItem | null>(null);
   const [showMetricDialog, setShowMetricDialog] = useState(false);
+  const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   
@@ -274,8 +278,22 @@ export function PlanOptimizerStep({
       {/* Tree View with Drag and Drop */}
       <Card>
         <CardHeader className="border-b">
-          <CardTitle className="text-lg">Plan Structure</CardTitle>
-          <p className="text-sm text-muted-foreground">Drag items to reorganize hierarchy</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-lg">Plan Structure</CardTitle>
+              <p className="text-sm text-muted-foreground">Drag items to reorganize hierarchy</p>
+            </div>
+            {onUpdateLevels && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowLevelModal(true)}
+              >
+                <Settings className="h-4 w-4 mr-2" />
+                Configure Levels
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <DndContext
@@ -455,6 +473,22 @@ export function PlanOptimizerStep({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Level Configuration Modal */}
+      {onUpdateLevels && (
+        <LevelVerificationModal
+          open={showLevelModal}
+          onOpenChange={setShowLevelModal}
+          levels={levels}
+          onConfirm={(newLevels) => {
+            onUpdateLevels(newLevels);
+            toast({
+              title: 'Levels updated',
+              description: 'Plan structure has been recalculated',
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

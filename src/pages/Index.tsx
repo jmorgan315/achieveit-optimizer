@@ -21,6 +21,12 @@ const WIZARD_STEPS = [
 const Index = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
+  
+  // Pending AI data - stored temporarily until user confirms levels
+  const [pendingAIData, setPendingAIData] = useState<{
+    items: PlanItem[];
+    personMappings: PersonMapping[];
+  } | null>(null);
 
   const {
     state,
@@ -33,23 +39,36 @@ const Index = () => {
     applyPersonMappingsToItems,
     updateItem,
     moveItem,
+    updateLevelsAndRecalculate,
   } = usePlanState();
 
   const handleTextSubmit = (text: string) => {
     setRawText(text);
+    setPendingAIData(null); // Clear any pending AI data
     setShowLevelModal(true);
   };
 
-  // Handle AI-extracted items - skip level verification since AI already detected them
+  // Handle AI-extracted items - show level verification modal with detected levels
   const handleAIExtraction = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
-    setLevels(levels);
-    setItems(items, personMappings);
-    setCurrentStep(1); // Go directly to path selection
+    setLevels(levels); // Pre-populate with AI-detected levels
+    setPendingAIData({ items, personMappings }); // Store items temporarily
+    setShowLevelModal(true); // Show level verification modal
   };
 
-  const handleLevelConfirm = (levels: typeof state.levels) => {
+  const handleLevelConfirm = (levels: PlanLevel[]) => {
     setLevels(levels);
-    processText();
+    
+    if (pendingAIData) {
+      // AI extraction path: apply levels to pending items and recalculate order strings
+      setItems(pendingAIData.items, pendingAIData.personMappings);
+      // Recalculate with the confirmed levels
+      updateLevelsAndRecalculate(levels);
+      setPendingAIData(null);
+    } else {
+      // Manual text parsing path
+      processText();
+    }
+    
     setCurrentStep(1);
   };
 
@@ -69,6 +88,10 @@ const Index = () => {
       title: 'Export Complete',
       description: 'Your AchieveIt import file has been downloaded.',
     });
+  };
+
+  const handleUpdateLevels = (levels: PlanLevel[]) => {
+    updateLevelsAndRecalculate(levels);
   };
 
   return (
@@ -105,6 +128,7 @@ const Index = () => {
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onExport={handleExport}
+              onUpdateLevels={handleUpdateLevels}
             />
           )}
         </div>
