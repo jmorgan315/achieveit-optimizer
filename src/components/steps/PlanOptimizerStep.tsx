@@ -35,11 +35,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { PlanItem, PlanLevel } from '@/types/plan';
-import { SortableTreeItem } from '@/components/plan-optimizer/SortableTreeItem';
+import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { Sparkles, Loader2, RefreshCw, Settings } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+
+type DropInfo = { itemId: string; position: DropPosition };
 
 interface PlanOptimizerStepProps {
   items: PlanItem[];
@@ -47,6 +49,7 @@ interface PlanOptimizerStepProps {
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
+  onReorderSiblings?: (itemId: string, newIndex: number) => void;
   onExport: () => void;
   onUpdateLevels?: (levels: PlanLevel[]) => void;
 }
@@ -68,6 +71,7 @@ export function PlanOptimizerStep({
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
+  onReorderSiblings,
   onExport,
   onUpdateLevels,
 }: PlanOptimizerStepProps) {
@@ -77,7 +81,7 @@ export function PlanOptimizerStep({
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [overId, setOverId] = useState<string | null>(null);
+  const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
   
   // AI suggestion state
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
@@ -184,14 +188,43 @@ export function PlanOptimizerStep({
     setActiveId(event.active.id as string);
   };
 
+  const getDropPosition = useCallback((event: DragOverEvent): DropPosition => {
+    if (!event.over) return null;
+    
+    const overElement = document.querySelector(`[data-id="${event.over.id}"]`);
+    if (!overElement) return 'inside';
+    
+    const rect = overElement.getBoundingClientRect();
+    const mouseY = (event.activatorEvent as MouseEvent)?.clientY || 0;
+    
+    // Calculate thresholds (25% from top and bottom)
+    const topThreshold = rect.top + rect.height * 0.25;
+    const bottomThreshold = rect.bottom - rect.height * 0.25;
+    
+    if (mouseY < topThreshold) {
+      return 'before';
+    } else if (mouseY > bottomThreshold) {
+      return 'after';
+    } else {
+      return 'inside';
+    }
+  }, []);
+
   const handleDragOver = (event: DragOverEvent) => {
-    setOverId(event.over?.id as string | null);
+    const overId = event.over?.id as string | null;
+    if (overId) {
+      const position = getDropPosition(event);
+      setDropInfo({ itemId: overId, position });
+    } else {
+      setDropInfo(null);
+    }
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+    const currentDropInfo = dropInfo;
     setActiveId(null);
-    setOverId(null);
+    setDropInfo(null);
 
     if (!over || active.id === over.id) return;
 
@@ -220,13 +253,42 @@ export function PlanOptimizerStep({
       return;
     }
 
-    // Reparent: make dragged item a child of target item
-    onMoveItem(draggedId, targetId);
+    const position = currentDropInfo?.position || 'inside';
 
-    toast({
-      title: 'Item moved',
-      description: `"${draggedItem.name}" is now under "${targetItem.name}"`,
-    });
+    if (position === 'inside') {
+      // Nest: make dragged item a child of target item
+      onMoveItem(draggedId, targetId);
+      toast({
+        title: 'Item moved',
+        description: `"${draggedItem.name}" is now under "${targetItem.name}"`,
+      });
+    } else if (onReorderSiblings) {
+      // Reorder: place before or after target
+      const targetParentId = targetItem.parentId;
+      const siblings = items.filter((i) => i.parentId === targetParentId);
+      const targetIndex = siblings.findIndex((s) => s.id === targetId);
+      
+      // If dragged item has a different parent, first move it to target's parent
+      if (draggedItem.parentId !== targetParentId) {
+        onMoveItem(draggedId, targetParentId);
+      }
+      
+      // Calculate new index based on drop position
+      let newIndex = position === 'before' ? targetIndex : targetIndex + 1;
+      
+      // Adjust if dragged item was in same list and before target
+      const draggedIndex = siblings.findIndex((s) => s.id === draggedId);
+      if (draggedIndex !== -1 && draggedIndex < targetIndex) {
+        newIndex = Math.max(0, newIndex - 1);
+      }
+      
+      onReorderSiblings(draggedId, newIndex);
+      
+      toast({
+        title: 'Item reordered',
+        description: `"${draggedItem.name}" moved ${position} "${targetItem.name}"`,
+      });
+    }
   };
 
   const rootItems = items.filter((i) => !i.parentId);
@@ -326,17 +388,19 @@ export function PlanOptimizerStep({
             >
               <div className="divide-y">
                 {flatList.map(({ item, depth }) => (
-                  <SortableTreeItem
-                    key={item.id}
-                    item={item}
-                    depth={depth}
-                    hasChildren={getChildren(item.id).length > 0}
-                    isExpanded={expandedItems.has(item.id)}
-                    onToggleExpand={toggleExpand}
-                    onOptimize={handleOptimize}
-                    onEdit={handleEdit}
-                    isOver={overId === item.id}
-                  />
+                  <div key={item.id} data-id={item.id}>
+                    <SortableTreeItem
+                      item={item}
+                      depth={depth}
+                      hasChildren={getChildren(item.id).length > 0}
+                      isExpanded={expandedItems.has(item.id)}
+                      onToggleExpand={toggleExpand}
+                      onOptimize={handleOptimize}
+                      onEdit={handleEdit}
+                      isOver={dropInfo?.itemId === item.id}
+                      dropPosition={dropInfo?.itemId === item.id ? dropInfo.position : null}
+                    />
+                  </div>
                 ))}
               </div>
             </SortableContext>

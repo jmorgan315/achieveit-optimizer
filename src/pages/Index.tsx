@@ -39,6 +39,7 @@ const Index = () => {
     applyPersonMappingsToItems,
     updateItem,
     moveItem,
+    reorderSiblings,
     updateLevelsAndRecalculate,
     changeItemLevel,
   } = usePlanState();
@@ -129,6 +130,7 @@ const Index = () => {
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}
+              onReorderSiblings={reorderSiblings}
               onExport={handleExport}
               onUpdateLevels={handleUpdateLevels}
             />

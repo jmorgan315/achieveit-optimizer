@@ -78,10 +78,12 @@ export function EditItemDialog({
     }
   }, [item]);
 
-  const canSave =
-    formData.startDate &&
-    formData.dueDate &&
-    formData.dueDate >= formData.startDate;
+  // Date validation: both or neither
+  const bothDatesEmpty = !formData.startDate && !formData.dueDate;
+  const bothDatesFilled = formData.startDate && formData.dueDate;
+  const onlyOneDate = (formData.startDate && !formData.dueDate) || (!formData.startDate && formData.dueDate);
+  const datesValid = bothDatesFilled ? formData.dueDate >= formData.startDate : true;
+  const canSave = (bothDatesEmpty || (bothDatesFilled && datesValid));
 
   const handleSave = () => {
     if (!item || !canSave) return;
@@ -110,7 +112,7 @@ export function EditItemDialog({
         <DialogHeader>
           <DialogTitle>Edit Plan Item</DialogTitle>
           <DialogDescription>
-            Update the details for this plan item. Both start and due dates are required.
+            Update the details for this plan item. Dates are optional, but if you set one, you must set both.
           </DialogDescription>
         </DialogHeader>
 
@@ -164,9 +166,7 @@ export function EditItemDialog({
           <div className="grid grid-cols-2 gap-4">
             {/* Start Date */}
             <div className="space-y-2">
-              <Label>
-                Start Date <span className="text-destructive">*</span>
-              </Label>
+              <Label>Start Date</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
@@ -194,9 +194,7 @@ export function EditItemDialog({
 
             {/* Due Date */}
             <div className="space-y-2">
-              <Label>
-                Due Date <span className="text-destructive">*</span>
-              </Label>
+              <Label>Due Date</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
@@ -226,9 +224,9 @@ export function EditItemDialog({
             </div>
           </div>
 
-          {!formData.startDate || !formData.dueDate ? (
-            <p className="text-xs text-muted-foreground">* Both dates are required to save</p>
-          ) : formData.dueDate < formData.startDate ? (
+          {onlyOneDate ? (
+            <p className="text-xs text-destructive">If you set one date, you must set both</p>
+          ) : bothDatesFilled && !datesValid ? (
             <p className="text-xs text-destructive">Due date must be on or after start date</p>
           ) : null}
 
