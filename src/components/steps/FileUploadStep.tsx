@@ -135,8 +135,9 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         detectedLevels: detectedLevelsFromVision.length > 0 ? detectedLevelsFromVision : [
           { depth: 1, name: 'Strategic Priority' },
           { depth: 2, name: 'Objective' },
-          { depth: 3, name: 'Strategy' },
-          { depth: 4, name: 'KPI' },
+          { depth: 3, name: 'Goal' },
+          { depth: 4, name: 'Strategy' },
+          { depth: 5, name: 'KPI' },
         ],
       };
 
