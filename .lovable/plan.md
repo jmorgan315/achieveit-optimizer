@@ -1,210 +1,172 @@
 
-# Implementation Plan: Real Functionality for AchieveIt Strategy Tool
+# Plan: AI-Powered Intelligent Document Extraction
 
-## Overview
+## Problem Analysis
 
-This plan converts the application from demo mode to production-ready functionality by implementing four key features:
-1. Real text parsing from uploaded files
-2. Drag-and-drop hierarchy editing
-3. PDF document parsing via Lovable Cloud
-4. AI-powered metric suggestions via OpenAI
+The current `src/utils/textParser.ts` uses regex patterns to detect plan items based on:
+- Numbering patterns (1.1.1)
+- Label keywords ("Strategic Priority", "Objective")
+- Indentation levels
 
----
+This approach fails because real strategic plans contain significant narrative content that shouldn't be tracked. The Boulder County example has:
+- 70% narrative/context (demographics, introductions, achievements)
+- 30% actual trackable items (goals, initiatives, metrics)
 
-## Phase 1: Real Text Parsing Engine
+## Solution: AI-Powered Extraction Edge Function
 
-### What We Are Building
-A parser that extracts actual plan items, hierarchy, owners, and metrics from uploaded text/CSV files instead of returning hardcoded mock data.
-
-### Changes Required
-
-**File: `src/types/plan.ts`**
-- Add a new function `parseTextToPlanItems()` that:
-  - Splits text by common delimiters (newlines, bullet points)
-  - Uses regex patterns to detect hierarchy indicators (numbering like "1.1.1", indentation, keywords like "Strategic Priority", "Objective", "Initiative")
-  - Extracts owner names using patterns like "Owner:", "Assigned:", "Lead:"
-  - Extracts dates using patterns like "Start:", "Due:", "Q1 2024"
-  - Extracts metrics using patterns like "Target:", "Goal:", percentage/number values
-
-**File: `src/hooks/usePlanState.ts`**
-- Replace the `processText()` function to call the new `parseTextToPlanItems(state.rawText, state.levels)` instead of `generateMockPlanItems()`
-
-### Parsing Logic
-```text
-Input text patterns to detect:
-+------------------+------------------------------------------+
-| Pattern Type     | Example                                  |
-+------------------+------------------------------------------+
-| Numbered items   | "1.1.2 Cloud Migration"                  |
-| Labeled items    | "Strategic Priority 1: Digital Transform"|
-| Owner keywords   | "Owner: John Smith", "Lead: IT Team"     |
-| Date keywords    | "Start: Q1 2024", "Due: 12/31/2024"      |
-| Metric keywords  | "Target: 80%", "Goal: $2M"               |
-+------------------+------------------------------------------+
-```
-
----
-
-## Phase 2: Drag-and-Drop Tree Editing
-
-### What We Are Building
-Functional drag-and-drop in the Plan Optimizer that allows users to move items between parent nodes and reorder siblings.
-
-### New Dependency
-- `@dnd-kit/core` - Core drag and drop primitives
-- `@dnd-kit/sortable` - Sortable preset for lists
-- `@dnd-kit/utilities` - CSS transform utilities
-
-### Changes Required
-
-**File: `src/components/steps/PlanOptimizerStep.tsx`**
-- Wrap the tree view with `<DndContext>` provider
-- Convert each tree item to a `<SortableItem>` component using `useSortable` hook
-- Implement `handleDragEnd` to:
-  - Detect if item was dropped on another item (reparenting) or between items (reordering)
-  - Call `onMoveItem(draggedId, newParentId)` to update hierarchy
-- Add visual drop indicators showing where items will land
-
-**File: `src/hooks/usePlanState.ts`**
-- The existing `moveItem()` function already handles the state update
-- Add `reorderSiblings()` function for same-level reordering
-
-### User Experience
-- Drag handle activates on mouse down
-- Ghost preview follows cursor
-- Drop zones highlight when hovering over valid targets
-- Auto-recalculates order strings (1, 1.1, 1.2) after drop
-
----
-
-## Phase 3: PDF Parsing via Lovable Cloud
-
-### What We Are Building
-A Supabase Edge Function that accepts PDF uploads and returns extracted text content.
+Replace the regex parser with an intelligent AI extraction step that can distinguish between narrative and actionable plan items.
 
 ### Architecture
+
 ```text
-Browser                    Lovable Cloud
-   |                            |
-   |-- POST /parse-pdf -------->|
-   |   (PDF binary)             |
-   |                            |-- Extract text
-   |                            |   via unpdf library
-   |<-- JSON response ----------|
-   |   { text: "..." }          |
+User uploads PDF
+       |
+       v
+parse-pdf edge function (existing)
+       |
+       v
+Raw text extracted
+       |
+       v
+extract-plan-items edge function (NEW)
+       |
+       v
+AI analyzes text, identifies:
+  - Strategic priorities (top level)
+  - Goals/Objectives (mid level)  
+  - Initiatives/Actions (low level)
+       |
+       v
+Structured JSON with hierarchy
+       |
+       v
+Display in Plan Optimizer
 ```
 
-### New Files
+### New Edge Function: extract-plan-items
 
-**File: `supabase/functions/parse-pdf/index.ts`**
-- Uses `unpdf` library for PDF.js-based text extraction
-- Accepts multipart/form-data with PDF file
-- Returns JSON with extracted text
-- Handles CORS for browser requests
+**File: `supabase/functions/extract-plan-items/index.ts`**
 
-**File: `supabase/config.toml`**
-- Configure the edge function with `verify_jwt = false` for public access
+This function will:
+1. Accept the raw text from a document
+2. Use Lovable AI (Gemini 3 Flash) to analyze and extract only trackable items
+3. Return structured JSON with:
+   - Hierarchical plan items
+   - Detected owners/departments
+   - Any dates or metrics found
+   - Confidence scores for uncertain extractions
+
+### AI Prompt Engineering
+
+The prompt will instruct the model to:
+
+1. **Identify trackable items** - Goals with measurable outcomes, not background narrative
+2. **Detect hierarchy** - Which items are parent priorities vs child initiatives
+3. **Extract metadata** - Owners, dates, metrics embedded in text
+4. **Skip noise** - Table of contents, page numbers, image captions, introductory paragraphs
+
+Example extraction from the Boulder County document:
+
+```json
+{
+  "items": [
+    {
+      "name": "Economic Security and Social Stability",
+      "levelType": "strategic_priority",
+      "description": "Ensuring residents have resources for health and wellbeing",
+      "children": [
+        {
+          "name": "Housing access and affordability",
+          "levelType": "focus_area",
+          "children": [
+            {
+              "name": "Increase BCHA affordable units by 3% in 2025",
+              "levelType": "goal",
+              "metricTarget": "3%",
+              "metricUnit": "Percentage",
+              "dueDate": "2025-12-31"
+            },
+            {
+              "name": "Net 600+ housing units within planning period",
+              "levelType": "goal",
+              "metricTarget": "600",
+              "metricUnit": "Number"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
 
 ### Changes Required
-
-**File: `src/components/steps/FileUploadStep.tsx`**
-- When a PDF is uploaded, send it to the edge function
-- Show loading state during processing
-- On success, populate `fileContent` with the returned text
-- On error, show user-friendly message
-
----
-
-## Phase 4: AI Metric Suggestions via OpenAI
-
-### What We Are Building
-Integration with OpenAI's API to generate intelligent metric suggestions based on plan item names and descriptions.
-
-### Prerequisites
-- User needs to add an `OPENAI_API_KEY` secret
-
-### New Files
-
-**File: `supabase/functions/suggest-metrics/index.ts`**
-- Accepts item name and description
-- Calls OpenAI GPT-4o-mini with a prompt designed for strategic planning metrics
-- Returns suggested metric name, target value, unit type, and description type
-- Prompt engineering focuses on SMART metrics (Specific, Measurable, Achievable, Relevant, Time-bound)
-
-### Prompt Design
-The AI will receive context about AchieveIt's metric types:
-- Metric Description: Track to Target, Maintain, Stay Above, Stay Below
-- Metric Unit: Number, Dollar, Percentage
-- Metric Rollup: Manual, Sum Children, Average Children
-
-### Changes Required
-
-**File: `src/components/steps/PlanOptimizerStep.tsx`**
-- Replace the mock suggestion logic in the Optimize dialog
-- Add loading state while waiting for AI response
-- Display AI-generated suggestions with one-click apply
-- Add "Regenerate" button for alternative suggestions
-
----
-
-## Technical Details
-
-### Edge Function: parse-pdf
-
-```text
-POST /functions/v1/parse-pdf
-Content-Type: multipart/form-data
-
-Response:
-{
-  "success": true,
-  "text": "Strategic Priority 1: Digital Transformation...",
-  "pageCount": 5
-}
-```
-
-### Edge Function: suggest-metrics
-
-```text
-POST /functions/v1/suggest-metrics
-Content-Type: application/json
-{
-  "name": "Improve Customer Satisfaction",
-  "description": "Enhance all customer touchpoints"
-}
-
-Response:
-{
-  "suggestion": {
-    "name": "Increase Customer Satisfaction Score by 15%",
-    "metricDescription": "Track to Target",
-    "metricUnit": "Percentage",
-    "metricTarget": "85",
-    "metricBaseline": "70"
-  }
-}
-```
-
----
-
-## Implementation Order
-
-1. **Text Parsing** (no dependencies) - Get real data flowing first
-2. **Drag-and-Drop** (npm install required) - Enable hierarchy fixing
-3. **PDF Parsing** (Lovable Cloud required) - Handle binary documents
-4. **AI Suggestions** (OpenAI key required) - Add intelligent features
-
----
-
-## Summary of Files to Create/Modify
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `src/types/plan.ts` | Modify | Add `parseTextToPlanItems()` function |
-| `src/hooks/usePlanState.ts` | Modify | Wire up real parsing, add reorder |
-| `src/components/steps/PlanOptimizerStep.tsx` | Modify | Add dnd-kit integration, AI calls |
-| `src/components/steps/FileUploadStep.tsx` | Modify | Call PDF parsing edge function |
-| `supabase/functions/parse-pdf/index.ts` | Create | PDF text extraction endpoint |
-| `supabase/functions/suggest-metrics/index.ts` | Create | AI metric suggestion endpoint |
-| `supabase/config.toml` | Create | Edge function configuration |
-| `package.json` | Modify | Add @dnd-kit dependencies |
+| `supabase/functions/extract-plan-items/index.ts` | Create | AI extraction endpoint using Lovable AI |
+| `supabase/config.toml` | Modify | Add new function configuration |
+| `src/components/steps/FileUploadStep.tsx` | Modify | Chain PDF parsing with AI extraction |
+| `src/utils/textParser.ts` | Modify | Add function to convert AI response to PlanItem format |
+| `src/hooks/usePlanState.ts` | Modify | Handle async AI extraction flow |
+
+### User Experience Flow
+
+1. User uploads PDF
+2. Show "Extracting text from document..." (existing)
+3. Show "AI analyzing document for plan items..." (new)
+4. Display extracted items with confidence indicators
+5. User can review and adjust before proceeding
+
+### Edge Cases Handled
+
+- Documents with no clear hierarchy - AI will infer based on context
+- Multiple unrelated plans in one document - AI will group logically
+- Heavily narrative documents - AI will extract only actionable items
+- Mixed languages - Gemini supports multilingual extraction
+
+### Technical Implementation Details
+
+**AI Request Structure:**
+```typescript
+const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${LOVABLE_API_KEY}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "google/gemini-3-flash-preview",
+    messages: [
+      { role: "system", content: EXTRACTION_PROMPT },
+      { role: "user", content: documentText }
+    ],
+    tools: [{
+      type: "function",
+      function: {
+        name: "extract_plan_items",
+        parameters: { /* structured output schema */ }
+      }
+    }],
+    tool_choice: { type: "function", function: { name: "extract_plan_items" } }
+  }),
+});
+```
+
+**Extraction Prompt (key points):**
+- You are analyzing a strategic planning document
+- Extract ONLY items that would be tracked over time (goals, initiatives, KPIs)
+- Skip: table of contents, demographics, historical achievements, mission statements
+- Preserve hierarchy: Strategic Priority > Focus Area > Goal/Initiative > Action Item
+- Extract any embedded metrics, dates, or owners
+
+### Cost and Performance
+
+- Single AI call per document (not per item)
+- Gemini 3 Flash is fast and cost-effective
+- Typical strategic plan (20-30 pages): 2-5 seconds processing
+- Token usage: ~2000 input + ~1000 output per document
+
+## Summary
+
+This plan replaces the naive regex parser with intelligent AI extraction that understands document context and extracts only meaningful, trackable plan items while preserving hierarchy.
