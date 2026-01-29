@@ -299,13 +299,30 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       let pageCount = 1;
 
       if (isPdf) {
-        // First try text extraction
+        // Check file size first - if over 10MB, skip text extraction and go directly to Vision AI
+        const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+        const skipTextExtraction = file.size > FILE_SIZE_LIMIT;
+        
+        if (skipTextExtraction) {
+          console.log('File over 10MB, skipping text extraction, using Vision AI directly');
+          setProcessingStatus('Large document detected, using Vision AI...');
+          setIsProcessing(false);
+          await extractWithVisionAI(file);
+          return;
+        }
+        
+        // First try text extraction for smaller files
         try {
           const result = await parsePdfWithEdgeFunction(file);
           extractedText = result.text;
           pageCount = result.pageCount;
         } catch (error) {
           console.log('Text extraction failed, will try vision AI', error);
+          // If text extraction fails for any reason, fall back to Vision AI
+          setProcessingStatus('Text extraction unavailable, using Vision AI...');
+          setIsProcessing(false);
+          await extractWithVisionAI(file);
+          return;
         }
 
         // Check if text quality is poor - if so, use Vision AI
