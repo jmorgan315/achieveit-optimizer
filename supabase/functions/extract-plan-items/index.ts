@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 // Validation constants
-const MAX_TEXT_LENGTH = 100000;
+const MAX_TEXT_LENGTH = 300000;
 const MIN_TEXT_LENGTH = 50;
 
 // Safe error helper
