@@ -335,6 +335,16 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
           await extractWithVisionAI(file);
           return; // Exit early - vision AI handles everything
         }
+        
+        // Check if text is too long for text-based extraction (100k char limit)
+        const TEXT_LENGTH_LIMIT = 100000;
+        if (extractedText.length > TEXT_LENGTH_LIMIT) {
+          console.log(`Text too long (${extractedText.length} chars), switching to Vision AI`);
+          setProcessingStatus('Large document detected, using Vision AI...');
+          setIsProcessing(false);
+          await extractWithVisionAI(file);
+          return;
+        }
       } else if (isWord || isExcel) {
         // Binary office formats - would need server-side processing
         setProcessingStatus('Processing document...');
