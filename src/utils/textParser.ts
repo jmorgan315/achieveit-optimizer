@@ -267,7 +267,7 @@ export interface ParseResult {
 // Types for AI extraction response
 export interface AIExtractedItem {
   name: string;
-  levelType: 'strategic_priority' | 'focus_area' | 'goal' | 'action_item' | 'sub_action';
+  levelType: string; // Dynamic — whatever labels the AI detected
   description?: string;
   owner?: string;
   metricTarget?: string;
@@ -369,24 +369,64 @@ function normalizeItemChildren(items: AIExtractedItem[]): AIExtractedItem[] {
   });
 }
 
-// Get the next level type in the hierarchy
-function getNextLevelType(currentType: string): AIExtractedItem['levelType'] {
-  const hierarchy: AIExtractedItem['levelType'][] = ['strategic_priority', 'focus_area', 'goal', 'action_item', 'sub_action'];
-  const currentIndex = hierarchy.indexOf(currentType as AIExtractedItem['levelType']);
-  if (currentIndex === -1 || currentIndex >= hierarchy.length - 1) {
-    return 'sub_action';
+// Build a dynamic levelType-to-depth map from detectedLevels or item data
+function buildLevelTypeToDepthMap(
+  detectedLevels?: { depth: number; name: string }[],
+  items?: AIExtractedItem[]
+): Map<string, number> {
+  const map = new Map<string, number>();
+
+  // Primary: use detectedLevels from AI response
+  if (detectedLevels && detectedLevels.length > 0) {
+    detectedLevels
+      .sort((a, b) => a.depth - b.depth)
+      .forEach(level => {
+        map.set(level.name, level.depth);
+      });
+    return map;
   }
-  return hierarchy[currentIndex + 1];
+
+  // Fallback: infer from unique levelTypes in item order
+  if (items && items.length > 0) {
+    const seen: string[] = [];
+    function collectTypes(list: AIExtractedItem[], depth: number) {
+      for (const item of list) {
+        if (item?.levelType && !seen.includes(item.levelType)) {
+          seen.push(item.levelType);
+          if (!map.has(item.levelType)) {
+            map.set(item.levelType, depth);
+          }
+        }
+        if (item?.children && Array.isArray(item.children)) {
+          collectTypes(item.children as AIExtractedItem[], depth + 1);
+        }
+      }
+    }
+    collectTypes(items, 1);
+    return map;
+  }
+
+  return map;
 }
 
-// Map AI level types to depth
-const LEVEL_TYPE_TO_DEPTH: Record<string, number> = {
-  'strategic_priority': 1,
-  'focus_area': 2,
-  'goal': 3,
-  'action_item': 4,
-  'sub_action': 5,
-};
+// Get the next level type in the hierarchy (dynamic)
+let _currentHierarchy: string[] = [];
+
+function setCurrentHierarchy(detectedLevels?: { depth: number; name: string }[]) {
+  if (detectedLevels && detectedLevels.length > 0) {
+    _currentHierarchy = detectedLevels
+      .sort((a, b) => a.depth - b.depth)
+      .map(l => l.name);
+  }
+}
+
+function getNextLevelType(currentType: string): string {
+  const idx = _currentHierarchy.indexOf(currentType);
+  if (idx === -1 || idx >= _currentHierarchy.length - 1) {
+    return _currentHierarchy[_currentHierarchy.length - 1] || currentType;
+  }
+  return _currentHierarchy[idx + 1];
+}
 
 // Detect if AI response is flat (all items at root with no children)
 function isFlatResponse(items: AIExtractedItem[]): boolean {
@@ -421,25 +461,29 @@ function isFlatResponse(items: AIExtractedItem[]): boolean {
 // Rebuild hierarchy from flat AI response using levelType ordering
 function rebuildHierarchyFromFlatItems(
   flatItems: AIExtractedItem[],
-  levels: PlanLevel[]
+  levels: PlanLevel[],
+  detectedLevels?: { depth: number; name: string }[]
 ): PlanItem[] {
   const items: PlanItem[] = [];
   const personSet = new Set<string>();
   let itemId = 1;
+
+  const levelTypeToDepth = buildLevelTypeToDepthMap(detectedLevels, flatItems);
+  const maxDepth = Math.max(...Array.from(levelTypeToDepth.values()), 1);
   
-  // Parent stack: tracks current parent at each depth level (now supports 5 levels)
-  const parentStack: Record<number, string | null> = { 1: null, 2: null, 3: null, 4: null, 5: null };
+  // Dynamic parent stack — size based on detected levels
+  const parentStack = new Map<number, string | null>();
 
   flatItems.forEach((aiItem) => {
     if (!aiItem || !aiItem.levelType) return;
     
-    const depth = LEVEL_TYPE_TO_DEPTH[aiItem.levelType] || 1;
+    const depth = levelTypeToDepth.get(aiItem.levelType) || 1;
     
     // Find parent from the level above
     let parentId: string | null = null;
     for (let d = depth - 1; d >= 1; d--) {
-      if (parentStack[d]) {
-        parentId = parentStack[d];
+      if (parentStack.get(d)) {
+        parentId = parentStack.get(d)!;
         break;
       }
     }
@@ -464,7 +508,7 @@ function rebuildHierarchyFromFlatItems(
       id,
       order: '', // Will be recalculated
       levelName: levels.find(l => l.depth === depth)?.name || 
-        aiItem.levelType.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        aiItem.levelType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
       levelDepth: depth,
       name: aiItem.name || 'Untitled Item',
       description: aiItem.description || '',
@@ -490,11 +534,11 @@ function rebuildHierarchyFromFlatItems(
     items.push(item);
     
     // Set this item as potential parent for deeper items
-    parentStack[depth] = id;
+    parentStack.set(depth, id);
     
     // Clear deeper levels (they need new parents when we encounter a new item at this depth)
-    for (let d = depth + 1; d <= 5; d++) {
-      parentStack[d] = null;
+    for (let d = depth + 1; d <= maxDepth; d++) {
+      parentStack.set(d, null);
     }
   });
   
@@ -545,6 +589,9 @@ export function convertAIResponseToPlanItems(
   aiResponse: AIExtractionResponse,
   levels: PlanLevel[]
 ): ParseResult {
+  // Set the current hierarchy for child normalization
+  setCurrentHierarchy(aiResponse.detectedLevels);
+  
   // First normalize the AI response to fix any malformed data
   const normalizedResponse = normalizeAIResponse(aiResponse);
   
@@ -564,12 +611,13 @@ export function convertAIResponseToPlanItems(
     rootsWithChildren,
     flatDetected,
     levelTypeDistribution: levelTypeDist,
+    detectedLevels: normalizedResponse.detectedLevels,
   });
 
   // Check if AI returned a flat response
   if (flatDetected) {
     console.log('Detected flat AI response, rebuilding hierarchy from levelType ordering');
-    const rebuiltItems = rebuildHierarchyFromFlatItems(normalizedResponse.items, levels);
+    const rebuiltItems = rebuildHierarchyFromFlatItems(normalizedResponse.items, levels, normalizedResponse.detectedLevels);
     const finalItems = recalculateItemsWithTreeDepth(rebuiltItems, levels);
     
     // Extract person mappings
