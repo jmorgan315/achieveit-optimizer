@@ -29,27 +29,30 @@ function createSafeError(
 
 const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
 
-Your task is to identify plan items that an organization would track progress on over time. 
+Your task is to identify plan items that an organization would track progress on over time.
 
-=== DOCUMENT TERMINOLOGY DETECTION (CRITICAL) ===
+=== DYNAMIC LEVEL DETECTION (CRITICAL) ===
 
-Many documents define their own hierarchy terms. DETECT and MAP these to our standard levels:
+Every document has its own hierarchy. Your job is to DETECT the levels the document uses, not force it into a template.
 
-Common document terms → Standard mapping:
-- "Pillar", "Strategic Priority", "Theme", "Strategic Goal" → strategic_priority (depth 1)
-- "Objective", "Focus Area", "Goal Area", "Priority Area" → focus_area (depth 2)  
-- "Outcome KPI", "Goal", "Target", "Key Result" → goal (depth 3)
-- "Strategy", "Initiative", "Tactic", "Program", "Action" → action_item (depth 4)
-- "Strategy KPI", "Metric", "Measure", "Tollgate", "Sub-metric" → sub_action (depth 5)
+1. Read the document and identify its natural hierarchy levels.
+2. Assign a consistent, descriptive levelType string to each level (e.g., "strategic_priority", "focus_area", "goal", "action_item", "kpi", or whatever terms fit the document).
+3. Items at the same hierarchy depth MUST use the same levelType string.
+4. Report all detected levels in the detectedLevels array, with depth 1 for the highest level, depth 2 for the next, etc.
+
+Examples of level detection:
+- A 3-level document might have: strategic_priority (depth 1), focus_area (depth 2), goal (depth 3)
+- A 5-level document might have: pillar (depth 1), objective (depth 2), outcome_kpi (depth 3), strategy (depth 4), strategy_kpi (depth 5)
+- A 2-level document might have: theme (depth 1), initiative (depth 2)
 
 Look for definition sections like "Terms definitions:", "Key terms:", "Glossary" that explain the document's terminology.
 
-EXTRACT these types of items (IN HIERARCHICAL ORDER):
-1. strategic_priority - Top-level themes (e.g., "Economic Security", "Climate Resilience", "Equity & Access")
-2. focus_area - Mid-level groupings under priorities (e.g., "Housing Access", "Workforce Development")
-3. goal - Outcome KPIs with targets (e.g., "Increase affordable units by 3%")
-4. action_item - Strategies and initiatives (e.g., "Expand services", "Complete permit applications by Q2")
-5. sub_action - Strategy KPIs, metrics, tollgates (e.g., "Track monthly", "Increase by 10%")
+EXTRACT these types of items (trackable, actionable items at any level):
+- Top-level themes/priorities/pillars
+- Mid-level groupings/objectives/focus areas
+- Goals with targets
+- Strategies, initiatives, actions
+- KPIs, metrics, measures
 
 SKIP these (do NOT include as plan items):
 - Table of contents, page numbers, headers, footers
@@ -68,13 +71,6 @@ If the document text appears to come from a table or matrix format:
 3. KPIs/Metrics belong under their associated Strategy/Goal
 4. Extract ALL items including those that look like metrics or KPIs
 
-Example: If you see "Pillar: Equity | Objective: Access | Strategy: Expand | KPI: +10%"
-This should produce:
-- strategic_priority: "Equity"
-  - focus_area: "Access"
-    - goal: "Expand"
-      - action_item: "+10%" (with metricTarget)
-
 === CRITICAL HIERARCHY RULES (MUST FOLLOW) ===
 
 1. DETECT THE DOCUMENT'S NATURAL STRUCTURE:
@@ -83,13 +79,13 @@ This should produce:
    - Do NOT force the document into a predetermined template or framework
    - Follow the document's own groupings, headings, sections, and nesting
 
-2. ROOT LEVEL: ONLY strategic_priority items at root. EVERY focus_area, goal, action_item, and sub_action MUST be nested as a child — NEVER at root level.
+2. ROOT LEVEL: ONLY the highest-level items at root. EVERY lower-level item MUST be nested as a child — NEVER at root level.
 
 3. EVERY ITEM MUST USE children[] FOR NESTING:
-   - strategic_priority -> children: [focus_area items]
-   - focus_area -> children: [goal items]
-   - goal -> children: [action_item items]
-   - action_item -> children: [sub_action items]
+   - Level 1 items -> children: [Level 2 items]
+   - Level 2 items -> children: [Level 3 items]
+   - Level 3 items -> children: [Level 4 items]
+   - And so on for however many levels the document has
 
 4. NESTING IS MANDATORY:
    - EVERY bullet point, numbered item, goal, and action MUST be nested as a child under its parent — NEVER at root level
@@ -97,9 +93,8 @@ This should produce:
    - If you find yourself putting everything at root level with no children, you are doing it WRONG — go back and nest items under their natural parents
 
 5. VALIDATION BEFORE RETURNING:
-   - Each strategic_priority SHOULD have children (focus_area, goal, or action_item items)
-   - Goals should be nested under focus_areas or strategic_priorities, not at root
-   - focus_area items should NOT be at root level
+   - Each root item SHOULD have children
+   - Lower-level items should be nested under their parents, not at root
    - If all items are at root with empty children arrays, your response is WRONG — go back and nest them properly
    - Did you preserve the document's own hierarchy? Do parent items have their children nested?
 
@@ -107,8 +102,8 @@ This should produce:
 
 When you see bullet points under a heading:
 - ALL bullets at the same indent level = SAME levelType
-- Bullets under "Housing Access" heading = children of that focus_area
-- Example: "The county will:" followed by 5 bullets = 5 goals nested under that section
+- Bullets under a section heading = children of that section
+- Example: "The county will:" followed by 5 bullets = 5 children nested under that section
 
 DO NOT:
 - Put bullets as siblings at root level
@@ -126,24 +121,33 @@ INPUT:
 
 OUTPUT:
 {
-  "name": "Quality Improvement",
-  "levelType": "strategic_priority",
-  "children": [
+  "items": [
     {
-      "name": "Patient Safety",
-      "levelType": "focus_area",
+      "name": "Quality Improvement",
+      "levelType": "priority",
       "children": [
-        { "name": "Reduce readmission rates by 5%", "levelType": "goal" },
-        { "name": "Implement safety protocols", "levelType": "goal" },
-        { "name": "Train staff on new procedures", "levelType": "goal" }
+        {
+          "name": "Patient Safety",
+          "levelType": "focus_area",
+          "children": [
+            { "name": "Reduce readmission rates by 5%", "levelType": "goal" },
+            { "name": "Implement safety protocols", "levelType": "goal" },
+            { "name": "Train staff on new procedures", "levelType": "goal" }
+          ]
+        }
       ]
     }
+  ],
+  "detectedLevels": [
+    { "depth": 1, "name": "priority" },
+    { "depth": 2, "name": "focus_area" },
+    { "depth": 3, "name": "goal" }
   ]
 }
 
 === WRONG (FLAT) OUTPUT - DO NOT DO THIS ===
 [
-  { "name": "Quality Improvement", "levelType": "strategic_priority" },
+  { "name": "Quality Improvement", "levelType": "priority" },
   { "name": "Patient Safety", "levelType": "focus_area" },
   { "name": "Reduce readmission rates", "levelType": "goal" }
 ]
@@ -151,41 +155,78 @@ OUTPUT:
 
 === SELF-CHECK BEFORE RESPONDING ===
 1. Did you detect and follow the document's own structure?
-2. Do root items have empty children arrays? → Move subsequent items into children
-3. Are focus_area items at root? → They should be children of strategic_priority
-4. Are goal items at root? → They should be children of focus_area or strategic_priority
+2. Did you report all detected levels in detectedLevels with correct depth ordering?
+3. Do root items have empty children arrays? → Move subsequent items into children
+4. Are lower-level items at root? → They should be children of higher-level items
 5. If all items are at root with no nesting, your response is WRONG — restructure.`;
+
+// Helper to build a single item schema at a given nesting depth
+function buildItemProperties(): Record<string, unknown> {
+  return {
+    name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
+    levelType: { type: "string", description: "A label for this item's hierarchy level. Items at the same hierarchy depth should use the same levelType string. Use descriptive snake_case labels like 'strategic_priority', 'focus_area', 'goal', etc." },
+    description: { type: "string", description: "Brief description adding actionable context (optional)" },
+    owner: { type: "string", description: "Person, role, or department responsible (if mentioned)" },
+    metricTarget: { type: "string", description: "Target value if this is a measurable goal (e.g., '3%', '600', '$2M')" },
+    metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage", "None"], description: "Unit type for the metric (use 'None' if not applicable)" },
+    startDate: { type: "string", description: "Start date in YYYY-MM-DD format (if mentioned)" },
+    dueDate: { type: "string", description: "Due/target date in YYYY-MM-DD format (if mentioned)" },
+  };
+}
+
+// Build inlined schema with explicit nesting (no $ref)
+const level4Item = {
+  type: "object",
+  properties: {
+    ...buildItemProperties(),
+    // Deepest level — no children
+  },
+  required: ["name", "levelType"],
+};
+
+const level3Item = {
+  type: "object",
+  properties: {
+    ...buildItemProperties(),
+    children: { type: "array", description: "Nested child items", items: level4Item },
+  },
+  required: ["name", "levelType"],
+};
+
+const level2Item = {
+  type: "object",
+  properties: {
+    ...buildItemProperties(),
+    children: { type: "array", description: "Nested child items", items: level3Item },
+  },
+  required: ["name", "levelType"],
+};
+
+const level1Item = {
+  type: "object",
+  properties: {
+    ...buildItemProperties(),
+    children: { type: "array", description: "Nested child items", items: level2Item },
+  },
+  required: ["name", "levelType"],
+};
 
 const extractPlanItemsSchema = {
   type: "object",
   properties: {
     items: {
       type: "array",
-      description: "Hierarchical list of extracted plan items",
-      items: {
-        type: "object",
-        properties: {
-          name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
-          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"], description: "The hierarchy level of this item" },
-          description: { type: "string", description: "Brief description adding actionable context (optional)" },
-          owner: { type: "string", description: "Person, role, or department responsible (if mentioned)" },
-          metricTarget: { type: "string", description: "Target value if this is a measurable goal (e.g., '3%', '600', '$2M')" },
-          metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage", "None"], description: "Unit type for the metric (use 'None' if not applicable)" },
-          startDate: { type: "string", description: "Start date in YYYY-MM-DD format (if mentioned)" },
-          dueDate: { type: "string", description: "Due/target date in YYYY-MM-DD format (if mentioned)" },
-          children: { type: "array", description: "Nested child items under this item", items: { $ref: "#/properties/items/items" } }
-        },
-        required: ["name", "levelType"]
-      }
+      description: "Hierarchical list of extracted plan items (root-level items only, with children nested)",
+      items: level1Item
     },
     detectedLevels: {
       type: "array",
-      description: "The hierarchy level names detected in this document",
+      description: "The hierarchy levels detected in this document, ordered by depth",
       items: {
         type: "object",
         properties: {
-          depth: { type: "number" },
-          name: { type: "string" }
+          depth: { type: "number", description: "Depth in hierarchy (1 = highest/root level)" },
+          name: { type: "string", description: "The levelType label used for items at this depth" }
         },
         required: ["depth", "name"]
       }
@@ -269,7 +310,7 @@ serve(async (req) => {
     }
 
     const extractedData = JSON.parse(toolCall.function.arguments);
-    console.log(`Extracted ${extractedData.items?.length || 0} top-level items`);
+    console.log(`Extracted ${extractedData.items?.length || 0} top-level items, detected ${extractedData.detectedLevels?.length || 0} levels`);
 
     return new Response(
       JSON.stringify({ success: true, data: extractedData }),
