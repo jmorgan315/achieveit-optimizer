@@ -39,19 +39,9 @@ import { PlanItem, PlanLevel } from '@/types/plan';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings, ArrowLeft, RotateCcw } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
+import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
 
 type DropInfo = { itemId: string; position: DropPosition };
 
@@ -157,7 +147,7 @@ export function PlanOptimizerStep({
       console.error('Suggestion error:', error);
       toast({
         title: 'Suggestion failed',
-        description: error instanceof Error ? error.message : 'Could not generate suggestion',
+        description: getUserFriendlyError(error, 'suggestion'),
         variant: 'destructive',
       });
     } finally {
@@ -531,42 +521,6 @@ export function PlanOptimizerStep({
         </CardContent>
       </Card>
 
-      {/* Action Buttons */}
-      <div className="flex items-center gap-3">
-        {onBack && (
-          <Button variant="ghost" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-        )}
-        <Button onClick={onExport} className="flex-1 h-12 text-base">
-          Download AchieveIt Import File
-        </Button>
-        {onStartOver && (
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="ghost" className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                <RotateCcw className="h-4 w-4 mr-2" />
-                Start Over
-              </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Start over?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This will discard all your current work including uploaded plans, mappings, and edits. This action cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={onStartOver} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                  Yes, start over
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-      </div>
 
       {/* Metric Suggestion Dialog */}
       <Dialog open={showMetricDialog} onOpenChange={setShowMetricDialog}>
@@ -707,6 +661,7 @@ export function PlanOptimizerStep({
           open={showLevelModal}
           onOpenChange={setShowLevelModal}
           levels={levels}
+          items={items}
           onConfirm={(newLevels) => {
             onUpdateLevels(newLevels);
             toast({

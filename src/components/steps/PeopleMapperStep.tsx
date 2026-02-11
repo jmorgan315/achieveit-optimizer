@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { PersonMapping } from '@/types/plan';
-import { Users, Check, AlertCircle, Mail, ArrowLeft } from 'lucide-react';
+import { Users, Check, AlertCircle, Mail } from 'lucide-react';
 
 interface PeopleMapperStepProps {
   personMappings: PersonMapping[];
@@ -125,16 +125,10 @@ export function PeopleMapperStep({
             </p>
           </div>
 
-          <div className="mt-6 flex items-center gap-3">
-            {onBack && (
-              <Button variant="ghost" onClick={onBack}>
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back
-              </Button>
-            )}
+          <div className="mt-6">
             <Button
               onClick={handleComplete}
-              className="flex-1 h-12"
+              className="w-full h-12"
             >
               Continue with {resolvedCount} Resolved Owners
             </Button>

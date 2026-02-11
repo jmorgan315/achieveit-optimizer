@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Brain, Eye } from 'lucide-react';
 import { SAMPLE_RAW_TEXT, PlanItem, PersonMapping, PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
 import { toast } from '@/hooks/use-toast';
+import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
 import { AIExtractionResponse, AIDocumentTerminology, convertAIResponseToPlanItems } from '@/utils/textParser';
 import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
 
@@ -168,7 +169,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       console.error('Vision AI extraction error:', error);
       toast({
         title: "Vision AI Extraction Failed",
-        description: error instanceof Error ? error.message : "Please try again or use a different document format",
+        description: getUserFriendlyError(error, 'vision'),
         variant: "destructive",
       });
       setExtractedItems(null);
@@ -265,7 +266,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       console.error('AI extraction error:', error);
       toast({
         title: "AI Extraction Issue",
-        description: error instanceof Error ? error.message : "Falling back to basic parsing",
+        description: getUserFriendlyError(error, 'extraction'),
         variant: "destructive",
       });
       // Clear extraction results so user can still proceed with basic parsing
@@ -390,7 +391,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       setFileContent(SAMPLE_RAW_TEXT);
       toast({
         title: "Processing failed",
-        description: error instanceof Error ? error.message : "Using sample data instead",
+        description: getUserFriendlyError(error, 'upload'),
         variant: "destructive",
       });
       setIsProcessing(false);

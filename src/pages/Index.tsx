@@ -10,6 +10,19 @@ import { usePlanState } from '@/hooks/usePlanState';
 import { ProcessingPath, PlanItem, PersonMapping, PlanLevel } from '@/types/plan';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
+import { ArrowLeft, RotateCcw, Download } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 const WIZARD_STEPS = [
   { id: 'upload', title: 'Upload Plan' },
@@ -118,6 +131,49 @@ const Index = () => {
       <main className="container mx-auto px-4 py-8">
         <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} onStepClick={handleStepClick} />
 
+        {/* Sticky Action Bar */}
+        {currentStep > 0 && (
+          <div className="sticky top-16 z-40 bg-background/95 backdrop-blur-sm border-b border-border/50 -mx-4 px-4 py-3 mt-4 flex items-center justify-between">
+            <Button variant="ghost" onClick={handleBack} size="sm">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back
+            </Button>
+
+            <div className="flex items-center gap-3">
+              {currentStep === 3 && (
+                <>
+                  <Button onClick={handleExport} size="sm">
+                    <Download className="h-4 w-4 mr-2" />
+                    Download AchieveIt Import File
+                  </Button>
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10">
+                        <RotateCcw className="h-4 w-4 mr-2" />
+                        Start Over
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Start over?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          This will discard all your current work including uploaded plans, mappings, and edits. This action cannot be undone.
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction onClick={handleStartOver} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                          Yes, start over
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="mt-8">
           {currentStep === 0 && (
             <FileUploadStep 
@@ -160,6 +216,7 @@ const Index = () => {
         open={showLevelModal}
         onOpenChange={setShowLevelModal}
         levels={state.levels}
+        items={state.items}
         onConfirm={handleLevelConfirm}
       />
     </div>
