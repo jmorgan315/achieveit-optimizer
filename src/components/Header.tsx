@@ -10,18 +10,18 @@ export function Header() {
             href="https://www.achieveit.com" 
             target="_blank" 
             rel="noopener noreferrer"
-            className="flex items-center gap-3 hover:opacity-90 transition-opacity"
+            className="hover:opacity-90 transition-opacity"
           >
             <img 
               src={achieveitLogo} 
               alt="AchieveIt - Let's actually do this." 
               className="h-10 w-auto"
             />
-            <div className="hidden sm:block h-6 w-px bg-border mx-2" />
-            <span className="hidden sm:block text-sm font-medium text-muted-foreground">
-              Plan Import Assistant
-            </span>
           </a>
+          <div className="hidden sm:block h-6 w-px bg-border mx-2" />
+          <span className="hidden sm:block text-sm font-medium text-muted-foreground">
+            Plan Import Assistant
+          </span>
         </div>
 
         <div className="flex items-center gap-4">

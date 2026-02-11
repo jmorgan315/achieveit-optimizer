@@ -105,14 +105,6 @@ export function PathSelectorStep({ onSelect, onBack }: PathSelectorStepProps) {
         </Card>
       </div>
 
-      {onBack && (
-        <div className="mt-6 flex justify-start">
-          <Button variant="ghost" onClick={onBack}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-        </div>
-      )}
     </div>
   );
 }

@@ -9,13 +9,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
-import { Plus, Trash2, GripVertical, Layers } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { PlanLevel, PlanItem, DEFAULT_LEVELS } from '@/types/plan';
+import { Plus, Trash2, Layers } from 'lucide-react';
 
 interface LevelVerificationModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   levels: PlanLevel[];
+  items?: PlanItem[];
   onConfirm: (levels: PlanLevel[]) => void;
 }
 
@@ -23,6 +30,7 @@ export function LevelVerificationModal({
   open,
   onOpenChange,
   levels: initialLevels,
+  items = [],
   onConfirm,
 }: LevelVerificationModalProps) {
   const [levels, setLevels] = useState<PlanLevel[]>(initialLevels);
@@ -33,8 +41,14 @@ export function LevelVerificationModal({
     setLevels([...levels, { id: newId, name: `Level ${newDepth}`, depth: newDepth }]);
   };
 
+  const getItemCountAtLevel = (level: PlanLevel) => {
+    return items.filter((item) => item.levelDepth === level.depth).length;
+  };
+
   const removeLevel = (id: string) => {
     if (levels.length <= 2) return;
+    const level = levels.find((l) => l.id === id);
+    if (level && getItemCountAtLevel(level) > 0) return;
     const filtered = levels.filter((l) => l.id !== id);
     setLevels(filtered.map((l, i) => ({ ...l, depth: i + 1 })));
   };
@@ -71,7 +85,6 @@ export function LevelVerificationModal({
               key={level.id}
               className="flex items-center gap-3 p-3 rounded-lg border bg-card"
             >
-              <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab" />
               <div className="flex-shrink-0 h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
                 <span className="text-sm font-semibold text-primary">{index + 1}</span>
               </div>
@@ -81,15 +94,34 @@ export function LevelVerificationModal({
                 className="flex-1"
                 placeholder="Level name"
               />
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => removeLevel(level.id)}
-                disabled={levels.length <= 2}
-                className="text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
+              {(() => {
+                const itemCount = getItemCountAtLevel(level);
+                const isDisabled = levels.length <= 2 || itemCount > 0;
+                const button = (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => removeLevel(level.id)}
+                    disabled={isDisabled}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                );
+                if (itemCount > 0) {
+                  return (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>{button}</TooltipTrigger>
+                        <TooltipContent>
+                          <p>{itemCount} item{itemCount !== 1 ? 's are' : ' is'} assigned to this level</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  );
+                }
+                return button;
+              })()}
             </div>
           ))}
         </div>
