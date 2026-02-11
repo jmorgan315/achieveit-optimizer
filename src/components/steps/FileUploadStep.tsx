@@ -54,7 +54,44 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
     return { text: result.text, pageCount: result.pageCount };
   };
 
-  const extractWithVisionAI = async (file: File): Promise<void> => {
+  // Verification: checks extraction quality
+  const verifyExtractionResult = (
+    items: PlanItem[],
+    levels: PlanLevel[],
+    pageCount: number
+  ): { passed: boolean; reason: string } => {
+    if (!items || items.length === 0) {
+      return { passed: false, reason: 'No items extracted' };
+    }
+
+    // Check nesting: at least some items should have children
+    const hasNesting = items.some(item => item.children && item.children.length > 0);
+    if (!hasNesting && items.length > 2) {
+      return { passed: false, reason: 'All items are flat with no hierarchy — likely incomplete extraction' };
+    }
+
+    // Check reasonable item count for page count (at least 1 item per 3 pages)
+    const minExpected = Math.max(1, Math.floor(pageCount / 3));
+    if (items.length < minExpected && pageCount > 3) {
+      return { passed: false, reason: `Only ${items.length} items for ${pageCount} pages — likely missed content` };
+    }
+
+    // Count total items recursively
+    const countAll = (list: PlanItem[]): number => 
+      list.reduce((sum, item) => sum + 1 + countAll(item.children || []), 0);
+    const totalItems = countAll(items);
+
+    if (totalItems < 3 && pageCount > 2) {
+      return { passed: false, reason: `Only ${totalItems} total items — likely incomplete` };
+    }
+
+    return { passed: true, reason: 'OK' };
+  };
+
+  const extractWithVisionAI = async (
+    file: File,
+    levelHints?: PlanLevel[]
+  ): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
     setIsExtracting(true);
     setUseVisionAI(true);
     setProcessingStatus('Rendering PDF pages for visual analysis...');
@@ -70,6 +107,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       let allItems: AIExtractionResponse['items'] = [];
       let detectedLevelsFromVision: AIExtractionResponse['detectedLevels'] = [];
       let previousContext = '';
+
+      // If we have level hints from text extraction, seed the context
+      if (levelHints && levelHints.length > 0) {
+        const levelNames = levelHints.map(l => l.name).join(', ');
+        previousContext = `Document hierarchy terminology detected from text analysis: ${levelNames}. Use these SAME level terms for consistency.`;
+      }
 
       for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
         const batch = batches[batchIndex];
@@ -113,11 +156,10 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         
         // Check for columnHierarchy in documentTerminology (first batch only)
         if (batchIndex === 0 && result.data.documentTerminology?.columnHierarchy?.length > 0) {
-          // Build detected levels from column hierarchy order
           detectedLevelsFromVision = result.data.documentTerminology.columnHierarchy.map(
             (name: string, idx: number) => ({
               depth: idx + 1,
-              name: name // Use actual column name like "Outcome KPI"
+              name: name
             })
           );
         } else if (result.data.detectedLevels?.length > 0 && detectedLevelsFromVision.length === 0) {
@@ -152,11 +194,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       // Convert AI response to PlanItems
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
 
-      setExtractedItems(items);
-      setExtractedMappings(personMappings);
-      setDetectedLevels(levels);
-      setFileContent('__VISION_EXTRACTED__'); // Marker that content was extracted via vision
-      
       const itemCount = items.length;
       setProcessingStatus(`Vision AI found ${itemCount} trackable plan items`);
       
@@ -165,6 +202,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         description: `Extracted ${itemCount} plan items from visual document analysis`,
       });
 
+      return { items, levels, personMappings };
+
     } catch (error) {
       console.error('Vision AI extraction error:', error);
       toast({
@@ -172,10 +211,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         description: getUserFriendlyError(error, 'vision'),
         variant: "destructive",
       });
-      setExtractedItems(null);
-      setExtractedMappings(null);
-      setDetectedLevels(null);
-      setUseVisionAI(false);
+      return null;
     } finally {
       setIsExtracting(false);
     }
@@ -188,15 +224,13 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
   ): AIExtractionResponse['items'] => {
     if (existing.length === 0) return newItems;
     
-    // For now, simple concatenation - the AI should handle continuity via context
-    // In the future, could implement smarter deduplication
     const existingNames = new Set(existing.map(item => item.name.toLowerCase()));
     
     const uniqueNewItems = newItems.filter(item => {
       if (!item?.name) return false;
       const nameLower = item.name.toLowerCase();
       if (existingNames.has(nameLower)) {
-        return false; // Skip duplicates
+        return false;
       }
       existingNames.add(nameLower);
       return true;
@@ -205,7 +239,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
     return [...existing, ...uniqueNewItems];
   };
 
-  const extractPlanItemsWithAI = async (text: string): Promise<void> => {
+  const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
     setIsExtracting(true);
     const isLargeDoc = text.length > 50000;
     setProcessingStatus(isLargeDoc ? 'AI analyzing large document (multi-pass)...' : 'AI analyzing document for plan items...');
@@ -250,10 +284,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       // Convert AI response to PlanItems
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
 
-      setExtractedItems(items);
-      setExtractedMappings(personMappings);
-      setDetectedLevels(levels);
-      
       const itemCount = items.length;
       setProcessingStatus(`Found ${itemCount} trackable plan items`);
       
@@ -262,6 +292,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         description: `Extracted ${itemCount} plan items from your document`,
       });
 
+      return { items, levels, personMappings };
+
     } catch (error) {
       console.error('AI extraction error:', error);
       toast({
@@ -269,10 +301,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         description: getUserFriendlyError(error, 'extraction'),
         variant: "destructive",
       });
-      // Clear extraction results so user can still proceed with basic parsing
-      setExtractedItems(null);
-      setExtractedMappings(null);
-      setDetectedLevels(null);
+      return null;
     } finally {
       setIsExtracting(false);
     }
@@ -293,7 +322,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       const isWord = fileName.endsWith('.doc') || fileName.endsWith('.docx');
       const isExcel = fileName.endsWith('.xls') || fileName.endsWith('.xlsx');
       
-      // Text-based files can be read directly
       const textExtensions = ['.txt', '.csv', '.json', '.xml', '.md'];
       const isTextFile = textExtensions.some(ext => fileName.endsWith(ext)) || file.type.startsWith('text/');
 
@@ -309,48 +337,150 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
           console.log('File over 10MB, skipping text extraction, using Vision AI directly');
           setProcessingStatus('Large document detected, using Vision AI...');
           setIsProcessing(false);
-          await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionAI(file);
+          if (visionResult) {
+            setExtractedItems(visionResult.items);
+            setExtractedMappings(visionResult.personMappings);
+            setDetectedLevels(visionResult.levels);
+            setFileContent('__VISION_EXTRACTED__');
+          }
           return;
         }
         
-        // First try text extraction for smaller files
+        // Step 1: Text extraction
         try {
           const result = await parsePdfWithEdgeFunction(file);
           extractedText = result.text;
           pageCount = result.pageCount;
         } catch (error) {
           console.log('Text extraction failed, will try vision AI', error);
-          // If text extraction fails for any reason, fall back to Vision AI
           setProcessingStatus('Text extraction unavailable, using Vision AI...');
           setIsProcessing(false);
-          await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionAI(file);
+          if (visionResult) {
+            setExtractedItems(visionResult.items);
+            setExtractedMappings(visionResult.personMappings);
+            setDetectedLevels(visionResult.levels);
+            setFileContent('__VISION_EXTRACTED__');
+          }
           return;
         }
 
-        // Only fall back to Vision AI if text is truly empty or corrupted
+        // Step 2: Quality gate
         if (!extractedText || extractedText.trim().length < 50) {
           console.log('Text extraction returned empty/minimal content, falling back to Vision AI');
           setProcessingStatus('No readable text found, using Vision AI...');
           setIsProcessing(false);
-          await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionAI(file);
+          if (visionResult) {
+            setExtractedItems(visionResult.items);
+            setExtractedMappings(visionResult.personMappings);
+            setDetectedLevels(visionResult.levels);
+            setFileContent('__VISION_EXTRACTED__');
+          }
           return;
         }
         
-        // Check for gibberish (high ratio of non-alphanumeric characters suggests corrupted extraction)
+        // Check for gibberish
         const alphanumericChars = extractedText.replace(/[^a-zA-Z0-9]/g, '').length;
         const gibberishRatio = alphanumericChars / extractedText.length;
         if (gibberishRatio < 0.3) {
           console.log(`Text appears corrupted (alphanumeric ratio: ${gibberishRatio.toFixed(2)}), falling back to Vision AI`);
           setProcessingStatus('Text extraction corrupted, using Vision AI...');
           setIsProcessing(false);
-          await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionAI(file);
+          if (visionResult) {
+            setExtractedItems(visionResult.items);
+            setExtractedMappings(visionResult.personMappings);
+            setDetectedLevels(visionResult.levels);
+            setFileContent('__VISION_EXTRACTED__');
+          }
           return;
         }
         
         console.log(`Text extraction successful: ${extractedText.length} chars, ${pageCount} pages, alphanumeric ratio: ${gibberishRatio.toFixed(2)}`);
         
+        setFileContent(extractedText);
+        setIsProcessing(false);
+
+        // Step 3: Text-based AI extraction
+        const textResult = await extractPlanItemsWithAI(extractedText);
+
+        // Step 4: Result gate — did text AI find items?
+        if (!textResult || textResult.items.length === 0) {
+          console.log('Text AI found 0 items, falling back to Vision AI with level hints');
+          setProcessingStatus('Text analysis found no items, trying visual analysis...');
+          const levelHints = textResult?.levels || undefined;
+          const visionResult = await extractWithVisionAI(file, levelHints);
+          if (visionResult) {
+            setExtractedItems(visionResult.items);
+            setExtractedMappings(visionResult.personMappings);
+            setDetectedLevels(visionResult.levels);
+            setFileContent('__VISION_EXTRACTED__');
+          }
+          return;
+        }
+
+        // Step 5: Verification
+        const verification = verifyExtractionResult(textResult.items, textResult.levels, pageCount);
+        if (!verification.passed) {
+          console.log(`Text extraction verification failed: ${verification.reason}. Trying Vision AI...`);
+          setProcessingStatus(`Verification: ${verification.reason}. Trying visual analysis...`);
+          const visionResult = await extractWithVisionAI(file, textResult.levels);
+          if (visionResult) {
+            // Verify vision result too
+            const visionVerification = verifyExtractionResult(visionResult.items, visionResult.levels, pageCount);
+            if (visionVerification.passed) {
+              setExtractedItems(visionResult.items);
+              setExtractedMappings(visionResult.personMappings);
+              setDetectedLevels(visionResult.levels);
+              setFileContent('__VISION_EXTRACTED__');
+              return;
+            } else {
+              // Vision also failed verification — use whichever has more items
+              console.log(`Vision verification also failed: ${visionVerification.reason}. Using best result.`);
+              const countAll = (list: PlanItem[]): number =>
+                list.reduce((sum, item) => sum + 1 + countAll(item.children || []), 0);
+              const textTotal = countAll(textResult.items);
+              const visionTotal = countAll(visionResult.items);
+              
+              if (visionTotal > textTotal) {
+                setExtractedItems(visionResult.items);
+                setExtractedMappings(visionResult.personMappings);
+                setDetectedLevels(visionResult.levels);
+                setFileContent('__VISION_EXTRACTED__');
+              } else {
+                setExtractedItems(textResult.items);
+                setExtractedMappings(textResult.personMappings);
+                setDetectedLevels(textResult.levels);
+              }
+              toast({
+                title: "Extraction may be incomplete",
+                description: "We extracted what we could, but some items may be missing. Please review carefully.",
+                variant: "destructive",
+              });
+              return;
+            }
+          }
+          // Vision failed entirely — use text result with warning
+          setExtractedItems(textResult.items);
+          setExtractedMappings(textResult.personMappings);
+          setDetectedLevels(textResult.levels);
+          toast({
+            title: "Extraction may be incomplete",
+            description: verification.reason + ". Please review carefully.",
+            variant: "destructive",
+          });
+          return;
+        }
+
+        // Text extraction passed verification
+        setExtractedItems(textResult.items);
+        setExtractedMappings(textResult.personMappings);
+        setDetectedLevels(textResult.levels);
+        return;
+        
       } else if (isWord || isExcel) {
-        // Binary office formats - would need server-side processing
         setProcessingStatus('Processing document...');
         await new Promise(resolve => setTimeout(resolve, 1000));
         extractedText = SAMPLE_RAW_TEXT;
@@ -359,7 +489,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
           description: "Using sample data for demo. Full Office support coming soon.",
         });
       } else if (isTextFile) {
-        // Read text files directly
         setProcessingStatus('Reading file...');
         const reader = new FileReader();
         
@@ -371,7 +500,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
 
         extractedText = content && content.length > 0 ? content : SAMPLE_RAW_TEXT;
       } else {
-        // Unsupported format
         extractedText = SAMPLE_RAW_TEXT;
         toast({
           title: "Unsupported format",
@@ -383,8 +511,13 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       setFileContent(extractedText);
       setIsProcessing(false);
       
-      // Now trigger AI extraction
-      await extractPlanItemsWithAI(extractedText);
+      // For non-PDF files, run text extraction and set state directly
+      const textResult = await extractPlanItemsWithAI(extractedText);
+      if (textResult) {
+        setExtractedItems(textResult.items);
+        setExtractedMappings(textResult.personMappings);
+        setDetectedLevels(textResult.levels);
+      }
       
     } catch (error) {
       console.error('File processing error:', error);
@@ -417,8 +550,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
   const loadSampleData = async () => {
     setUploadedFile({ name: 'sample-strategic-plan.txt', size: SAMPLE_RAW_TEXT.length } as File);
     setFileContent(SAMPLE_RAW_TEXT);
-    // Trigger AI extraction for sample data too
-    await extractPlanItemsWithAI(SAMPLE_RAW_TEXT);
+    const textResult = await extractPlanItemsWithAI(SAMPLE_RAW_TEXT);
+    if (textResult) {
+      setExtractedItems(textResult.items);
+      setExtractedMappings(textResult.personMappings);
+      setDetectedLevels(textResult.levels);
+    }
   };
 
   const handleContinue = () => {
