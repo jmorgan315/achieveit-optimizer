@@ -256,6 +256,16 @@ export function usePlanState() {
     });
   }, []);
 
+  const resetState = useCallback(() => {
+    setState({
+      levels: DEFAULT_LEVELS,
+      items: [],
+      personMappings: [],
+      processingPath: null,
+      rawText: '',
+    });
+  }, []);
+
   return {
     state,
     setLevels,
@@ -271,6 +281,7 @@ export function usePlanState() {
     reorderSiblings,
     updateLevelsAndRecalculate,
     changeItemLevel,
+    resetState,
   };
 }
 
