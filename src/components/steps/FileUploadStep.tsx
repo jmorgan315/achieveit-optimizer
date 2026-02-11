@@ -206,7 +206,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
 
   const extractPlanItemsWithAI = async (text: string): Promise<void> => {
     setIsExtracting(true);
-    setProcessingStatus('AI analyzing document for plan items...');
+    const isLargeDoc = text.length > 50000;
+    setProcessingStatus(isLargeDoc ? 'AI analyzing large document (multi-pass)...' : 'AI analyzing document for plan items...');
 
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-items`, {

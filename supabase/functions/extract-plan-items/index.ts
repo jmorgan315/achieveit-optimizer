@@ -8,6 +8,7 @@ const corsHeaders = {
 // Validation constants
 const MAX_TEXT_LENGTH = 300000;
 const MIN_TEXT_LENGTH = 50;
+const CHUNK_SIZE = 50000;
 
 // Safe error helper
 function createSafeError(
@@ -25,6 +26,44 @@ function createSafeError(
     JSON.stringify({ success: false, error: publicMessage }),
     { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
+}
+
+// Split document into chunks at paragraph boundaries
+function splitDocumentIntoChunks(text: string, maxChunkSize: number): string[] {
+  if (text.length <= maxChunkSize) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChunkSize) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // Find the best split point within the chunk size limit
+    let splitAt = maxChunkSize;
+
+    // Try to split at a double newline (paragraph boundary)
+    const lastDoubleNewline = remaining.lastIndexOf('\n\n', maxChunkSize);
+    if (lastDoubleNewline > maxChunkSize * 0.5) {
+      splitAt = lastDoubleNewline + 2; // Include the double newline
+    } else {
+      // Fall back to single newline
+      const lastNewline = remaining.lastIndexOf('\n', maxChunkSize);
+      if (lastNewline > maxChunkSize * 0.5) {
+        splitAt = lastNewline + 1;
+      }
+      // Otherwise just split at maxChunkSize
+    }
+
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
+  }
+
+  return chunks;
 }
 
 const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
@@ -96,7 +135,6 @@ If the document text appears to come from a table or matrix format:
    - Each root item SHOULD have children
    - Lower-level items should be nested under their parents, not at root
    - If all items are at root with empty children arrays, your response is WRONG — go back and nest them properly
-   - Did you preserve the document's own hierarchy? Do parent items have their children nested?
 
 === BULLET POINT HANDLING (CRITICAL) ===
 
@@ -179,7 +217,6 @@ const level4Item = {
   type: "object",
   properties: {
     ...buildItemProperties(),
-    // Deepest level — no children
   },
   required: ["name", "levelType"],
 };
@@ -235,6 +272,92 @@ const extractPlanItemsSchema = {
   required: ["items", "detectedLevels"]
 };
 
+interface ExtractedChunkResult {
+  items: unknown[];
+  detectedLevels: { depth: number; name: string }[];
+}
+
+async function processChunk(
+  chunkText: string,
+  chunkIndex: number,
+  totalChunks: number,
+  previousContext: { detectedLevels: { depth: number; name: string }[]; extractedItemNames: string[] } | null,
+  apiKey: string
+): Promise<ExtractedChunkResult> {
+  let userMessage = `Please analyze this strategic planning document and extract only the trackable plan items:\n\n${chunkText}`;
+
+  // For subsequent chunks, add context to avoid duplicates and maintain consistency
+  if (previousContext && chunkIndex > 0) {
+    const levelsList = previousContext.detectedLevels.map(l => `${l.name} (depth ${l.depth})`).join(', ');
+    const itemsList = previousContext.extractedItemNames.join(', ');
+    userMessage = `Continue extracting plan items from this document section (chunk ${chunkIndex + 1} of ${totalChunks}).
+
+IMPORTANT CONTEXT:
+- Previously detected hierarchy levels: ${levelsList}. Use these SAME level names for consistency.
+- Previously extracted top-level items: ${itemsList}
+- Do NOT re-extract any items already listed above.
+- Extract only NEW items found in this section.
+
+Document section:\n\n${chunkText}`;
+  }
+
+  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-3-flash-preview",
+      max_tokens: 16384,
+      messages: [
+        { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
+        { role: "user", content: userMessage }
+      ],
+      tools: [{
+        type: "function",
+        function: {
+          name: "extract_plan_items",
+          description: "Extract structured plan items from a strategic planning document",
+          parameters: extractPlanItemsSchema
+        }
+      }],
+      tool_choice: { type: "function", function: { name: "extract_plan_items" } }
+    }),
+  });
+
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw { status: 429, message: 'Service temporarily busy. Please try again in a moment.' };
+    }
+    if (response.status === 402) {
+      throw { status: 402, message: 'Service temporarily unavailable. Please try again later.' };
+    }
+    const errorText = await response.text();
+    throw { status: 500, message: 'Document processing failed. Please try again.', details: errorText };
+  }
+
+  const aiResponse = await response.json();
+  const toolCall = aiResponse.choices?.[0]?.message?.tool_calls?.[0];
+
+  if (!toolCall || toolCall.function?.name !== "extract_plan_items") {
+    throw { status: 500, message: 'Unable to extract plan items. Please try again.', details: 'Unexpected AI response format' };
+  }
+
+  return JSON.parse(toolCall.function.arguments);
+}
+
+// Collect all item names recursively for deduplication context
+function collectItemNames(items: unknown[]): string[] {
+  const names: string[] = [];
+  for (const item of items) {
+    const i = item as { name?: string; children?: unknown[] };
+    if (i.name) names.push(i.name);
+    if (i.children?.length) names.push(...collectItemNames(i.children));
+  }
+  return names;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -249,71 +372,73 @@ serve(async (req) => {
     const body = await req.json();
     const { documentText } = body;
 
-    // Validate documentText exists and is a string
     if (!documentText || typeof documentText !== "string") {
       return createSafeError(400, "Document text is required and must be a string.");
     }
 
     const trimmedText = documentText.trim();
 
-    // Validate minimum length
     if (trimmedText.length < MIN_TEXT_LENGTH) {
       return createSafeError(400, `Document text too short. Minimum ${MIN_TEXT_LENGTH} characters required.`);
     }
 
-    // Reject if too long (instead of silent truncation)
     if (trimmedText.length > MAX_TEXT_LENGTH) {
       return createSafeError(413, `Document text too long. Maximum ${MAX_TEXT_LENGTH} characters allowed.`);
     }
 
-    console.log(`Processing document with ${trimmedText.length} characters`);
+    // Split into chunks
+    const chunks = splitDocumentIntoChunks(trimmedText, CHUNK_SIZE);
+    console.log(`Processing document: ${trimmedText.length} chars, ${chunks.length} chunk(s)`);
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
-        messages: [
-          { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
-          { role: "user", content: `Please analyze this strategic planning document and extract only the trackable plan items:\n\n${trimmedText}` }
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "extract_plan_items",
-            description: "Extract structured plan items from a strategic planning document",
-            parameters: extractPlanItemsSchema
-          }
-        }],
-        tool_choice: { type: "function", function: { name: "extract_plan_items" } }
-      }),
-    });
+    let allItems: unknown[] = [];
+    let finalDetectedLevels: { depth: number; name: string }[] = [];
 
-    if (!response.ok) {
-      if (response.status === 429) {
-        return createSafeError(429, 'Service temporarily busy. Please try again in a moment.');
+    for (let i = 0; i < chunks.length; i++) {
+      console.log(`Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+
+      const previousContext = i > 0 ? {
+        detectedLevels: finalDetectedLevels,
+        extractedItemNames: collectItemNames(allItems),
+      } : null;
+
+      try {
+        const result = await processChunk(chunks[i], i, chunks.length, previousContext, LOVABLE_API_KEY);
+
+        if (result.items?.length > 0) {
+          allItems = [...allItems, ...result.items];
+        }
+
+        // Use detected levels from first chunk
+        if (i === 0 && result.detectedLevels?.length > 0) {
+          finalDetectedLevels = result.detectedLevels;
+        }
+
+        console.log(`Chunk ${i + 1}: extracted ${result.items?.length || 0} top-level items`);
+      } catch (chunkError) {
+        const err = chunkError as { status?: number; message?: string; details?: string };
+        if (err.status === 429 || err.status === 402) {
+          return createSafeError(err.status, err.message || 'Service error');
+        }
+        // Log and continue with remaining chunks
+        console.error(`Chunk ${i + 1} failed:`, err.details || err.message || chunkError);
+        // If first chunk fails, we can't continue meaningfully
+        if (i === 0) {
+          return createSafeError(500, 'Unable to process document. Please try again.', chunkError);
+        }
       }
-      if (response.status === 402) {
-        return createSafeError(503, 'Service temporarily unavailable. Please try again later.');
-      }
-      return createSafeError(500, 'Document processing failed. Please try again.', await response.text());
     }
 
-    const aiResponse = await response.json();
-    const toolCall = aiResponse.choices?.[0]?.message?.tool_calls?.[0];
-    
-    if (!toolCall || toolCall.function?.name !== "extract_plan_items") {
-      return createSafeError(500, 'Unable to extract plan items. Please try again.', 'Unexpected AI response format');
-    }
-
-    const extractedData = JSON.parse(toolCall.function.arguments);
-    console.log(`Extracted ${extractedData.items?.length || 0} top-level items, detected ${extractedData.detectedLevels?.length || 0} levels`);
+    console.log(`Total extracted: ${allItems.length} top-level items, ${finalDetectedLevels.length} levels, from ${chunks.length} chunk(s)`);
 
     return new Response(
-      JSON.stringify({ success: true, data: extractedData }),
+      JSON.stringify({
+        success: true,
+        data: {
+          items: allItems,
+          detectedLevels: finalDetectedLevels,
+        },
+        chunksProcessed: chunks.length,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
