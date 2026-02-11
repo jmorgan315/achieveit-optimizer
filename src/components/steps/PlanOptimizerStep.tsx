@@ -83,6 +83,7 @@ export function PlanOptimizerStep({
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | null>(null);
   
   // Track live pointer position for accurate drop detection
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -346,12 +347,45 @@ export function PlanOptimizerStep({
   const rootItems = items.filter((i) => !i.parentId);
   const getChildren = (parentId: string) => items.filter((i) => i.parentId === parentId);
 
+  // Compute visible items based on active filter
+  const getVisibleItemIds = useCallback((): Set<string> | null => {
+    if (!activeFilter) return null; // null means show all
+    const matchingItems = items.filter((i) => i.issues.some((is) => is.type === activeFilter));
+    const visibleIds = new Set<string>();
+    for (const item of matchingItems) {
+      visibleIds.add(item.id);
+      // Walk up parent chain to include ancestors
+      let current = item;
+      while (current.parentId) {
+        visibleIds.add(current.parentId);
+        const parent = items.find((i) => i.id === current.parentId);
+        if (!parent) break;
+        current = parent;
+      }
+    }
+    return visibleIds;
+  }, [activeFilter, items]);
+
+  const visibleItemIds = getVisibleItemIds();
+
+  // Auto-expand ancestors when filter is activated
+  const handleFilterClick = (filter: 'missing-owner' | 'missing-dates' | 'orphan') => {
+    if (activeFilter === filter) {
+      setActiveFilter(null);
+    } else {
+      setActiveFilter(filter);
+      // Auto-expand all items so filtered items are visible
+      setExpandedItems(new Set(items.map((i) => i.id)));
+    }
+  };
+
   // Build flat list for sortable context
   const buildFlatList = (parentId: string | null, depth: number): { item: PlanItem; depth: number }[] => {
     const result: { item: PlanItem; depth: number }[] = [];
     const children = parentId === null ? rootItems : getChildren(parentId);
 
     for (const item of children) {
+      if (visibleItemIds && !visibleItemIds.has(item.id)) continue;
       result.push({ item, depth });
       if (expandedItems.has(item.id)) {
         result.push(...buildFlatList(item.id, depth + 1));
@@ -374,13 +408,19 @@ export function PlanOptimizerStep({
     <div className="w-full max-w-6xl mx-auto space-y-6">
       {/* Stats Bar */}
       <div className="grid grid-cols-4 gap-4">
-        <Card>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${!activeFilter ? 'ring-2 ring-primary' : ''}`}
+          onClick={() => setActiveFilter(null)}
+        >
           <CardContent className="p-4">
             <div className="text-2xl font-bold text-foreground">{items.length}</div>
             <div className="text-sm text-muted-foreground">Total Items</div>
           </CardContent>
         </Card>
-        <Card className={issueStats.missingOwner > 0 ? 'border-destructive/50' : ''}>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'missing-owner' ? 'ring-2 ring-primary' : ''} ${issueStats.missingOwner > 0 ? 'border-destructive/50' : ''}`}
+          onClick={() => handleFilterClick('missing-owner')}
+        >
           <CardContent className="p-4">
             <div className={`text-2xl font-bold ${issueStats.missingOwner > 0 ? 'text-destructive' : 'text-success'}`}>
               {issueStats.missingOwner}
@@ -388,7 +428,10 @@ export function PlanOptimizerStep({
             <div className="text-sm text-muted-foreground">Missing Owners</div>
           </CardContent>
         </Card>
-        <Card className={issueStats.missingDates > 0 ? 'border-warning/50' : ''}>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'missing-dates' ? 'ring-2 ring-primary' : ''} ${issueStats.missingDates > 0 ? 'border-warning/50' : ''}`}
+          onClick={() => handleFilterClick('missing-dates')}
+        >
           <CardContent className="p-4">
             <div className={`text-2xl font-bold ${issueStats.missingDates > 0 ? 'text-warning' : 'text-success'}`}>
               {issueStats.missingDates}
@@ -396,7 +439,10 @@ export function PlanOptimizerStep({
             <div className="text-sm text-muted-foreground">Missing Dates</div>
           </CardContent>
         </Card>
-        <Card className={issueStats.orphans > 0 ? 'border-info/50' : ''}>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'orphan' ? 'ring-2 ring-primary' : ''} ${issueStats.orphans > 0 ? 'border-info/50' : ''}`}
+          onClick={() => handleFilterClick('orphan')}
+        >
           <CardContent className="p-4">
             <div className={`text-2xl font-bold ${issueStats.orphans > 0 ? 'text-info' : 'text-success'}`}>
               {issueStats.orphans}
