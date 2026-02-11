@@ -1,72 +1,57 @@
 
 
-# Fix: Restore Proper Hierarchical Extraction for Standard Strategic Plans
+# Plan: Make Extraction Document-Agnostic
 
 ## Problem
 
-The AI extraction returns all 68 items flat as `strategic_priority` with no children. This is a regression caused by the recent prompt changes that added multi-entity guidance (for 50-state documents). The model now incorrectly treats every line item as a root entity instead of properly nesting them.
-
-The Boulder County document has a clear 3-level hierarchy:
-- 3 Strategic Priorities (Economic Security, Climate Action, Good Governance)
-  - Numbered Focus Areas (1. Housing, 2. Mental Health, etc.)
-    - Bullet point Goals/Actions under each
-
-## Root Cause
-
-Two issues working together:
-
-1. **AI Prompt**: The multi-entity guidance ("If there are 50 states, return 50 root items") may be overriding the nesting instructions, causing the model to put everything at root level
-2. **Flat rebuild fallback**: When all items are returned as `strategic_priority`, the `rebuildHierarchyFromFlatItems()` function maps them all to depth 1, so no hierarchy gets reconstructed
+The current AI prompt forces documents into one of two predefined frameworks: "single organization strategic plan (3-7 root items)" or "multi-entity document (50 states)." This is too rigid. Real-world documents come in endless formats, and the AI should detect and follow whatever structure the document actually has rather than fitting it into a template.
 
 ## Solution
 
-### Change 1: Strengthen AI Prompt Hierarchy Instructions
+### Change 1: Rewrite the AI Prompt to Be Structure-Agnostic
 **File**: `supabase/functions/extract-plan-items/index.ts`
 
-Rebalance the prompt to strongly emphasize nesting for standard strategic plans while keeping multi-entity support:
+Replace the current framework-specific guidance (rules 3 and 4 about "single org" and "multi-entity") with universal instructions:
 
-- Move the nesting/hierarchy rules ABOVE the multi-entity guidance so the model sees them first
-- Add explicit instruction: "For a single organization's strategic plan, there should be only a few root strategic_priority items (typically 3-7) with everything else nested as children"
-- Add a clarifying note that multi-entity guidance only applies when the document clearly contains multiple distinct organizations/entities/locations
-- Add stronger emphasis: "EVERY bullet point and numbered item MUST be nested as a child, never at root level"
+- Remove all references to "single organization" vs "multi-entity" categorization
+- Remove the "3-7 root items" guideline and the "50 states" example framing
+- Replace with: "Read the document. Detect its natural structure. Use the hierarchy the document itself presents."
+- Keep the core nesting rules (root items should have children, don't flatten everything, use children[] arrays)
+- Keep the 5 level types (strategic_priority through sub_action) as the vocabulary for tagging items
+- Add instruction: "The number of root items depends entirely on the document. It could be 3, 15, or 50 -- follow what the document shows."
+- Simplify the self-check to focus on: "Did you preserve the document's own hierarchy? Do parent items have their children nested?"
 
-### Change 2: Smarter Flat Response Rebuild
+Key sections to rewrite:
+- Remove rule 3 ("FOR A SINGLE ORGANIZATION'S STRATEGIC PLAN") entirely
+- Remove rule 4 ("FOR MULTI-ENTITY DOCUMENTS") entirely
+- Replace with a single universal rule about detecting and following the document's natural structure
+- Simplify the examples to show generic nesting rather than specific document types
+
+### Change 2: Remove Framework-Specific Heuristics from Smart Rebuild
 **File**: `src/utils/textParser.ts`
 
-When `isFlatResponse()` detects a flat response AND all items share the same `levelType`, add smarter reconstruction:
+The `smartRebuildFromSameLevelType` function uses heuristics designed for corporate strategic plans (short titles = priorities, action verbs = goals). These assumptions don't hold for arbitrary document types.
 
-- If all items are `strategic_priority`, use name-based heuristics to detect which ones are actual top-level priorities vs. sub-items:
-  - Short, title-like names (under ~60 chars, no verbs like "Increase", "Implement") are likely real priorities
-  - Longer, action-oriented names starting with verbs are likely goals/action items
-  - Numbered items ("1. Housing access") are likely focus areas
-- Group action-oriented items under the nearest preceding title-like item
-- This provides a safety net even when the AI prompt improvements fail
+- Simplify the flat-response rebuild: if all items are the same levelType with no children, use `rebuildHierarchyFromFlatItems` which already handles levelType-based ordering
+- Remove the title-length and action-verb heuristics that assume a specific document format
+- Keep `isFlatResponse()` detection and the `rebuildHierarchyFromFlatItems` fallback as-is since those are format-agnostic
 
-### Change 3: Add logging for debugging
-**File**: `src/utils/textParser.ts`
-
-Add a console.log in `convertAIResponseToPlanItems` that logs:
-- Number of root items returned by AI
-- How many have children
-- Whether `isFlatResponse` triggered
-- The levelTypes distribution
-
-This helps debug future regressions without needing to check edge function logs.
+### Change 3: Edge Function Redeployment
+Deploy the updated `extract-plan-items` function after prompt changes.
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/extract-plan-items/index.ts` | Rebalance prompt: prioritize nesting rules, scope multi-entity guidance to only apply when document clearly has multiple entities |
-| `src/utils/textParser.ts` | Add smart flat-response rebuild that can handle all-same-levelType items; add debug logging |
+| `supabase/functions/extract-plan-items/index.ts` | Rewrite prompt rules 3-4 into a single document-agnostic instruction; simplify examples |
+| `src/utils/textParser.ts` | Remove format-specific heuristics from `smartRebuildFromSameLevelType`; simplify to use generic rebuild |
 
 ## Expected Result
 
-- Boulder County PDF: 3 root strategic priorities, each with numbered focus areas and bullet-point goals nested underneath (roughly matching the original working behavior)
-- 50-state document: Still works with 50 root items, since multi-entity guidance is preserved (just scoped more carefully)
+- Any document type gets its natural hierarchy detected and preserved
+- No assumptions about how many root items there "should" be
+- The AI reads the document structure as-is rather than forcing it into a template
+- Boulder County: 3 root priorities (because the document has 3)
+- 50-state document: 50 root items (because the document has 50)
+- Any other format: whatever the document actually shows
 
-## Technical Notes
-
-- The prompt changes are the primary fix; the smart rebuild is a safety net
-- The Gemini model's context window easily handles 21k characters, so this is purely a prompt quality issue
-- Edge function will need redeployment after changes
