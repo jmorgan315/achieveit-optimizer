@@ -1,69 +1,43 @@
 
 
-# Fix: Large Document Extraction Truncation
+# Navigation: Back Button + Start Over
 
-## Problem
+## Recommendation
 
-The uploaded RHT document has 50 states, each with 1-2 pages of content. The text extraction worked fine (171,376 characters), but the AI model hit its **output token limit** before finishing all 50 states. It extracted Alabama through Georgia (10 states) and stopped. The edge function made a single API call with the entire document, and the structured JSON response for all 50 states exceeds what the model can output in one response.
+Based on standard wizard UX patterns, here's what works best:
 
-## Solution: Chunked Text Extraction
+1. **Back button** on every step (except step 1) -- lets users correct mistakes without losing everything
+2. **"Start Over" button** on the Review & Export page -- a deliberate reset for when users want to process a different document entirely
+3. **Clickable completed steps** in the progress bar -- power-user shortcut to jump back to any completed step
 
-Split large documents into chunks and process each chunk with a separate AI call, then merge the results -- similar to how Vision AI already works with batched page images.
+The Back button is the most important -- users expect it in any multi-step flow. "Start Over" is secondary but valuable on the final screen since going back 4 steps one at a time is tedious. Clickable step indicators are a nice-to-have that feel natural.
 
-### Change 1: Add Document Chunking to Edge Function
-**File**: `supabase/functions/extract-plan-items/index.ts`
+## UX Details
 
-- Add a `splitDocumentIntoChunks` function that splits the document text into chunks of ~50,000 characters, breaking at paragraph/section boundaries (double newlines)
-- For documents under 50,000 characters: process in a single call (current behavior)
-- For larger documents: process each chunk separately, passing a `previousContext` summary so the AI maintains continuity (detected levels, what states were already covered, etc.)
-- Merge results from all chunks: concatenate top-level items, use detected levels from the first chunk
-- Set `max_tokens: 16384` on each API call to ensure the model has enough output room per chunk
+- **Back button**: Appears as a ghost/outline button with a left arrow, positioned at the bottom-left of each step's content area (mirroring where "Next" buttons typically sit on the right)
+- **Start Over**: A subtle destructive-styled button (red text, no fill) on the Review & Export page, positioned near the top or bottom. Shows a confirmation dialog ("You'll lose all changes. Start over?") to prevent accidental resets
+- **Clickable progress steps**: Completed steps (with checkmarks) become clickable in the `WizardProgress` bar. Only completed steps are clickable -- you can't skip ahead
 
-### Change 2: Add Chunk Processing Loop
-**File**: `supabase/functions/extract-plan-items/index.ts`
+## Technical Changes
 
-- Wrap the existing single API call in a loop over chunks
-- For the first chunk, use the current system prompt as-is
-- For subsequent chunks, append context: "Continue extracting from where the previous batch left off. Previously detected levels: [levels]. Previously extracted top-level items: [names list]. Do NOT re-extract items already covered."
-- Merge items arrays from each chunk response
-- Return combined results with the detected levels from the first successful chunk
+### 1. `src/components/WizardProgress.tsx`
+- Make completed step circles clickable (`cursor-pointer`, `onClick`)
+- Accept an `onStepClick` callback prop
+- Add hover state styling for completed steps
 
-### Change 3: Update Client-Side Progress
-**File**: `src/components/steps/FileUploadStep.tsx`
+### 2. `src/pages/Index.tsx`
+- Add `handleBack` function: decrements `currentStep` by 1
+- Add `handleStartOver` function: resets `currentStep` to 0 and calls a new `resetState` function from `usePlanState`
+- Pass `onBack` and `onStartOver` props to the appropriate step components
+- Pass `onStepClick` to `WizardProgress` (only allowing navigation to completed steps)
 
-- Update the `extractPlanItemsWithAI` function to show progress if the response includes chunk info (optional -- the chunking is server-side and transparent to the client, but we can show "Processing large document..." status)
+### 3. `src/hooks/usePlanState.ts`
+- Add a `resetState` function that resets the entire state back to initial defaults (empty items, default levels, no mappings, no raw text)
 
-## Technical Details
+### 4. `src/components/steps/PlanOptimizerStep.tsx`
+- Add a "Start Over" button (with `AlertDialog` confirmation) near the export button area
+- Add a "Back" button
 
-```text
-Document Flow (Large Files):
-
-  171,376 chars input
-       |
-  Split into chunks (~50K chars each)
-       |
-  Chunk 1 (Alabama - Kansas)   --> AI call --> 15 states extracted
-  Chunk 2 (Kentucky - Nevada)  --> AI call --> 15 states extracted  
-  Chunk 3 (New Hampshire - TX) --> AI call --> 15 states extracted
-  Chunk 4 (Utah - Wyoming)     --> AI call --> 5 states extracted
-       |
-  Merge all items + use first chunk's detectedLevels
-       |
-  Return 50 states total
-```
-
-## Files to Modify
-
-| File | Change |
-|------|--------|
-| `supabase/functions/extract-plan-items/index.ts` | Add chunk splitting, loop over chunks with context passing, merge results, set max_tokens |
-| `src/components/steps/FileUploadStep.tsx` | Minor: update status message for large documents |
-
-## Edge Cases Handled
-
-- Documents under 50K chars: no change, single call as before
-- Chunk boundaries: split at paragraph breaks (double newlines) to avoid cutting mid-sentence
-- Deduplication: pass previously extracted item names to subsequent chunks to prevent duplicates
-- Detected levels consistency: use levels from the first chunk for all subsequent chunks
-- Timeout safety: each chunk call is independent, so individual calls stay well within the edge function timeout
+### 5. Step components (`PathSelectorStep`, `PeopleMapperStep`)
+- Accept an `onBack` prop and render a Back button alongside their existing action buttons
 
