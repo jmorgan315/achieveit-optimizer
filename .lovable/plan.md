@@ -1,79 +1,102 @@
 
 
-# UI/UX Improvements: 5 Fixes
+# Smart Extraction Pipeline with Automatic Fallback and Verification
 
-## 1. Remove Drag Icon from Level Configuration Modal
+## Problem
 
-**File**: `src/components/steps/LevelVerificationModal.tsx`
+The uploaded PDF has its actual plan content in images/tables, but the text extraction pulls out just the term definitions (enough text to pass quality checks). The text-based AI correctly detects the hierarchy levels but finds 0 plan items. The app currently stops there -- it never falls back to Vision AI when text extraction "succeeds" but yields no items.
 
-Remove the `GripVertical` icon and its import since drag-and-drop reordering is not supported. This eliminates the misleading visual affordance.
+## Solution Overview
 
-## 2. Prevent Deleting Levels That Have Items
+Build a cascading extraction pipeline that automatically tries the next method when the current one produces insufficient results, plus a verification step to validate extraction quality.
 
-**File**: `src/components/steps/LevelVerificationModal.tsx`
+```text
+File Upload
+    |
+    v
+Step 1: Extract text from PDF
+    |
+    v
+Step 2: Quality gate (length, gibberish ratio)
+    |-- FAIL --> Vision AI directly
+    |-- PASS --> Text-based AI extraction
+                    |
+                    v
+Step 3: Result gate (did AI find items?)
+    |-- 0 items --> Fall back to Vision AI (keep detected levels as hint)
+    |-- Items found --> Continue
+                          |
+                          v
+Step 4: Verification (behind the scenes)
+    |-- Check: items have proper nesting (not all flat)
+    |-- Check: item count is reasonable for page count
+    |-- Check: detected levels match item structure
+    |-- If verification fails --> Retry with Vision AI
+    |
+    v
+Step 5: Present results to user
+```
 
-The modal needs to know which levels have items assigned. Pass the current `items` array as a prop. Before allowing deletion, check if any items have `levelDepth` matching the level being removed. If items exist at that level, disable the delete button and show a tooltip explaining why (e.g., "3 items are assigned to this level").
+## Changes
 
-**Also update**:
-- `src/pages/Index.tsx` -- pass `items` to `LevelVerificationModal`
-- `src/components/steps/PlanOptimizerStep.tsx` -- pass `items` to the nested `LevelVerificationModal`
+### 1. Add Vision AI Fallback After Empty Text Extraction
+**File**: `src/components/steps/FileUploadStep.tsx`
 
-## 3. Move Navigation Buttons to a Sticky Top Bar
+In `handleFileUpload`, after `extractPlanItemsWithAI(extractedText)` completes, check if `extractedItems` is null or empty. If so, and the file is a PDF, automatically trigger `extractWithVisionAI(file)` as a fallback. The text-based extraction's `detectedLevels` (e.g., pillar, objective, strategy) are preserved and passed as a hint to Vision AI.
 
-**Files**: All step components + new shared component
+Key changes to `extractPlanItemsWithAI`:
+- Return a result object `{ items, levels }` instead of setting state and returning void
+- This allows `handleFileUpload` to inspect the result and decide whether to fall back
 
-Currently, Back and Start Over buttons sit at the very bottom. For large plans with hundreds of items, users must scroll to find them. The fix:
+Key changes to `handleFileUpload` (PDF branch):
+- After text AI returns 0 items, show status "Text analysis found no items, trying visual analysis..." and call `extractWithVisionAI(file)`
+- Pass detected levels from text extraction as context to Vision AI
 
-- Create a **sticky action bar** that sits just below the wizard progress bar, visible at all times
-- Move Back, Start Over, and Export into this bar
-- Remove the duplicate bottom buttons from each step component
+### 2. Add Extraction Verification
+**File**: `src/components/steps/FileUploadStep.tsx`
 
-The sticky bar will contain:
-- **Left side**: Back button (ghost style with arrow)
-- **Center/Right**: Primary action (e.g., "Download AchieveIt Import File" on Review & Export)
-- **Far right**: Start Over (destructive ghost, only on Review & Export)
+Add a `verifyExtractionResult` function that runs after any extraction method returns items. Checks include:
 
-This bar will be rendered in `Index.tsx` based on the current step, keeping it consistent across all steps. Each step component will no longer render its own navigation buttons.
+- **Minimum item count**: At least 1 item found (warn if fewer than expected for page count)
+- **Nesting check**: Not all items should be flat at root level -- at least some should have children
+- **Level consistency**: Items' levelTypes should match the detected levels
+- **Reasonable depth**: No item should be deeper than the number of detected levels
 
-**Files modified**:
-- `src/pages/Index.tsx` -- add sticky action bar between WizardProgress and step content
-- `src/components/steps/PlanOptimizerStep.tsx` -- remove bottom action buttons
-- `src/components/steps/PathSelectorStep.tsx` -- remove bottom back button
-- `src/components/steps/PeopleMapperStep.tsx` -- remove bottom back/continue buttons (continue moves to sticky bar)
+If verification fails on text extraction, fall back to Vision AI. If verification fails on Vision AI too, present what we have with a warning toast.
 
-## 4. Unlink "Plan Import Assistant" Text
+### 3. Pass Text-Detected Levels as Context to Vision AI
+**File**: `src/components/steps/FileUploadStep.tsx`
 
-**File**: `src/components/Header.tsx`
+When falling back from text to vision, pass the detected level names (e.g., "pillar", "objective", "strategy", "kpi") as `previousContext` to `extractWithVisionAI`. This gives the Vision AI a head start on understanding the document's hierarchy terminology.
 
-Currently, the logo AND "Plan Import Assistant" text are wrapped in a single `<a>` tag linking to achieveit.com. Restructure so:
-- The `<img>` logo stays wrapped in the link
-- The "Plan Import Assistant" text becomes a plain `<span>` outside the link, not clickable
+Modify `extractWithVisionAI` to accept an optional `levelHints` parameter that gets included in the first batch's context.
 
-## 5. Improve Error Messages
+### 4. Refactor for Cleaner Flow
+**File**: `src/components/steps/FileUploadStep.tsx`
 
-**Files**: `src/components/steps/FileUploadStep.tsx`, `src/components/steps/PlanOptimizerStep.tsx`
+Restructure the PDF handling in `handleFileUpload` to be a clear pipeline:
 
-Replace technical/generic error messages with user-friendly explanations:
+```text
+handleFileUpload (PDF):
+  1. parsePdfWithEdgeFunction() --> text + pageCount
+  2. Quality gate (existing checks)
+  3. extractPlanItemsWithAI(text) --> { items, levels }
+  4. If items.length === 0:
+       - extractWithVisionAI(file, levels as hints)
+  5. verifyExtractionResult(items)
+  6. If verification fails and haven't tried vision yet:
+       - extractWithVisionAI(file)
+  7. Set state with final results
+```
 
-| Current Error | Improved Message |
-|---|---|
-| `"Failed to parse PDF"` | `"We couldn't read your PDF. The file may be corrupted or password-protected. Try re-saving it or using a different format."` |
-| `"AI extraction failed"` | `"Our AI wasn't able to understand the document structure. This can happen with unusual formatting. Try copying the text into a plain text file and uploading that instead."` |
-| `"Failed to get suggestion"` | `"We couldn't generate a metric suggestion right now. This is usually temporary -- please try again in a moment."` |
-| `"AI rate limit reached..."` | `"We're processing too many requests right now. Please wait about 30 seconds and try again."` |
-| Generic catch-all | `"Something unexpected went wrong. Please try again, and if the problem continues, try a different file format or contact support."` |
+## Files to Modify
 
-Add a helper function `getUserFriendlyError(error, context)` that maps technical errors to plain-language messages based on the error content and operation context (upload, extraction, suggestion, etc.).
+| File | Change |
+|------|--------|
+| `src/components/steps/FileUploadStep.tsx` | Refactor extraction flow: make `extractPlanItemsWithAI` return results instead of setting state; add fallback logic after 0 items; add `verifyExtractionResult` function; pass level hints to vision fallback |
 
-## Files Summary
+## What This Fixes
 
-| File | Changes |
-|---|---|
-| `src/components/steps/LevelVerificationModal.tsx` | Remove GripVertical icon; add items-in-use check for delete |
-| `src/pages/Index.tsx` | Pass items to LevelVerificationModal; add sticky action bar |
-| `src/components/steps/PlanOptimizerStep.tsx` | Remove bottom action buttons; pass items to LevelVerificationModal |
-| `src/components/steps/PathSelectorStep.tsx` | Remove bottom back button |
-| `src/components/steps/PeopleMapperStep.tsx` | Remove bottom back/continue buttons |
-| `src/components/Header.tsx` | Separate logo link from "Plan Import Assistant" text |
-| `src/components/steps/FileUploadStep.tsx` | Add user-friendly error messages |
-
+- The Strategic Vision PDF: text extraction finds definitions + levels but 0 items, so the app automatically falls back to Vision AI which can read the tabular content from the page images
+- Any future PDF where text is extractable but content is primarily visual
+- Provides verification that catches poor extractions before presenting to user
