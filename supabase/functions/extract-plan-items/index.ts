@@ -77,23 +77,32 @@ This should produce:
 
 === CRITICAL HIERARCHY RULES (MUST FOLLOW) ===
 
-1. ROOT LEVEL: ONLY strategic_priority items. If you find yourself putting focus_area, goal, or action_item at root, STOP and restructure.
+1. ROOT LEVEL: ONLY strategic_priority items at root. EVERY focus_area, goal, action_item, and sub_action MUST be nested as a child — NEVER at root level.
 
 2. EVERY ITEM MUST USE children[] FOR NESTING:
    - strategic_priority -> children: [focus_area items]
    - focus_area -> children: [goal items]
    - goal -> children: [action_item items]
+   - action_item -> children: [sub_action items]
 
-3. ADAPTIVE ROOT COUNT:
-   - For corporate strategic plans: typically 3-7 root strategic priorities
-   - For multi-entity documents (states, regions, departments, projects, locations): each entity is its own root-level strategic_priority with its items nested underneath
+3. FOR A SINGLE ORGANIZATION'S STRATEGIC PLAN (the most common case):
+   - There should be only a FEW root strategic_priority items (typically 3-7)
+   - EVERYTHING ELSE must be nested as children under those priorities
+   - EVERY bullet point, numbered item, goal, and action MUST be a child — NEVER at root level
+   - If you find yourself creating more than 8 root items for a single organization, you are doing it WRONG — restructure by nesting items under their parent priorities
+
+4. FOR MULTI-ENTITY DOCUMENTS (ONLY when the document clearly contains multiple distinct organizations, states, regions, departments, or locations as separate entities):
+   - Each entity becomes its own root-level strategic_priority
+   - Their specific items (initiatives, goals, activities) are nested as children
    - Do NOT collapse distinct entities into artificial groups. If there are 50 states, return 50 root items.
    - Do NOT summarize or skip entities. Extract ALL of them.
+   - NOTE: This rule ONLY applies when entities are truly independent (e.g., "Alabama: ..., Alaska: ..."). Do NOT use this for a single organization's internal departments or focus areas — those should be nested children.
 
-4. VALIDATION BEFORE RETURNING:
+5. VALIDATION BEFORE RETURNING:
    - Each strategic_priority SHOULD have children (focus_area, goal, or action_item items)
    - Goals should be nested under focus_areas or strategic_priorities, not at root
    - focus_area items should NOT be at root level
+   - If all items are at root with empty children arrays, your response is WRONG — go back and nest them properly
 
 === BULLET POINT HANDLING (CRITICAL) ===
 
