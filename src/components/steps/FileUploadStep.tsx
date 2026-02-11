@@ -505,25 +505,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
                 </div>
               </div>
 
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-card px-4 text-muted-foreground font-medium">Or try a demo</span>
-                </div>
-              </div>
-
-              <div className="flex justify-center">
-                <Button 
-                  variant="outline" 
-                  onClick={loadSampleData}
-                  className="gap-2"
-                >
-                  <FileText className="h-4 w-4" />
-                  Load Sample Strategic Plan
-                </Button>
-              </div>
             </>
           ) : (
             <div className="space-y-4">
