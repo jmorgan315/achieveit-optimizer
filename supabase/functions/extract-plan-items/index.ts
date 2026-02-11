@@ -77,32 +77,31 @@ This should produce:
 
 === CRITICAL HIERARCHY RULES (MUST FOLLOW) ===
 
-1. ROOT LEVEL: ONLY strategic_priority items at root. EVERY focus_area, goal, action_item, and sub_action MUST be nested as a child — NEVER at root level.
+1. DETECT THE DOCUMENT'S NATURAL STRUCTURE:
+   - Read the document and identify the hierarchy it actually presents
+   - The number of root items depends entirely on the document — it could be 3, 15, or 50
+   - Do NOT force the document into a predetermined template or framework
+   - Follow the document's own groupings, headings, sections, and nesting
 
-2. EVERY ITEM MUST USE children[] FOR NESTING:
+2. ROOT LEVEL: ONLY strategic_priority items at root. EVERY focus_area, goal, action_item, and sub_action MUST be nested as a child — NEVER at root level.
+
+3. EVERY ITEM MUST USE children[] FOR NESTING:
    - strategic_priority -> children: [focus_area items]
    - focus_area -> children: [goal items]
    - goal -> children: [action_item items]
    - action_item -> children: [sub_action items]
 
-3. FOR A SINGLE ORGANIZATION'S STRATEGIC PLAN (the most common case):
-   - There should be only a FEW root strategic_priority items (typically 3-7)
-   - EVERYTHING ELSE must be nested as children under those priorities
-   - EVERY bullet point, numbered item, goal, and action MUST be a child — NEVER at root level
-   - If you find yourself creating more than 8 root items for a single organization, you are doing it WRONG — restructure by nesting items under their parent priorities
-
-4. FOR MULTI-ENTITY DOCUMENTS (ONLY when the document clearly contains multiple distinct organizations, states, regions, departments, or locations as separate entities):
-   - Each entity becomes its own root-level strategic_priority
-   - Their specific items (initiatives, goals, activities) are nested as children
-   - Do NOT collapse distinct entities into artificial groups. If there are 50 states, return 50 root items.
-   - Do NOT summarize or skip entities. Extract ALL of them.
-   - NOTE: This rule ONLY applies when entities are truly independent (e.g., "Alabama: ..., Alaska: ..."). Do NOT use this for a single organization's internal departments or focus areas — those should be nested children.
+4. NESTING IS MANDATORY:
+   - EVERY bullet point, numbered item, goal, and action MUST be nested as a child under its parent — NEVER at root level
+   - If the document has headings with bullets/items underneath, the heading is the parent and the bullets are children
+   - If you find yourself putting everything at root level with no children, you are doing it WRONG — go back and nest items under their natural parents
 
 5. VALIDATION BEFORE RETURNING:
    - Each strategic_priority SHOULD have children (focus_area, goal, or action_item items)
    - Goals should be nested under focus_areas or strategic_priorities, not at root
    - focus_area items should NOT be at root level
    - If all items are at root with empty children arrays, your response is WRONG — go back and nest them properly
+   - Did you preserve the document's own hierarchy? Do parent items have their children nested?
 
 === BULLET POINT HANDLING (CRITICAL) ===
 
@@ -119,24 +118,24 @@ DO NOT:
 === CORRECT NESTING EXAMPLE ===
 
 INPUT:
-"Economic Security and Social Stability
-  Housing Access and Affordability
-    • Increase affordable units by 3%
-    • Support inclusionary housing
-    • Invest in mobile home parks"
+"Section A: Quality Improvement
+  Area 1: Patient Safety
+    • Reduce readmission rates by 5%
+    • Implement safety protocols
+    • Train staff on new procedures"
 
 OUTPUT:
 {
-  "name": "Economic Security and Social Stability",
+  "name": "Quality Improvement",
   "levelType": "strategic_priority",
   "children": [
     {
-      "name": "Housing Access and Affordability",
+      "name": "Patient Safety",
       "levelType": "focus_area",
       "children": [
-        { "name": "Increase affordable units by 3%", "levelType": "goal" },
-        { "name": "Support inclusionary housing", "levelType": "goal" },
-        { "name": "Invest in mobile home parks", "levelType": "goal" }
+        { "name": "Reduce readmission rates by 5%", "levelType": "goal" },
+        { "name": "Implement safety protocols", "levelType": "goal" },
+        { "name": "Train staff on new procedures", "levelType": "goal" }
       ]
     }
   ]
@@ -144,40 +143,18 @@ OUTPUT:
 
 === WRONG (FLAT) OUTPUT - DO NOT DO THIS ===
 [
-  { "name": "Economic Security", "levelType": "strategic_priority" },
-  { "name": "Housing Access", "levelType": "focus_area" },
-  { "name": "Increase affordable units", "levelType": "goal" }
+  { "name": "Quality Improvement", "levelType": "strategic_priority" },
+  { "name": "Patient Safety", "levelType": "focus_area" },
+  { "name": "Reduce readmission rates", "levelType": "goal" }
 ]
 // WRONG: Everything is at root level with no children arrays!
 
-=== MULTI-ENTITY DOCUMENT EXAMPLE ===
-
-INPUT (50-state plan document):
-"Alabama: Initiative A, Initiative B
-Alaska: Initiative C
-Arizona: Initiative D, Initiative E"
-
-OUTPUT:
-[
-  { "name": "Alabama", "levelType": "strategic_priority", "children": [
-    { "name": "Initiative A", "levelType": "focus_area" },
-    { "name": "Initiative B", "levelType": "focus_area" }
-  ]},
-  { "name": "Alaska", "levelType": "strategic_priority", "children": [
-    { "name": "Initiative C", "levelType": "focus_area" }
-  ]},
-  { "name": "Arizona", "levelType": "strategic_priority", "children": [
-    { "name": "Initiative D", "levelType": "focus_area" },
-    { "name": "Initiative E", "levelType": "focus_area" }
-  ]}
-]
-// Each entity is a root item. Do NOT group them under artificial categories.
-
 === SELF-CHECK BEFORE RESPONDING ===
-1. Do root items have empty children arrays? → Move subsequent items into children
-2. Are focus_area items at root? → They should be children of strategic_priority
-3. Are goal items at root? → They should be children of focus_area or strategic_priority
-4. For multi-entity docs: Did you extract ALL entities? Do NOT skip or summarize.`;
+1. Did you detect and follow the document's own structure?
+2. Do root items have empty children arrays? → Move subsequent items into children
+3. Are focus_area items at root? → They should be children of strategic_priority
+4. Are goal items at root? → They should be children of focus_area or strategic_priority
+5. If all items are at root with no nesting, your response is WRONG — restructure.`;
 
 const extractPlanItemsSchema = {
   type: "object",
