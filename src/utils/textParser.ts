@@ -392,27 +392,25 @@ const LEVEL_TYPE_TO_DEPTH: Record<string, number> = {
 function isFlatResponse(items: AIExtractedItem[]): boolean {
   if (items.length <= 3) return false; // Small number could be correct
   
-  // Check if most items have no children and are all the same type
-  const typeCounts: Record<string, number> = {};
+  // Count items that actually have children
   let itemsWithChildren = 0;
+  let itemsWithNoChildren = 0;
   
   items.forEach(item => {
-    if (item?.levelType) {
-      typeCounts[item.levelType] = (typeCounts[item.levelType] || 0) + 1;
-    }
     if (item?.children && item.children.length > 0) {
       itemsWithChildren++;
+    } else {
+      itemsWithNoChildren++;
     }
   });
   
-  // If >8 items at root and few have children, it's flat
-  if (items.length > 8 && itemsWithChildren < items.length * 0.3) {
-    return true;
+  // If most items have children, it's a valid multi-entity structure (e.g., 50 states each with initiatives)
+  if (itemsWithChildren > items.length * 0.3) {
+    return false;
   }
   
-  // If most items are the same type (e.g., all focus_area), it's flat
-  const maxTypeCount = Math.max(...Object.values(typeCounts));
-  if (maxTypeCount > items.length * 0.7) {
+  // Only flat if ALL items have no children AND there are many of them
+  if (items.length > 8 && itemsWithChildren === 0) {
     return true;
   }
   

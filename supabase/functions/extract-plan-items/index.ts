@@ -84,11 +84,16 @@ This should produce:
    - focus_area -> children: [goal items]
    - goal -> children: [action_item items]
 
-3. VALIDATION BEFORE RETURNING:
-   - Count root items: Should be 3-7 strategic priorities MAXIMUM
-   - If you have >8 root items, your nesting is WRONG
-   - Each strategic_priority SHOULD have focus_area children
-   - Goals should be nested under focus_areas, not at root
+3. ADAPTIVE ROOT COUNT:
+   - For corporate strategic plans: typically 3-7 root strategic priorities
+   - For multi-entity documents (states, regions, departments, projects, locations): each entity is its own root-level strategic_priority with its items nested underneath
+   - Do NOT collapse distinct entities into artificial groups. If there are 50 states, return 50 root items.
+   - Do NOT summarize or skip entities. Extract ALL of them.
+
+4. VALIDATION BEFORE RETURNING:
+   - Each strategic_priority SHOULD have children (focus_area, goal, or action_item items)
+   - Goals should be nested under focus_areas or strategic_priorities, not at root
+   - focus_area items should NOT be at root level
 
 === BULLET POINT HANDLING (CRITICAL) ===
 
@@ -136,11 +141,34 @@ OUTPUT:
 ]
 // WRONG: Everything is at root level with no children arrays!
 
+=== MULTI-ENTITY DOCUMENT EXAMPLE ===
+
+INPUT (50-state plan document):
+"Alabama: Initiative A, Initiative B
+Alaska: Initiative C
+Arizona: Initiative D, Initiative E"
+
+OUTPUT:
+[
+  { "name": "Alabama", "levelType": "strategic_priority", "children": [
+    { "name": "Initiative A", "levelType": "focus_area" },
+    { "name": "Initiative B", "levelType": "focus_area" }
+  ]},
+  { "name": "Alaska", "levelType": "strategic_priority", "children": [
+    { "name": "Initiative C", "levelType": "focus_area" }
+  ]},
+  { "name": "Arizona", "levelType": "strategic_priority", "children": [
+    { "name": "Initiative D", "levelType": "focus_area" },
+    { "name": "Initiative E", "levelType": "focus_area" }
+  ]}
+]
+// Each entity is a root item. Do NOT group them under artificial categories.
+
 === SELF-CHECK BEFORE RESPONDING ===
-1. Are there more than 7 items at root? → Restructure into nested hierarchy
-2. Do root items have empty children arrays? → Move subsequent items into children
-3. Are focus_area items at root? → They should be children of strategic_priority
-4. Are goal items at root? → They should be children of focus_area or strategic_priority`;
+1. Do root items have empty children arrays? → Move subsequent items into children
+2. Are focus_area items at root? → They should be children of strategic_priority
+3. Are goal items at root? → They should be children of focus_area or strategic_priority
+4. For multi-entity docs: Did you extract ALL entities? Do NOT skip or summarize.`;
 
 const extractPlanItemsSchema = {
   type: "object",

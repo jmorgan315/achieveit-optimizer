@@ -325,16 +325,27 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
           return;
         }
 
-        // Check if text quality is poor - if so, use Vision AI
-        if (!extractedText || isTextQualityPoor(extractedText, pageCount)) {
-          console.log('Poor text quality detected, switching to Vision AI');
-          setProcessingStatus('Document has complex layout, using Vision AI...');
+        // Only fall back to Vision AI if text is truly empty or corrupted
+        if (!extractedText || extractedText.trim().length < 50) {
+          console.log('Text extraction returned empty/minimal content, falling back to Vision AI');
+          setProcessingStatus('No readable text found, using Vision AI...');
           setIsProcessing(false);
-          
-          // Use Vision AI for this document
           await extractWithVisionAI(file);
-          return; // Exit early - vision AI handles everything
+          return;
         }
+        
+        // Check for gibberish (high ratio of non-alphanumeric characters suggests corrupted extraction)
+        const alphanumericChars = extractedText.replace(/[^a-zA-Z0-9]/g, '').length;
+        const gibberishRatio = alphanumericChars / extractedText.length;
+        if (gibberishRatio < 0.3) {
+          console.log(`Text appears corrupted (alphanumeric ratio: ${gibberishRatio.toFixed(2)}), falling back to Vision AI`);
+          setProcessingStatus('Text extraction corrupted, using Vision AI...');
+          setIsProcessing(false);
+          await extractWithVisionAI(file);
+          return;
+        }
+        
+        console.log(`Text extraction successful: ${extractedText.length} chars, ${pageCount} pages, alphanumeric ratio: ${gibberishRatio.toFixed(2)}`);
         
       } else if (isWord || isExcel) {
         // Binary office formats - would need server-side processing
