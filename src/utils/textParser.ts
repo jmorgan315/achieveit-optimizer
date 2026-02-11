@@ -418,96 +418,6 @@ function isFlatResponse(items: AIExtractedItem[]): boolean {
   return false;
 }
 
-// Action verb patterns for heuristic hierarchy detection
-const ACTION_VERBS = /^(Increase|Decrease|Improve|Reduce|Expand|Implement|Develop|Create|Establish|Support|Invest|Provide|Ensure|Maintain|Strengthen|Promote|Enhance|Complete|Launch|Build|Deliver|Achieve|Address|Advance|Align|Allocate|Apply|Assess|Assist|Collaborate|Conduct|Continue|Coordinate|Deploy|Design|Eliminate|Engage|Evaluate|Execute|Explore|Facilitate|Foster|Fund|Generate|Grow|Hire|Host|Identify|Incorporate|Initiate|Integrate|Lead|Leverage|Maximize|Measure|Minimize|Monitor|Obtain|Offer|Operate|Optimize|Organize|Partner|Pilot|Plan|Prepare|Prioritize|Pursue|Recruit|Refine|Remove|Report|Research|Resolve|Retain|Review|Scale|Secure|Seek|Serve|Streamline|Submit|Track|Train|Transform|Update|Upgrade|Utilize)\b/i;
-
-// Smart rebuild for flat responses where all items share the same levelType
-function smartRebuildFromSameLevelType(
-  flatItems: AIExtractedItem[],
-  levels: PlanLevel[]
-): PlanItem[] {
-  const items: PlanItem[] = [];
-  let itemId = 1;
-  
-  // Classify items as "title-like" (priorities) vs "action-like" (goals/actions)
-  type ClassifiedItem = { aiItem: AIExtractedItem; isTitle: boolean; isNumbered: boolean };
-  const classified: ClassifiedItem[] = flatItems.map(aiItem => {
-    if (!aiItem) return { aiItem, isTitle: false, isNumbered: false };
-    const name = (aiItem.name || '').trim();
-    const isNumbered = /^\d+[\.\)]\s/.test(name);
-    const isActionVerb = ACTION_VERBS.test(name);
-    const isShortTitle = name.length < 60 && !isActionVerb && !isNumbered;
-    return { aiItem, isTitle: isShortTitle, isNumbered };
-  });
-  
-  // If we can't distinguish titles from actions, fall back to standard rebuild
-  const titleCount = classified.filter(c => c.isTitle).length;
-  if (titleCount === 0 || titleCount === classified.length) {
-    return rebuildHierarchyFromFlatItems(flatItems, levels);
-  }
-  
-  let currentParentId: string | null = null;
-  let currentFocusAreaId: string | null = null;
-  
-  classified.forEach(({ aiItem, isTitle, isNumbered }) => {
-    if (!aiItem || !aiItem.levelType) return;
-    
-    const id = String(itemId++);
-    const issues: PlanItem['issues'] = [];
-    if (!aiItem.owner) issues.push({ type: 'missing-owner', message: 'Missing assigned owner email' });
-    if (!aiItem.startDate || !aiItem.dueDate) issues.push({ type: 'missing-dates', message: 'Missing start or due date' });
-    
-    let depth: number;
-    let parentId: string | null;
-    
-    if (isTitle) {
-      // This is a top-level strategic priority
-      depth = 1;
-      parentId = null;
-      currentParentId = id;
-      currentFocusAreaId = null;
-    } else if (isNumbered) {
-      // Numbered item = focus area under current priority
-      depth = 2;
-      parentId = currentParentId;
-      currentFocusAreaId = id;
-    } else {
-      // Action/goal item = child of current focus area or priority
-      depth = currentFocusAreaId ? 3 : 2;
-      parentId = currentFocusAreaId || currentParentId;
-    }
-    
-    items.push({
-      id,
-      order: '',
-      levelName: levels.find(l => l.depth === depth)?.name ||
-        aiItem.levelType.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()),
-      levelDepth: depth,
-      name: aiItem.name || 'Untitled Item',
-      description: aiItem.description || '',
-      status: 'Not Started',
-      startDate: aiItem.startDate || '',
-      dueDate: aiItem.dueDate || '',
-      assignedTo: aiItem.owner || '',
-      members: [],
-      administrators: [],
-      updateFrequency: 'Monthly',
-      metricDescription: aiItem.metricTarget ? 'Track to Target' : '',
-      metricUnit: aiItem.metricUnit || '',
-      metricRollup: 'Manual',
-      metricBaseline: '',
-      metricTarget: aiItem.metricTarget || '',
-      currentValue: '',
-      tags: [],
-      parentId,
-      children: [],
-      issues,
-    });
-  });
-  
-  return items;
-}
-
 // Rebuild hierarchy from flat AI response using levelType ordering
 function rebuildHierarchyFromFlatItems(
   flatItems: AIExtractedItem[],
@@ -658,18 +568,8 @@ export function convertAIResponseToPlanItems(
 
   // Check if AI returned a flat response
   if (flatDetected) {
-    // Check if all items share the same levelType — use smart heuristic rebuild
-    const uniqueTypes = new Set(normalizedResponse.items.map(i => i?.levelType).filter(Boolean));
-    const allSameType = uniqueTypes.size === 1;
-    
-    let rebuiltItems: PlanItem[];
-    if (allSameType) {
-      console.log('All items share same levelType, using smart heuristic rebuild');
-      rebuiltItems = smartRebuildFromSameLevelType(normalizedResponse.items, levels);
-    } else {
-      console.log('Detected flat AI response, rebuilding hierarchy from levelType ordering');
-      rebuiltItems = rebuildHierarchyFromFlatItems(normalizedResponse.items, levels);
-    }
+    console.log('Detected flat AI response, rebuilding hierarchy from levelType ordering');
+    const rebuiltItems = rebuildHierarchyFromFlatItems(normalizedResponse.items, levels);
     const finalItems = recalculateItemsWithTreeDepth(rebuiltItems, levels);
     
     // Extract person mappings
