@@ -10,9 +10,10 @@ interface WizardStep {
 interface WizardProgressProps {
   steps: WizardStep[];
   currentStep: number;
+  onStepClick?: (stepIndex: number) => void;
 }
 
-export function WizardProgress({ steps, currentStep }: WizardProgressProps) {
+export function WizardProgress({ steps, currentStep, onStepClick }: WizardProgressProps) {
   return (
     <div className="w-full py-6">
       <div className="flex items-center justify-between max-w-3xl mx-auto">
@@ -30,8 +31,10 @@ export function WizardProgress({ steps, currentStep }: WizardProgressProps) {
                       ? 'bg-primary text-primary-foreground'
                       : isCurrent
                       ? 'bg-primary text-primary-foreground ring-4 ring-primary/20'
-                      : 'bg-muted text-muted-foreground'
+                      : 'bg-muted text-muted-foreground',
+                    isComplete && onStepClick && 'cursor-pointer hover:ring-4 hover:ring-primary/20'
                   )}
+                  onClick={() => isComplete && onStepClick?.(index)}
                 >
                   {isComplete ? <Check className="h-5 w-5" /> : index + 1}
                 </div>

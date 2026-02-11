@@ -1,13 +1,14 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ProcessingPath } from '@/types/plan';
-import { Zap, Sparkles, ArrowRight } from 'lucide-react';
+import { Zap, Sparkles, ArrowRight, ArrowLeft } from 'lucide-react';
 
 interface PathSelectorStepProps {
   onSelect: (path: ProcessingPath) => void;
+  onBack?: () => void;
 }
 
-export function PathSelectorStep({ onSelect }: PathSelectorStepProps) {
+export function PathSelectorStep({ onSelect, onBack }: PathSelectorStepProps) {
   return (
     <div className="w-full max-w-4xl mx-auto">
       <div className="text-center mb-8">
@@ -103,6 +104,15 @@ export function PathSelectorStep({ onSelect }: PathSelectorStepProps) {
           </CardContent>
         </Card>
       </div>
+
+      {onBack && (
+        <div className="mt-6 flex justify-start">
+          <Button variant="ghost" onClick={onBack}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

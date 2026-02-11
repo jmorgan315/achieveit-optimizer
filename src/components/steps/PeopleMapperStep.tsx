@@ -12,18 +12,20 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { PersonMapping } from '@/types/plan';
-import { Users, Check, AlertCircle, Mail } from 'lucide-react';
+import { Users, Check, AlertCircle, Mail, ArrowLeft } from 'lucide-react';
 
 interface PeopleMapperStepProps {
   personMappings: PersonMapping[];
   onUpdateMapping: (id: string, email: string) => void;
   onComplete: () => void;
+  onBack?: () => void;
 }
 
 export function PeopleMapperStep({
   personMappings,
   onUpdateMapping,
   onComplete,
+  onBack,
 }: PeopleMapperStepProps) {
   const [localMappings, setLocalMappings] = useState<Record<string, string>>({});
 
@@ -123,12 +125,20 @@ export function PeopleMapperStep({
             </p>
           </div>
 
-          <Button
-            onClick={handleComplete}
-            className="w-full mt-6 h-12"
-          >
-            Continue with {resolvedCount} Resolved Owners
-          </Button>
+          <div className="mt-6 flex items-center gap-3">
+            {onBack && (
+              <Button variant="ghost" onClick={onBack}>
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back
+              </Button>
+            )}
+            <Button
+              onClick={handleComplete}
+              className="flex-1 h-12"
+            >
+              Continue with {resolvedCount} Resolved Owners
+            </Button>
+          </div>
         </CardContent>
       </Card>
     </div>

@@ -42,7 +42,22 @@ const Index = () => {
     reorderSiblings,
     updateLevelsAndRecalculate,
     changeItemLevel,
+    resetState,
   } = usePlanState();
+
+  const handleBack = () => {
+    if (currentStep > 0) setCurrentStep(currentStep - 1);
+  };
+
+  const handleStartOver = () => {
+    resetState();
+    setPendingAIData(null);
+    setCurrentStep(0);
+  };
+
+  const handleStepClick = (stepIndex: number) => {
+    if (stepIndex < currentStep) setCurrentStep(stepIndex);
+  };
 
   const handleTextSubmit = (text: string) => {
     setRawText(text);
@@ -101,7 +116,7 @@ const Index = () => {
       <Header />
 
       <main className="container mx-auto px-4 py-8">
-        <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} />
+        <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} onStepClick={handleStepClick} />
 
         <div className="mt-8">
           {currentStep === 0 && (
@@ -112,7 +127,7 @@ const Index = () => {
           )}
 
           {currentStep === 1 && (
-            <PathSelectorStep onSelect={handlePathSelect} />
+            <PathSelectorStep onSelect={handlePathSelect} onBack={handleBack} />
           )}
 
           {currentStep === 2 && (
@@ -120,6 +135,7 @@ const Index = () => {
               personMappings={state.personMappings}
               onUpdateMapping={updatePersonMapping}
               onComplete={handlePeopleMappingComplete}
+              onBack={handleBack}
             />
           )}
 
@@ -133,6 +149,8 @@ const Index = () => {
               onReorderSiblings={reorderSiblings}
               onExport={handleExport}
               onUpdateLevels={handleUpdateLevels}
+              onBack={handleBack}
+              onStartOver={handleStartOver}
             />
           )}
         </div>
