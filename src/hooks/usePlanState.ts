@@ -256,6 +256,19 @@ export function usePlanState() {
     });
   }, []);
 
+  const deleteItem = useCallback((id: string) => {
+    setState((prev) => {
+      // Collect all descendant IDs recursively
+      const getDescendantIds = (parentId: string): string[] => {
+        const children = prev.items.filter((i) => i.parentId === parentId);
+        return children.flatMap((child) => [child.id, ...getDescendantIds(child.id)]);
+      };
+      const idsToRemove = new Set([id, ...getDescendantIds(id)]);
+      const remaining = prev.items.filter((i) => !idsToRemove.has(i.id));
+      return { ...prev, items: recalculateOrders(remaining, prev.levels) };
+    });
+  }, []);
+
   const resetState = useCallback(() => {
     setState({
       levels: DEFAULT_LEVELS,
@@ -281,6 +294,7 @@ export function usePlanState() {
     reorderSiblings,
     updateLevelsAndRecalculate,
     changeItemLevel,
+    deleteItem,
     resetState,
   };
 }

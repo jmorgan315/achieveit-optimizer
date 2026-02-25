@@ -5,6 +5,17 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PlanItem } from '@/types/plan';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import {
   ChevronRight,
   ChevronDown,
   AlertCircle,
@@ -13,6 +24,7 @@ import {
   Sparkles,
   GripVertical,
   Settings2,
+  Trash2,
 } from 'lucide-react';
 
 export type DropPosition = 'before' | 'after' | 'inside' | null;
@@ -25,6 +37,7 @@ interface SortableTreeItemProps {
   onToggleExpand: (id: string) => void;
   onOptimize: (item: PlanItem) => void;
   onEdit: (item: PlanItem) => void;
+  onDelete?: (item: PlanItem) => void;
   isOver?: boolean;
   dropPosition?: DropPosition;
 }
@@ -37,6 +50,7 @@ export function SortableTreeItem({
   onToggleExpand,
   onOptimize,
   onEdit,
+  onDelete,
   isOver,
   dropPosition,
 }: SortableTreeItemProps) {
@@ -180,6 +194,38 @@ export function SortableTreeItem({
         >
           <Settings2 className="h-4 w-4" />
         </Button>
+
+        {onDelete && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Delete item"
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete plan item?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Are you sure you want to delete "{item.name}"? This will also remove any items nested under it. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => onDelete(item)}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
       </div>
       
       {/* Drop after indicator */}
