@@ -55,6 +55,7 @@ const Index = () => {
     reorderSiblings,
     updateLevelsAndRecalculate,
     changeItemLevel,
+    deleteItem,
     resetState,
   } = usePlanState();
 
@@ -205,6 +206,7 @@ const Index = () => {
               onReorderSiblings={reorderSiblings}
               onExport={handleExport}
               onUpdateLevels={handleUpdateLevels}
+              onDeleteItem={deleteItem}
               onBack={handleBack}
               onStartOver={handleStartOver}
             />

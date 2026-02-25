@@ -54,6 +54,7 @@ interface PlanOptimizerStepProps {
   onReorderSiblings?: (itemId: string, newIndex: number) => void;
   onExport: () => void;
   onUpdateLevels?: (levels: PlanLevel[]) => void;
+  onDeleteItem?: (id: string) => void;
   onBack?: () => void;
   onStartOver?: () => void;
 }
@@ -78,6 +79,7 @@ export function PlanOptimizerStep({
   onReorderSiblings,
   onExport,
   onUpdateLevels,
+  onDeleteItem,
   onBack,
   onStartOver,
 }: PlanOptimizerStepProps) {
@@ -173,6 +175,16 @@ export function PlanOptimizerStep({
       title: 'Item updated',
       description: 'Changes have been saved',
     });
+  };
+
+  const handleDelete = (item: PlanItem) => {
+    if (onDeleteItem) {
+      onDeleteItem(item.id);
+      toast({
+        title: 'Item deleted',
+        description: `"${item.name}" has been removed`,
+      });
+    }
   };
 
   const applySuggestion = () => {
@@ -501,6 +513,7 @@ export function PlanOptimizerStep({
                       onToggleExpand={toggleExpand}
                       onOptimize={handleOptimize}
                       onEdit={handleEdit}
+                      onDelete={onDeleteItem ? handleDelete : undefined}
                       isOver={dropInfo?.itemId === item.id}
                       dropPosition={dropInfo?.itemId === item.id ? dropInfo.position : null}
                     />
@@ -680,6 +693,7 @@ export function PlanOptimizerStep({
         levels={levels}
         onSave={handleSaveEdit}
         onChangeLevel={onChangeLevel}
+        onDelete={onDeleteItem ? handleDelete : undefined}
       />
     </div>
   );

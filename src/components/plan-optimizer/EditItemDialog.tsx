@@ -27,7 +27,19 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { PlanItem, PlanLevel } from '@/types/plan';
+import { Trash2 } from 'lucide-react';
 
 interface EditItemDialogProps {
   open: boolean;
@@ -36,6 +48,7 @@ interface EditItemDialogProps {
   levels: PlanLevel[];
   onSave: (id: string, updates: Partial<PlanItem>) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
+  onDelete?: (item: PlanItem) => void;
 }
 
 interface EditFormData {
@@ -54,6 +67,7 @@ export function EditItemDialog({
   levels,
   onSave,
   onChangeLevel,
+  onDelete,
 }: EditItemDialogProps) {
   const [formData, setFormData] = useState<EditFormData>({
     name: '',
@@ -243,13 +257,45 @@ export function EditItemDialog({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={!canSave}>
-            Save Changes
-          </Button>
+        <DialogFooter className="flex justify-between sm:justify-between">
+          {onDelete && item ? (
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm">
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Item
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Delete plan item?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    Are you sure you want to delete "{item.name}"? This will also remove any items nested under it. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => {
+                      onDelete(item);
+                      onOpenChange(false);
+                    }}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Delete
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : <div />}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSave} disabled={!canSave}>
+              Save Changes
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
