@@ -1,102 +1,44 @@
 
 
-# Smart Extraction Pipeline with Automatic Fallback and Verification
+# Add Delete Item Capability
 
-## Problem
+## Approach
 
-The uploaded PDF has its actual plan content in images/tables, but the text extraction pulls out just the term definitions (enough text to pass quality checks). The text-based AI correctly detects the hierarchy levels but finds 0 plan items. The app currently stops there -- it never falls back to Vision AI when text extraction "succeeds" but yields no items.
+Add a delete button in two places for convenience:
+1. **Trash icon** on each tree row in `SortableTreeItem` (next to the edit gear icon) for quick access
+2. **Delete button** in the `EditItemDialog` footer for when you're already editing an item
 
-## Solution Overview
+Both trigger an `AlertDialog` confirmation before deleting. When an item with children is deleted, its children are also removed (cascading delete).
 
-Build a cascading extraction pipeline that automatically tries the next method when the current one produces insufficient results, plus a verification step to validate extraction quality.
+## Technical Changes
 
-```text
-File Upload
-    |
-    v
-Step 1: Extract text from PDF
-    |
-    v
-Step 2: Quality gate (length, gibberish ratio)
-    |-- FAIL --> Vision AI directly
-    |-- PASS --> Text-based AI extraction
-                    |
-                    v
-Step 3: Result gate (did AI find items?)
-    |-- 0 items --> Fall back to Vision AI (keep detected levels as hint)
-    |-- Items found --> Continue
-                          |
-                          v
-Step 4: Verification (behind the scenes)
-    |-- Check: items have proper nesting (not all flat)
-    |-- Check: item count is reasonable for page count
-    |-- Check: detected levels match item structure
-    |-- If verification fails --> Retry with Vision AI
-    |
-    v
-Step 5: Present results to user
-```
+### 1. `src/hooks/usePlanState.ts`
+Add a `deleteItem` function that:
+- Removes the item and all its descendants from the items array
+- Recalculates orders via the existing `recalculateOrders` function
 
-## Changes
+### 2. `src/components/plan-optimizer/SortableTreeItem.tsx`
+- Add a `Trash2` icon button next to the existing gear (Settings2) icon
+- Accept an `onDelete` callback prop
+- Wrap in an `AlertDialog` with confirmation message: "This will permanently delete this item and all its children. This cannot be undone."
 
-### 1. Add Vision AI Fallback After Empty Text Extraction
-**File**: `src/components/steps/FileUploadStep.tsx`
+### 3. `src/components/plan-optimizer/EditItemDialog.tsx`
+- Add a destructive "Delete Item" button on the left side of the footer
+- Accept an `onDelete` callback prop
+- Wrap in an `AlertDialog` confirmation (same message)
+- Close the edit dialog after deletion
 
-In `handleFileUpload`, after `extractPlanItemsWithAI(extractedText)` completes, check if `extractedItems` is null or empty. If so, and the file is a PDF, automatically trigger `extractWithVisionAI(file)` as a fallback. The text-based extraction's `detectedLevels` (e.g., pillar, objective, strategy) are preserved and passed as a hint to Vision AI.
+### 4. `src/components/steps/PlanOptimizerStep.tsx`
+- Wire up the new `onDelete` prop to both `SortableTreeItem` and `EditItemDialog`
+- Call `onDeleteItem` (passed from Index.tsx) which invokes `deleteItem` from usePlanState
 
-Key changes to `extractPlanItemsWithAI`:
-- Return a result object `{ items, levels }` instead of setting state and returning void
-- This allows `handleFileUpload` to inspect the result and decide whether to fall back
+### 5. `src/pages/Index.tsx`
+- Pass `deleteItem` from `usePlanState` down to `PlanOptimizerStep` as `onDeleteItem`
 
-Key changes to `handleFileUpload` (PDF branch):
-- After text AI returns 0 items, show status "Text analysis found no items, trying visual analysis..." and call `extractWithVisionAI(file)`
-- Pass detected levels from text extraction as context to Vision AI
+## Confirmation UX
 
-### 2. Add Extraction Verification
-**File**: `src/components/steps/FileUploadStep.tsx`
+The AlertDialog will show:
+- **Title**: "Delete plan item?"
+- **Description**: "Are you sure you want to delete '{item name}'? This will also remove any items nested under it. This action cannot be undone."
+- **Cancel** button (outline) + **Delete** button (destructive red)
 
-Add a `verifyExtractionResult` function that runs after any extraction method returns items. Checks include:
-
-- **Minimum item count**: At least 1 item found (warn if fewer than expected for page count)
-- **Nesting check**: Not all items should be flat at root level -- at least some should have children
-- **Level consistency**: Items' levelTypes should match the detected levels
-- **Reasonable depth**: No item should be deeper than the number of detected levels
-
-If verification fails on text extraction, fall back to Vision AI. If verification fails on Vision AI too, present what we have with a warning toast.
-
-### 3. Pass Text-Detected Levels as Context to Vision AI
-**File**: `src/components/steps/FileUploadStep.tsx`
-
-When falling back from text to vision, pass the detected level names (e.g., "pillar", "objective", "strategy", "kpi") as `previousContext` to `extractWithVisionAI`. This gives the Vision AI a head start on understanding the document's hierarchy terminology.
-
-Modify `extractWithVisionAI` to accept an optional `levelHints` parameter that gets included in the first batch's context.
-
-### 4. Refactor for Cleaner Flow
-**File**: `src/components/steps/FileUploadStep.tsx`
-
-Restructure the PDF handling in `handleFileUpload` to be a clear pipeline:
-
-```text
-handleFileUpload (PDF):
-  1. parsePdfWithEdgeFunction() --> text + pageCount
-  2. Quality gate (existing checks)
-  3. extractPlanItemsWithAI(text) --> { items, levels }
-  4. If items.length === 0:
-       - extractWithVisionAI(file, levels as hints)
-  5. verifyExtractionResult(items)
-  6. If verification fails and haven't tried vision yet:
-       - extractWithVisionAI(file)
-  7. Set state with final results
-```
-
-## Files to Modify
-
-| File | Change |
-|------|--------|
-| `src/components/steps/FileUploadStep.tsx` | Refactor extraction flow: make `extractPlanItemsWithAI` return results instead of setting state; add fallback logic after 0 items; add `verifyExtractionResult` function; pass level hints to vision fallback |
-
-## What This Fixes
-
-- The Strategic Vision PDF: text extraction finds definitions + levels but 0 items, so the app automatically falls back to Vision AI which can read the tabular content from the page images
-- Any future PDF where text is extractable but content is primarily visual
-- Provides verification that catches poor extractions before presenting to user
