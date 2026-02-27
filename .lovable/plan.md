@@ -1,19 +1,29 @@
 
 
-# Fix: Dynamic Schema Depth + Detected Level Names in Verification Modal
+# Improve Drag-and-Drop: Clear Nest vs Reorder UX
 
-## Problems
-1. **Schema caps at 4 levels** — `level4Item` has no `children`, so Claude physically cannot output items deeper than depth 4. The Boulder County doc has 5 levels (pillars → objectives → outcome KPIs → strategies → strategy KPIs).
-2. **LevelVerificationModal shows stale default names** — The modal uses `useState(initialLevels)` which captures the value only on first mount. When `handleAIExtraction` calls `setLevels(levels)` and then opens the modal, React batches the state update so `state.levels` is still `DEFAULT_LEVELS` when the modal renders. Even if it weren't, the modal's internal state wouldn't update because `useState` ignores prop changes after mount.
+## Current Problem
+The existing drag-and-drop uses mouse Y-position zones (top 20%, middle 60%, bottom 20%) to determine before/after/inside placement. The visual indicators are subtle (thin lines for reorder, light background for nest), making it unclear what action will happen on drop.
 
 ## Changes
 
-### 1. Extend schema nesting to 7 levels (`extract-plan-items/index.ts`, lines 271-293)
-Add `level5Item`, `level6Item`, `level7Item` to the chain so Claude can nest items up to 7 levels deep. Only ~10 lines of schema definition change.
+### 1. Improve drop zone indicators in `SortableTreeItem.tsx`
+- **Reorder (before/after)**: Thicker blue line (2px) with a small circle on the left edge, indented to match the target's depth — classic tree reorder indicator
+- **Nest (inside)**: Distinct highlighted border with a "nest under" icon/label overlay, using a colored left border + background tint so it's visually distinct from reorder lines
+- Add a small text label near the indicator: "Move before" / "Move after" for lines, "Nest under [item name]" for inside drops
 
-### 2. Fix LevelVerificationModal to sync with detected levels (`LevelVerificationModal.tsx`)
-Add a `useEffect` that updates the modal's internal `levels` state whenever the `open` prop transitions to `true`, ensuring it picks up the AI-detected level names and count instead of stale defaults.
+### 2. Refine drop zone thresholds in `PlanOptimizerStep.tsx`
+- Change zones from 20/60/20 to **25/50/25** — gives reorder zones more room since they're harder to hit
+- When dragging an item at the **same level** as the target, bias toward reorder (before/after)
+- When dragging an item at a **deeper level** than the target, bias toward "inside" (nesting)
 
-### 3. Pass detected levels directly to modal (`Index.tsx`, lines 83-87)
-In `handleAIExtraction`, pass the detected levels directly as a separate prop or store them so the modal receives the correct levels before opening. The simplest fix: store the AI-detected levels in a ref or pass them as the `levels` prop to the modal, and use a `key` or `useEffect` to reset internal state.
+### 3. Improve DragOverlay in `PlanOptimizerStep.tsx`
+- Show the current action in the drag overlay: append a small label like "↕ Reorder" or "→ Nest under [target]" so the user always knows what will happen on drop
+
+### 4. Add `data-id` attribute to the sortable item's inner div (`SortableTreeItem.tsx`)
+- Currently `data-id` is on a wrapper `div` in the parent. Move/add it to `setNodeRef` element so `document.querySelector` reliably finds the correct bounding rect for drop zone calculation.
+
+## Files Modified
+- `src/components/plan-optimizer/SortableTreeItem.tsx` — enhanced visual indicators
+- `src/components/steps/PlanOptimizerStep.tsx` — refined thresholds, improved overlay, pass target item info
 
