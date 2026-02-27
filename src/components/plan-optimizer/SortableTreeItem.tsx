@@ -41,6 +41,8 @@ interface SortableTreeItemProps {
   isOver?: boolean;
   dropPosition?: DropPosition;
   targetItemName?: string;
+  nestLevelName?: string;
+  reorderLevelName?: string;
 }
 
 export function SortableTreeItem({
@@ -55,6 +57,8 @@ export function SortableTreeItem({
   isOver,
   dropPosition,
   targetItemName,
+  nestLevelName,
+  reorderLevelName,
 }: SortableTreeItemProps) {
   const {
     attributes,
@@ -103,15 +107,12 @@ export function SortableTreeItem({
 
   return (
     <div className="relative">
-      {/* Drop before indicator — thick line with circle */}
+      {/* Drop before indicator — full-width separator line */}
       {showBeforeLine && (
         <div className="absolute top-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
-          <div className="relative h-0.5">
-            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-primary border-2 border-primary" />
-            <div className="absolute left-2.5 right-0 top-0 h-0.5 bg-primary" />
-          </div>
-          <span className="absolute left-10 -top-4 text-[10px] font-medium text-primary bg-background px-1 rounded">
-            Move before
+          <div className="h-0.5 bg-primary rounded-full" />
+          <span className="absolute left-10 -top-4 text-[10px] font-medium text-primary bg-background px-1.5 py-0.5 rounded shadow-sm border border-primary/20">
+            Reorder before "{targetItemName}"{reorderLevelName ? ` as ${reorderLevelName}` : ''}
           </span>
         </div>
       )}
@@ -129,7 +130,7 @@ export function SortableTreeItem({
         {/* Nest label overlay */}
         {showInsideHighlight && (
           <span className="absolute right-4 top-1 text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full z-10">
-            → Nest under {item.name}
+            → Nest under "{item.name}"{nestLevelName ? ` as ${nestLevelName}` : ''}
           </span>
         )}
         <button
@@ -245,15 +246,12 @@ export function SortableTreeItem({
         )}
       </div>
       
-      {/* Drop after indicator — thick line with circle */}
+      {/* Drop after indicator — full-width separator line */}
       {showAfterLine && (
         <div className="absolute bottom-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
-          <div className="relative h-0.5">
-            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-primary border-2 border-primary" />
-            <div className="absolute left-2.5 right-0 top-0 h-0.5 bg-primary" />
-          </div>
-          <span className="absolute left-10 top-0.5 text-[10px] font-medium text-primary bg-background px-1 rounded">
-            Move after
+          <div className="h-0.5 bg-primary rounded-full" />
+          <span className="absolute left-10 top-0.5 text-[10px] font-medium text-primary bg-background px-1.5 py-0.5 rounded shadow-sm border border-primary/20">
+            Reorder after "{targetItemName}"{reorderLevelName ? ` as ${reorderLevelName}` : ''}
           </span>
         </div>
       )}
