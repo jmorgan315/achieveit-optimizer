@@ -121,32 +121,52 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         
         setProcessingStatus(`Vision AI analyzing pages ${startPage}-${endPage}...`);
 
-        const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-vision`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ 
-            pageImages: batch.map(img => img.dataUrl),
-            previousContext 
-          }),
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          if (response.status === 429) {
-            throw new Error('AI rate limit reached. Please wait a moment and try again.');
-          }
-          if (response.status === 402) {
-            throw new Error('AI credits exhausted. Please add credits to continue.');
-          }
-          throw new Error(error.error || 'Vision AI extraction failed');
+        // Add delay between batches to avoid rate limits (Anthropic)
+        if (batchIndex > 0) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
 
-        const result = await response.json();
+        let result: any = null;
+        let retries = 0;
+        const maxRetries = 3;
 
-        if (!result.success || !result.data) {
-          throw new Error(result.error || 'Vision AI returned no data');
+        while (retries <= maxRetries) {
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-vision`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              pageImages: batch.map(img => img.dataUrl),
+              previousContext 
+            }),
+          });
+
+          if (response.status === 429 && retries < maxRetries) {
+            retries++;
+            const waitTime = Math.pow(2, retries) * 2000; // 4s, 8s, 16s
+            setProcessingStatus(`Rate limited — retrying in ${waitTime / 1000}s...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            continue;
+          }
+
+          if (!response.ok) {
+            const error = await response.json();
+            if (response.status === 429) {
+              throw new Error('AI rate limit reached. Please wait a moment and try again.');
+            }
+            if (response.status === 402) {
+              throw new Error('AI credits exhausted. Please add credits to continue.');
+            }
+            throw new Error(error.error || 'Vision AI extraction failed');
+          }
+
+          result = await response.json();
+          break;
+        }
+
+        if (!result?.success || !result?.data) {
+          throw new Error(result?.error || 'Vision AI returned no data');
         }
 
         // Merge results from this batch
