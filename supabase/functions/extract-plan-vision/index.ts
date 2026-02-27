@@ -353,9 +353,9 @@ serve(async (req) => {
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'LOVABLE_API_KEY not set');
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
+      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'ANTHROPIC_API_KEY not set');
     }
 
     const body = await req.json();
@@ -418,27 +418,49 @@ Extract all strategic plan items with their proper hierarchy.`
       });
     });
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // Convert content array to Anthropic format
+    const anthropicContent: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+    
+    for (const item of content) {
+      if (item.type === "text" && item.text) {
+        anthropicContent.push({ type: "text", text: item.text });
+      } else if (item.type === "image_url" && item.image_url) {
+        // Extract base64 data and media type from data URL
+        const url = item.image_url.url;
+        const match = url.match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (match) {
+          anthropicContent.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: match[1],
+              data: match[2]
+            }
+          });
+        }
+      }
+    }
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 16384,
+        system: VISION_EXTRACTION_PROMPT,
         messages: [
-          { role: "system", content: VISION_EXTRACTION_PROMPT },
-          { role: "user", content }
+          { role: "user", content: anthropicContent }
         ],
         tools: [{
-          type: "function",
-          function: {
-            name: "extract_plan_items",
-            description: "Extract structured plan items from document page images with layout detection and schema discovery",
-            parameters: extractPlanItemsSchema
-          }
+          name: "extract_plan_items",
+          description: "Extract structured plan items from document page images with layout detection and schema discovery",
+          input_schema: extractPlanItemsSchema
         }],
-        tool_choice: { type: "function", function: { name: "extract_plan_items" } }
+        tool_choice: { type: "tool", name: "extract_plan_items" }
       }),
     });
 
@@ -453,13 +475,13 @@ Extract all strategic plan items with their proper hierarchy.`
     }
 
     const aiResponse = await response.json();
-    const toolCall = aiResponse.choices?.[0]?.message?.tool_calls?.[0];
+    const toolUse = aiResponse.content?.find((block: { type: string }) => block.type === "tool_use");
     
-    if (!toolCall || toolCall.function?.name !== "extract_plan_items") {
+    if (!toolUse || toolUse.name !== "extract_plan_items") {
       return createSafeError(500, 'Unable to extract plan items from images. Please try again.', 'Unexpected AI response format');
     }
 
-    let extractedData = JSON.parse(toolCall.function.arguments);
+    let extractedData = toolUse.input as Record<string, unknown>;
     
     // Normalize and clean the response
     extractedData = normalizeResponse(extractedData);
