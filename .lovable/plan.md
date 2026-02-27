@@ -1,51 +1,19 @@
 
 
-# Improve Extraction Completeness
+# Fix: Dynamic Schema Depth + Detected Level Names in Verification Modal
 
-The core problem: the AI is silently dropping items. Two strategies to fix this — (A) make the initial extraction more thorough, and (B) add a verification pass that catches gaps.
+## Problems
+1. **Schema caps at 4 levels** — `level4Item` has no `children`, so Claude physically cannot output items deeper than depth 4. The Boulder County doc has 5 levels (pillars → objectives → outcome KPIs → strategies → strategy KPIs).
+2. **LevelVerificationModal shows stale default names** — The modal uses `useState(initialLevels)` which captures the value only on first mount. When `handleAIExtraction` calls `setLevels(levels)` and then opens the modal, React batches the state update so `state.levels` is still `DEFAULT_LEVELS` when the modal renders. Even if it weren't, the modal's internal state wouldn't update because `useState` ignores prop changes after mount.
 
 ## Changes
 
-### 1. Reduce chunk size from 50k to 25k characters (`extract-plan-items/index.ts`)
-Smaller chunks mean the AI has less to process per call and is far less likely to skip items. 50k chars is pushing Claude's attention limits for detailed extraction.
+### 1. Extend schema nesting to 7 levels (`extract-plan-items/index.ts`, lines 271-293)
+Add `level5Item`, `level6Item`, `level7Item` to the chain so Claude can nest items up to 7 levels deep. Only ~10 lines of schema definition change.
 
-### 2. Add a completeness verification pass (`extract-plan-items/index.ts`)
-After the initial extraction of each chunk, do a lightweight second AI call:
-- Send the original chunk text + the list of extracted item names
-- Ask Claude to identify any bullets, goals, strategies, or KPIs that were missed
-- Merge any newly found items into the correct parent in the existing tree
-- This acts as a "second pair of eyes" specifically focused on gaps
+### 2. Fix LevelVerificationModal to sync with detected levels (`LevelVerificationModal.tsx`)
+Add a `useEffect` that updates the modal's internal `levels` state whenever the `open` prop transitions to `true`, ensuring it picks up the AI-detected level names and count instead of stale defaults.
 
-### 3. Add bullet/item pre-count heuristic (`extract-plan-items/index.ts`)
-Before sending to AI, count recognizable list markers in the text (bullets, numbered items, dashes). After extraction, compare total extracted items to this count. If extracted < 60% of the counted markers, log a warning and trigger the verification pass.
-
-### 4. Strengthen the system prompt (`extract-plan-items/index.ts`)
-Add explicit completeness instructions:
-- "COMPLETENESS IS CRITICAL — you must extract EVERY bullet point, numbered item, goal, and action. Do NOT summarize or skip items you consider minor."
-- "Count the bullets in each section and ensure your output has at least that many children."
-
-### 5. Improve text-preference logic (`FileUploadStep.tsx`)
-Currently the verification gate uses weak thresholds (1 item per 3 pages). Tighten to:
-- At least 1 top-level item per 2 pages
-- Total items (recursive) should be at least 2x page count
-- Add a text-density check: if source text has >500 chars/page, strongly prefer text extraction over vision
-
-### 6. Add per-chunk item count logging and user feedback (`FileUploadStep.tsx`)
-Show the user running totals as chunks process: "Chunk 2/4: found 23 items (47 total so far)" so they can see progress and know if something seems off.
-
-## Technical Flow
-
-```text
-Upload PDF
-  → Parse text
-  → Pre-count bullets/markers in text
-  → For each 25k chunk:
-      1. Initial extraction (Claude tool call)
-      2. Compare extracted count vs bullet count
-      3. If gap detected OR always: run verification pass
-         → "Here's the text and what was found. What's missing?"
-         → Merge missing items into tree
-  → Final verification gate (tightened thresholds)
-  → If failed → fallback to Vision AI
-```
+### 3. Pass detected levels directly to modal (`Index.tsx`, lines 83-87)
+In `handleAIExtraction`, pass the detected levels directly as a separate prop or store them so the modal receives the correct levels before opening. The simplest fix: store the AI-detected levels in a ref or pass them as the `levels` prop to the modal, and use a `key` or `useEffect` to reset internal state.
 
