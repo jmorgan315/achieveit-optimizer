@@ -1,44 +1,51 @@
 
 
-# Add Delete Item Capability
+# Improve Extraction Completeness
 
-## Approach
+The core problem: the AI is silently dropping items. Two strategies to fix this — (A) make the initial extraction more thorough, and (B) add a verification pass that catches gaps.
 
-Add a delete button in two places for convenience:
-1. **Trash icon** on each tree row in `SortableTreeItem` (next to the edit gear icon) for quick access
-2. **Delete button** in the `EditItemDialog` footer for when you're already editing an item
+## Changes
 
-Both trigger an `AlertDialog` confirmation before deleting. When an item with children is deleted, its children are also removed (cascading delete).
+### 1. Reduce chunk size from 50k to 25k characters (`extract-plan-items/index.ts`)
+Smaller chunks mean the AI has less to process per call and is far less likely to skip items. 50k chars is pushing Claude's attention limits for detailed extraction.
 
-## Technical Changes
+### 2. Add a completeness verification pass (`extract-plan-items/index.ts`)
+After the initial extraction of each chunk, do a lightweight second AI call:
+- Send the original chunk text + the list of extracted item names
+- Ask Claude to identify any bullets, goals, strategies, or KPIs that were missed
+- Merge any newly found items into the correct parent in the existing tree
+- This acts as a "second pair of eyes" specifically focused on gaps
 
-### 1. `src/hooks/usePlanState.ts`
-Add a `deleteItem` function that:
-- Removes the item and all its descendants from the items array
-- Recalculates orders via the existing `recalculateOrders` function
+### 3. Add bullet/item pre-count heuristic (`extract-plan-items/index.ts`)
+Before sending to AI, count recognizable list markers in the text (bullets, numbered items, dashes). After extraction, compare total extracted items to this count. If extracted < 60% of the counted markers, log a warning and trigger the verification pass.
 
-### 2. `src/components/plan-optimizer/SortableTreeItem.tsx`
-- Add a `Trash2` icon button next to the existing gear (Settings2) icon
-- Accept an `onDelete` callback prop
-- Wrap in an `AlertDialog` with confirmation message: "This will permanently delete this item and all its children. This cannot be undone."
+### 4. Strengthen the system prompt (`extract-plan-items/index.ts`)
+Add explicit completeness instructions:
+- "COMPLETENESS IS CRITICAL — you must extract EVERY bullet point, numbered item, goal, and action. Do NOT summarize or skip items you consider minor."
+- "Count the bullets in each section and ensure your output has at least that many children."
 
-### 3. `src/components/plan-optimizer/EditItemDialog.tsx`
-- Add a destructive "Delete Item" button on the left side of the footer
-- Accept an `onDelete` callback prop
-- Wrap in an `AlertDialog` confirmation (same message)
-- Close the edit dialog after deletion
+### 5. Improve text-preference logic (`FileUploadStep.tsx`)
+Currently the verification gate uses weak thresholds (1 item per 3 pages). Tighten to:
+- At least 1 top-level item per 2 pages
+- Total items (recursive) should be at least 2x page count
+- Add a text-density check: if source text has >500 chars/page, strongly prefer text extraction over vision
 
-### 4. `src/components/steps/PlanOptimizerStep.tsx`
-- Wire up the new `onDelete` prop to both `SortableTreeItem` and `EditItemDialog`
-- Call `onDeleteItem` (passed from Index.tsx) which invokes `deleteItem` from usePlanState
+### 6. Add per-chunk item count logging and user feedback (`FileUploadStep.tsx`)
+Show the user running totals as chunks process: "Chunk 2/4: found 23 items (47 total so far)" so they can see progress and know if something seems off.
 
-### 5. `src/pages/Index.tsx`
-- Pass `deleteItem` from `usePlanState` down to `PlanOptimizerStep` as `onDeleteItem`
+## Technical Flow
 
-## Confirmation UX
-
-The AlertDialog will show:
-- **Title**: "Delete plan item?"
-- **Description**: "Are you sure you want to delete '{item name}'? This will also remove any items nested under it. This action cannot be undone."
-- **Cancel** button (outline) + **Delete** button (destructive red)
+```text
+Upload PDF
+  → Parse text
+  → Pre-count bullets/markers in text
+  → For each 25k chunk:
+      1. Initial extraction (Claude tool call)
+      2. Compare extracted count vs bullet count
+      3. If gap detected OR always: run verification pass
+         → "Here's the text and what was found. What's missing?"
+         → Merge missing items into tree
+  → Final verification gate (tightened thresholds)
+  → If failed → fallback to Vision AI
+```
 
