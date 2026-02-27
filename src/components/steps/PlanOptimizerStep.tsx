@@ -227,42 +227,14 @@ export function PlanOptimizerStep({
     }
   };
 
-  const getDropPosition = useCallback((): DropPosition => {
-    const activeIdValue = activeId;
-    if (!activeIdValue || !dropInfo?.itemId) return null;
-    
-    const overElement = document.querySelector(`[data-id="${dropInfo.itemId}"]`);
-    if (!overElement) return 'inside';
-    
-    const rect = overElement.getBoundingClientRect();
-    const mouseY = pointerPositionRef.current.y;
-    
-    // 25/50/25 zones — more room for reorder
-    const topThreshold = rect.top + rect.height * 0.25;
-    const bottomThreshold = rect.bottom - rect.height * 0.25;
-    
-    // Level-based bias: same parent → bias reorder, different parent → bias nest
-    const draggedItem = items.find(i => i.id === activeIdValue);
-    const targetItem = items.find(i => i.id === dropInfo.itemId);
-    const sameLevel = draggedItem && targetItem && draggedItem.parentId === targetItem.parentId;
-    
-    if (sameLevel) {
-      // Wider reorder zones (30/40/30) for same-level items
-      const biasedTop = rect.top + rect.height * 0.3;
-      const biasedBottom = rect.bottom - rect.height * 0.3;
-      if (mouseY < biasedTop) return 'before';
-      if (mouseY > biasedBottom) return 'after';
-      return 'inside';
-    }
-    
-    if (mouseY < topThreshold) {
-      return 'before';
-    } else if (mouseY > bottomThreshold) {
-      return 'after';
-    } else {
-      return 'inside';
-    }
-  }, [activeId, dropInfo?.itemId, items]);
+  const EDGE_ZONE_PX = 12;
+
+  const computeDropPosition = useCallback((rect: DOMRect, mouseY: number): DropPosition => {
+    // 12px from top edge → before, 12px from bottom edge → after, everything else → nest
+    if (mouseY < rect.top + EDGE_ZONE_PX) return 'before';
+    if (mouseY > rect.bottom - EDGE_ZONE_PX) return 'after';
+    return 'inside';
+  }, []);
 
   const handleDragOver = (event: DragOverEvent) => {
     const overId = event.over?.id as string | null;
@@ -281,27 +253,7 @@ export function PlanOptimizerStep({
       if (overElement) {
         const rect = overElement.getBoundingClientRect();
         const mouseY = pointerPositionRef.current.y;
-        
-        // 25/50/25 zones, with same-parent bias
-        const draggedItem = items.find(i => i.id === activeId);
-        const targetItem = items.find(i => i.id === overId);
-        const sameLevel = draggedItem && targetItem && draggedItem.parentId === targetItem.parentId;
-        
-        const topPct = sameLevel ? 0.3 : 0.25;
-        const bottomPct = sameLevel ? 0.3 : 0.25;
-        
-        const topThreshold = rect.top + rect.height * topPct;
-        const bottomThreshold = rect.bottom - rect.height * bottomPct;
-        
-        let position: DropPosition;
-        if (mouseY < topThreshold) {
-          position = 'before';
-        } else if (mouseY > bottomThreshold) {
-          position = 'after';
-        } else {
-          position = 'inside';
-        }
-        
+        const position = computeDropPosition(rect, mouseY);
         setDropInfo({ itemId: overId, position });
       } else {
         setDropInfo({ itemId: overId, position: 'inside' });
@@ -524,7 +476,15 @@ export function PlanOptimizerStep({
               strategy={verticalListSortingStrategy}
             >
               <div className="divide-y">
-                {flatList.map(({ item, depth }) => (
+                {flatList.map(({ item, depth }) => {
+                  const targetItem = dropInfo?.itemId === item.id ? item : null;
+                  const nestLevelName = targetItem
+                    ? levels.find(l => l.depth === targetItem.levelDepth + 1)?.name || `Level ${targetItem.levelDepth + 1}`
+                    : '';
+                  const reorderLevelName = targetItem
+                    ? targetItem.levelName
+                    : '';
+                  return (
                   <SortableTreeItem
                     key={item.id}
                     item={item}
@@ -538,8 +498,11 @@ export function PlanOptimizerStep({
                     isOver={dropInfo?.itemId === item.id}
                     dropPosition={dropInfo?.itemId === item.id ? dropInfo.position : null}
                     targetItemName={item.name}
+                    nestLevelName={nestLevelName}
+                    reorderLevelName={reorderLevelName}
                   />
-                ))}
+                  );
+                })}
               </div>
             </SortableContext>
 
@@ -548,17 +511,24 @@ export function PlanOptimizerStep({
                 <div className="bg-card border rounded-lg shadow-lg p-3 opacity-90 flex items-center gap-2">
                   <Badge variant="secondary">{activeItem.order}</Badge>
                   <span className="font-medium">{activeItem.name}</span>
-                  {dropInfo && (
-                    <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded-full ${
-                      dropInfo.position === 'inside'
-                        ? 'bg-primary/10 text-primary'
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
-                      {dropInfo.position === 'inside'
-                        ? `→ Nest under ${items.find(i => i.id === dropInfo.itemId)?.name || '...'}`
-                        : `↕ Reorder`}
-                    </span>
-                  )}
+                  {dropInfo && (() => {
+                    const target = items.find(i => i.id === dropInfo.itemId);
+                    if (!target) return null;
+                    if (dropInfo.position === 'inside') {
+                      const childLevel = levels.find(l => l.depth === target.levelDepth + 1)?.name || `Level ${target.levelDepth + 1}`;
+                      return (
+                        <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                          → Nest under {target.name} as {childLevel}
+                        </span>
+                      );
+                    } else {
+                      return (
+                        <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                          ↕ Reorder as {target.levelName}
+                        </span>
+                      );
+                    }
+                  })()}
                 </div>
               ) : null}
             </DragOverlay>
