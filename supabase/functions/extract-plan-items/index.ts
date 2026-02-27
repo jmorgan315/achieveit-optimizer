@@ -267,10 +267,28 @@ function buildItemProperties(): Record<string, unknown> {
   };
 }
 
-// Build inlined schema with explicit nesting (no $ref)
-const level4Item = {
+// Build inlined schema with explicit nesting (no $ref) — 7 levels deep
+const level7Item = {
   type: "object",
   properties: { ...buildItemProperties() },
+  required: ["name", "levelType"],
+};
+
+const level6Item = {
+  type: "object",
+  properties: { ...buildItemProperties(), children: { type: "array", description: "Nested child items", items: level7Item } },
+  required: ["name", "levelType"],
+};
+
+const level5Item = {
+  type: "object",
+  properties: { ...buildItemProperties(), children: { type: "array", description: "Nested child items", items: level6Item } },
+  required: ["name", "levelType"],
+};
+
+const level4Item = {
+  type: "object",
+  properties: { ...buildItemProperties(), children: { type: "array", description: "Nested child items", items: level5Item } },
   required: ["name", "levelType"],
 };
 
