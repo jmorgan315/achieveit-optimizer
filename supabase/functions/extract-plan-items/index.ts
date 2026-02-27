@@ -8,7 +8,7 @@ const corsHeaders = {
 // Validation constants
 const MAX_TEXT_LENGTH = 300000;
 const MIN_TEXT_LENGTH = 50;
-const CHUNK_SIZE = 50000;
+const CHUNK_SIZE = 25000; // Reduced from 50k for better extraction completeness
 
 // Safe error helper
 function createSafeError(
@@ -28,6 +28,44 @@ function createSafeError(
   );
 }
 
+// Count bullet/list markers in text for completeness heuristic
+function countBulletMarkers(text: string): number {
+  const patterns = [
+    /^[\s]*[-•●◦▪▸►]\s/gm,        // Bullet chars
+    /^[\s]*\d+[\.\)]\s/gm,          // Numbered lists (1. or 1))
+    /^[\s]*[a-zA-Z][\.\)]\s/gm,     // Letter lists (a. or a))
+    /^[\s]*[ivxIVX]+[\.\)]\s/gm,    // Roman numerals
+  ];
+  let count = 0;
+  for (const pattern of patterns) {
+    const matches = text.match(pattern);
+    if (matches) count += matches.length;
+  }
+  return count;
+}
+
+// Count all items recursively
+function countAllItems(items: unknown[]): number {
+  let count = 0;
+  for (const item of items) {
+    count++;
+    const i = item as { children?: unknown[] };
+    if (i.children?.length) count += countAllItems(i.children);
+  }
+  return count;
+}
+
+// Collect all item names recursively for deduplication context
+function collectItemNames(items: unknown[]): string[] {
+  const names: string[] = [];
+  for (const item of items) {
+    const i = item as { name?: string; children?: unknown[] };
+    if (i.name) names.push(i.name);
+    if (i.children?.length) names.push(...collectItemNames(i.children));
+  }
+  return names;
+}
+
 // Split document into chunks at paragraph boundaries
 function splitDocumentIntoChunks(text: string, maxChunkSize: number): string[] {
   if (text.length <= maxChunkSize) {
@@ -43,20 +81,15 @@ function splitDocumentIntoChunks(text: string, maxChunkSize: number): string[] {
       break;
     }
 
-    // Find the best split point within the chunk size limit
     let splitAt = maxChunkSize;
-
-    // Try to split at a double newline (paragraph boundary)
     const lastDoubleNewline = remaining.lastIndexOf('\n\n', maxChunkSize);
     if (lastDoubleNewline > maxChunkSize * 0.5) {
-      splitAt = lastDoubleNewline + 2; // Include the double newline
+      splitAt = lastDoubleNewline + 2;
     } else {
-      // Fall back to single newline
       const lastNewline = remaining.lastIndexOf('\n', maxChunkSize);
       if (lastNewline > maxChunkSize * 0.5) {
         splitAt = lastNewline + 1;
       }
-      // Otherwise just split at maxChunkSize
     }
 
     chunks.push(remaining.slice(0, splitAt));
@@ -68,7 +101,11 @@ function splitDocumentIntoChunks(text: string, maxChunkSize: number): string[] {
 
 const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
 
-Your task is to identify plan items that an organization would track progress on over time.
+=== COMPLETENESS IS CRITICAL ===
+
+You MUST extract EVERY SINGLE bullet point, numbered item, goal, strategy, action, KPI, and metric in the document. Do NOT summarize, skip, or combine items you consider minor or redundant. If the document has 15 bullets under a heading, your output MUST have 15 children under that parent. Count the bullets in each section and ensure your output has AT LEAST that many children.
+
+FAILURE TO EXTRACT ALL ITEMS IS THE WORST POSSIBLE ERROR. When in doubt, INCLUDE the item.
 
 === DYNAMIC LEVEL DETECTION (CRITICAL) ===
 
@@ -142,11 +179,13 @@ When you see bullet points under a heading:
 - ALL bullets at the same indent level = SAME levelType
 - Bullets under a section heading = children of that section
 - Example: "The county will:" followed by 5 bullets = 5 children nested under that section
+- If you see 10 bullets, you MUST output 10 children. NOT 5, NOT 7. ALL 10.
 
 DO NOT:
 - Put bullets as siblings at root level
 - Skip bullet points
 - Mix bullet types (if 5 bullets, all should be same levelType)
+- Summarize multiple bullets into fewer items
 
 === CORRECT NESTING EXAMPLE ===
 
@@ -196,7 +235,23 @@ OUTPUT:
 2. Did you report all detected levels in detectedLevels with correct depth ordering?
 3. Do root items have empty children arrays? → Move subsequent items into children
 4. Are lower-level items at root? → They should be children of higher-level items
-5. If all items are at root with no nesting, your response is WRONG — restructure.`;
+5. If all items are at root with no nesting, your response is WRONG — restructure.
+6. COUNT: Does the number of items in your output match the number of items in the document? If not, go back and add the missing ones.`;
+
+// Verification pass system prompt
+const VERIFICATION_SYSTEM_PROMPT = `You are a completeness auditor. You will receive:
+1. The original document text
+2. A list of items that were already extracted
+
+Your ONLY job is to find items that were MISSED. Look for:
+- Bullet points not in the extracted list
+- Numbered items not in the extracted list
+- Goals, strategies, actions, KPIs mentioned in the text but missing from extraction
+- Sub-items under headings that were skipped
+
+Return ONLY the missing items, properly nested under their correct parent (use the parent's name to indicate where they belong). If nothing was missed, return an empty items array.
+
+Be thorough — check every bullet, every numbered item, every heading with sub-items.`;
 
 // Helper to build a single item schema at a given nesting depth
 function buildItemProperties(): Record<string, unknown> {
@@ -215,36 +270,25 @@ function buildItemProperties(): Record<string, unknown> {
 // Build inlined schema with explicit nesting (no $ref)
 const level4Item = {
   type: "object",
-  properties: {
-    ...buildItemProperties(),
-  },
+  properties: { ...buildItemProperties() },
   required: ["name", "levelType"],
 };
 
 const level3Item = {
   type: "object",
-  properties: {
-    ...buildItemProperties(),
-    children: { type: "array", description: "Nested child items", items: level4Item },
-  },
+  properties: { ...buildItemProperties(), children: { type: "array", description: "Nested child items", items: level4Item } },
   required: ["name", "levelType"],
 };
 
 const level2Item = {
   type: "object",
-  properties: {
-    ...buildItemProperties(),
-    children: { type: "array", description: "Nested child items", items: level3Item },
-  },
+  properties: { ...buildItemProperties(), children: { type: "array", description: "Nested child items", items: level3Item } },
   required: ["name", "levelType"],
 };
 
 const level1Item = {
   type: "object",
-  properties: {
-    ...buildItemProperties(),
-    children: { type: "array", description: "Nested child items", items: level2Item },
-  },
+  properties: { ...buildItemProperties(), children: { type: "array", description: "Nested child items", items: level2Item } },
   required: ["name", "levelType"],
 };
 
@@ -272,9 +316,72 @@ const extractPlanItemsSchema = {
   required: ["items", "detectedLevels"]
 };
 
+// Verification pass schema - simpler, just missing items with parent context
+const verificationSchema = {
+  type: "object",
+  properties: {
+    missingItems: {
+      type: "array",
+      description: "Items that were missed in the initial extraction",
+      items: {
+        type: "object",
+        properties: {
+          parentName: { type: "string", description: "Name of the parent item this belongs under (must match an existing extracted item name). Use empty string if it's a new root item." },
+          name: { type: "string", description: "Name of the missed item" },
+          levelType: { type: "string", description: "Level type matching the document's hierarchy" },
+          description: { type: "string", description: "Brief description (optional)" },
+          metricTarget: { type: "string", description: "Target value if measurable" },
+          metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage", "None"] },
+        },
+        required: ["parentName", "name", "levelType"]
+      }
+    }
+  },
+  required: ["missingItems"]
+};
+
 interface ExtractedChunkResult {
   items: unknown[];
   detectedLevels: { depth: number; name: string }[];
+}
+
+async function callAnthropicWithRetry(
+  body: Record<string, unknown>,
+  apiKey: string,
+  maxRetries = 2
+): Promise<unknown> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.status === 429 && attempt < maxRetries) {
+      const waitTime = Math.pow(2, attempt + 1) * 2000;
+      console.log(`Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+      continue;
+    }
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        throw { status: 429, message: 'Service temporarily busy. Please try again in a moment.' };
+      }
+      if (response.status === 402) {
+        throw { status: 402, message: 'Service temporarily unavailable. Please try again later.' };
+      }
+      const errorText = await response.text();
+      throw { status: 500, message: 'Document processing failed. Please try again.', details: errorText };
+    }
+
+    return await response.json();
+  }
+  throw { status: 429, message: 'Service temporarily busy. Please try again in a moment.' };
 }
 
 async function processChunk(
@@ -284,9 +391,11 @@ async function processChunk(
   previousContext: { detectedLevels: { depth: number; name: string }[]; extractedItemNames: string[] } | null,
   apiKey: string
 ): Promise<ExtractedChunkResult> {
-  let userMessage = `Please analyze this strategic planning document and extract only the trackable plan items:\n\n${chunkText}`;
+  const bulletCount = countBulletMarkers(chunkText);
+  console.log(`Chunk ${chunkIndex + 1}: detected ~${bulletCount} bullet markers in text`);
 
-  // For subsequent chunks, add context to avoid duplicates and maintain consistency
+  let userMessage = `Please analyze this strategic planning document and extract EVERY trackable plan item. There are approximately ${bulletCount} bullet/list markers in this text — make sure you capture all of them.\n\n${chunkText}`;
+
   if (previousContext && chunkIndex > 0) {
     const levelsList = previousContext.detectedLevels.map(l => `${l.name} (depth ${l.depth})`).join(', ');
     const itemsList = previousContext.extractedItemNames.join(', ');
@@ -297,63 +406,152 @@ IMPORTANT CONTEXT:
 - Previously extracted top-level items: ${itemsList}
 - Do NOT re-extract any items already listed above.
 - Extract only NEW items found in this section.
+- There are approximately ${bulletCount} bullet/list markers in this section — make sure you capture all of them.
 
 Document section:\n\n${chunkText}`;
   }
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 16384,
-      system: EXTRACTION_SYSTEM_PROMPT,
-      messages: [
-        { role: "user", content: userMessage }
-      ],
-      tools: [{
-        name: "extract_plan_items",
-        description: "Extract structured plan items from a strategic planning document",
-        input_schema: extractPlanItemsSchema
-      }],
-      tool_choice: { type: "tool", name: "extract_plan_items" }
-    }),
-  });
+  const aiResponse = await callAnthropicWithRetry({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 16384,
+    system: EXTRACTION_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: userMessage }],
+    tools: [{
+      name: "extract_plan_items",
+      description: "Extract structured plan items from a strategic planning document",
+      input_schema: extractPlanItemsSchema
+    }],
+    tool_choice: { type: "tool", name: "extract_plan_items" }
+  }, apiKey);
 
-  if (!response.ok) {
-    if (response.status === 429) {
-      throw { status: 429, message: 'Service temporarily busy. Please try again in a moment.' };
-    }
-    if (response.status === 402) {
-      throw { status: 402, message: 'Service temporarily unavailable. Please try again later.' };
-    }
-    const errorText = await response.text();
-    throw { status: 500, message: 'Document processing failed. Please try again.', details: errorText };
-  }
-
-  const aiResponse = await response.json();
-  const toolUse = aiResponse.content?.find((block: { type: string }) => block.type === "tool_use");
+  const response = aiResponse as { content?: { type: string; name?: string; input?: unknown }[] };
+  const toolUse = response.content?.find((block) => block.type === "tool_use");
 
   if (!toolUse || toolUse.name !== "extract_plan_items") {
     throw { status: 500, message: 'Unable to extract plan items. Please try again.', details: 'Unexpected AI response format' };
   }
 
-  return toolUse.input;
+  const result = toolUse.input as ExtractedChunkResult;
+  const extractedTotal = countAllItems(result.items || []);
+  console.log(`Chunk ${chunkIndex + 1}: extracted ${extractedTotal} total items (${result.items?.length || 0} top-level), bullet markers: ${bulletCount}`);
+
+  // Verification pass: if extracted < 60% of bullet markers, or always for thoroughness
+  const shouldVerify = bulletCount > 0 && extractedTotal < bulletCount * 0.6;
+  if (shouldVerify) {
+    console.log(`Chunk ${chunkIndex + 1}: Gap detected (${extractedTotal} extracted vs ${bulletCount} markers). Running verification pass...`);
+  }
+
+  // Always run verification for completeness
+  try {
+    const verifiedItems = await runVerificationPass(chunkText, result.items, apiKey);
+    if (verifiedItems.length > 0) {
+      console.log(`Verification found ${verifiedItems.length} missing items, merging...`);
+      mergeVerifiedItems(result.items, verifiedItems);
+      const newTotal = countAllItems(result.items);
+      console.log(`After merge: ${newTotal} total items`);
+    } else {
+      console.log(`Verification pass: no missing items found`);
+    }
+  } catch (verifyError) {
+    console.error('Verification pass failed (non-fatal):', verifyError);
+    // Continue with initial extraction results
+  }
+
+  return result;
 }
 
-// Collect all item names recursively for deduplication context
-function collectItemNames(items: unknown[]): string[] {
-  const names: string[] = [];
+interface MissingItem {
+  parentName: string;
+  name: string;
+  levelType: string;
+  description?: string;
+  metricTarget?: string;
+  metricUnit?: string;
+}
+
+async function runVerificationPass(
+  chunkText: string,
+  extractedItems: unknown[],
+  apiKey: string
+): Promise<MissingItem[]> {
+  const extractedNames = collectItemNames(extractedItems);
+  
+  const userMessage = `Here is a document section and the items that were already extracted from it. Find any bullets, goals, strategies, actions, or KPIs that were MISSED.
+
+ALREADY EXTRACTED (${extractedNames.length} items):
+${extractedNames.map(n => `- ${n}`).join('\n')}
+
+DOCUMENT TEXT:
+${chunkText}
+
+Look carefully at every bullet point, numbered item, and sub-item. If any are not in the extracted list above, return them as missing items with the correct parent name.`;
+
+  const aiResponse = await callAnthropicWithRetry({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 8192,
+    system: VERIFICATION_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: userMessage }],
+    tools: [{
+      name: "report_missing_items",
+      description: "Report items that were missed in the initial extraction",
+      input_schema: verificationSchema
+    }],
+    tool_choice: { type: "tool", name: "report_missing_items" }
+  }, apiKey);
+
+  const response = aiResponse as { content?: { type: string; name?: string; input?: { missingItems?: MissingItem[] } }[] };
+  const toolUse = response.content?.find((block) => block.type === "tool_use");
+
+  if (!toolUse?.input?.missingItems) return [];
+  return toolUse.input.missingItems;
+}
+
+// Merge missing items into the existing tree
+function mergeVerifiedItems(items: unknown[], missingItems: MissingItem[]): void {
+  for (const missing of missingItems) {
+    const newItem = {
+      name: missing.name,
+      levelType: missing.levelType,
+      description: missing.description,
+      metricTarget: missing.metricTarget,
+      metricUnit: missing.metricUnit,
+    };
+
+    if (!missing.parentName || missing.parentName === '') {
+      // Add as root item
+      items.push(newItem);
+      continue;
+    }
+
+    // Find parent recursively
+    const parent = findItemByName(items, missing.parentName);
+    if (parent) {
+      if (!parent.children) parent.children = [];
+      // Check for duplicate
+      const exists = parent.children.some(
+        (c: { name?: string }) => c.name?.toLowerCase() === missing.name.toLowerCase()
+      );
+      if (!exists) {
+        parent.children.push(newItem);
+      }
+    } else {
+      // Parent not found — add to root
+      items.push(newItem);
+    }
+  }
+}
+
+function findItemByName(items: unknown[], name: string): { children?: unknown[]; [key: string]: unknown } | null {
+  const nameLower = name.toLowerCase();
   for (const item of items) {
     const i = item as { name?: string; children?: unknown[] };
-    if (i.name) names.push(i.name);
-    if (i.children?.length) names.push(...collectItemNames(i.children));
+    if (i.name?.toLowerCase() === nameLower) return i as { children?: unknown[]; [key: string]: unknown };
+    if (i.children?.length) {
+      const found = findItemByName(i.children, name);
+      if (found) return found;
+    }
   }
-  return names;
+  return null;
 }
 
 serve(async (req) => {
@@ -384,15 +582,23 @@ serve(async (req) => {
       return createSafeError(413, `Document text too long. Maximum ${MAX_TEXT_LENGTH} characters allowed.`);
     }
 
+    // Pre-count bullets for logging
+    const totalBulletMarkers = countBulletMarkers(trimmedText);
+
     // Split into chunks
     const chunks = splitDocumentIntoChunks(trimmedText, CHUNK_SIZE);
-    console.log(`Processing document: ${trimmedText.length} chars, ${chunks.length} chunk(s)`);
+    console.log(`Processing document: ${trimmedText.length} chars, ${chunks.length} chunk(s), ~${totalBulletMarkers} bullet markers`);
 
     let allItems: unknown[] = [];
     let finalDetectedLevels: { depth: number; name: string }[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
       console.log(`Processing chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+
+      // Add delay between chunks to avoid rate limits
+      if (i > 0) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
 
       const previousContext = i > 0 ? {
         detectedLevels: finalDetectedLevels,
@@ -406,27 +612,26 @@ serve(async (req) => {
           allItems = [...allItems, ...result.items];
         }
 
-        // Use detected levels from first chunk
         if (i === 0 && result.detectedLevels?.length > 0) {
           finalDetectedLevels = result.detectedLevels;
         }
 
-        console.log(`Chunk ${i + 1}: extracted ${result.items?.length || 0} top-level items`);
+        const chunkTotal = countAllItems(result.items || []);
+        console.log(`Chunk ${i + 1}: ${result.items?.length || 0} top-level, ${chunkTotal} total items`);
       } catch (chunkError) {
         const err = chunkError as { status?: number; message?: string; details?: string };
         if (err.status === 429 || err.status === 402) {
           return createSafeError(err.status, err.message || 'Service error');
         }
-        // Log and continue with remaining chunks
         console.error(`Chunk ${i + 1} failed:`, err.details || err.message || chunkError);
-        // If first chunk fails, we can't continue meaningfully
         if (i === 0) {
           return createSafeError(500, 'Unable to process document. Please try again.', chunkError);
         }
       }
     }
 
-    console.log(`Total extracted: ${allItems.length} top-level items, ${finalDetectedLevels.length} levels, from ${chunks.length} chunk(s)`);
+    const totalExtracted = countAllItems(allItems);
+    console.log(`Total extracted: ${allItems.length} top-level, ${totalExtracted} total items, ${finalDetectedLevels.length} levels, ~${totalBulletMarkers} bullet markers, from ${chunks.length} chunk(s)`);
 
     return new Response(
       JSON.stringify({
@@ -436,6 +641,8 @@ serve(async (req) => {
           detectedLevels: finalDetectedLevels,
         },
         chunksProcessed: chunks.length,
+        totalItems: totalExtracted,
+        bulletMarkersDetected: totalBulletMarkers,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

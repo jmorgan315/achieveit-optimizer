@@ -58,7 +58,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
   const verifyExtractionResult = (
     items: PlanItem[],
     levels: PlanLevel[],
-    pageCount: number
+    pageCount: number,
+    sourceTextLength?: number
   ): { passed: boolean; reason: string } => {
     if (!items || items.length === 0) {
       return { passed: false, reason: 'No items extracted' };
@@ -70,10 +71,10 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       return { passed: false, reason: 'All items are flat with no hierarchy — likely incomplete extraction' };
     }
 
-    // Check reasonable item count for page count (at least 1 item per 3 pages)
-    const minExpected = Math.max(1, Math.floor(pageCount / 3));
-    if (items.length < minExpected && pageCount > 3) {
-      return { passed: false, reason: `Only ${items.length} items for ${pageCount} pages — likely missed content` };
+    // Tighter threshold: at least 1 top-level item per 2 pages
+    const minTopLevel = Math.max(1, Math.floor(pageCount / 2));
+    if (items.length < minTopLevel && pageCount > 3) {
+      return { passed: false, reason: `Only ${items.length} top-level items for ${pageCount} pages — likely missed content` };
     }
 
     // Count total items recursively
@@ -81,8 +82,18 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       list.reduce((sum, item) => sum + 1 + countAll(item.children || []), 0);
     const totalItems = countAll(items);
 
-    if (totalItems < 3 && pageCount > 2) {
-      return { passed: false, reason: `Only ${totalItems} total items — likely incomplete` };
+    // Total items should be at least 2x page count
+    const minTotal = Math.max(3, pageCount * 2);
+    if (totalItems < minTotal && pageCount > 2) {
+      return { passed: false, reason: `Only ${totalItems} total items for ${pageCount} pages — likely incomplete` };
+    }
+
+    // Text density check: if source text is rich (>500 chars/page), text extraction should yield good results
+    if (sourceTextLength && pageCount > 0) {
+      const charsPerPage = sourceTextLength / pageCount;
+      if (charsPerPage > 500 && totalItems < pageCount) {
+        return { passed: false, reason: `Dense text (${Math.round(charsPerPage)} chars/page) but only ${totalItems} items — extraction likely incomplete` };
+      }
     }
 
     return { passed: true, reason: 'OK' };
@@ -261,8 +272,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
 
   const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
     setIsExtracting(true);
-    const isLargeDoc = text.length > 50000;
-    setProcessingStatus(isLargeDoc ? 'AI analyzing large document (multi-pass)...' : 'AI analyzing document for plan items...');
+    const chunkCount = Math.ceil(text.length / 25000);
+    setProcessingStatus(chunkCount > 1 ? `AI analyzing document (${chunkCount} chunks)...` : 'AI analyzing document for plan items...');
 
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-items`, {
@@ -292,6 +303,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
 
       const aiResponse: AIExtractionResponse = result.data;
       
+      // Log extraction stats
+      const totalItems = result.totalItems || 0;
+      const bulletMarkers = result.bulletMarkersDetected || 0;
+      const chunksProcessed = result.chunksProcessed || 1;
+      console.log(`Extraction complete: ${totalItems} items, ${bulletMarkers} bullet markers, ${chunksProcessed} chunks`);
+      
       // Convert detected levels or use defaults
       const levels: PlanLevel[] = aiResponse.detectedLevels?.length > 0
         ? aiResponse.detectedLevels.map((l, idx) => ({
@@ -305,11 +322,11 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
 
       const itemCount = items.length;
-      setProcessingStatus(`Found ${itemCount} trackable plan items`);
+      setProcessingStatus(`Found ${itemCount} top-level items (${totalItems} total)`);
       
       toast({
         title: "AI Analysis Complete",
-        description: `Extracted ${itemCount} plan items from your document`,
+        description: `Extracted ${totalItems} plan items from your document${chunksProcessed > 1 ? ` (${chunksProcessed} chunks)` : ''}`,
       });
 
       return { items, levels, personMappings };
@@ -441,8 +458,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
           return;
         }
 
-        // Step 5: Verification
-        const verification = verifyExtractionResult(textResult.items, textResult.levels, pageCount);
+        // Step 5: Verification (with text density check)
+        const verification = verifyExtractionResult(textResult.items, textResult.levels, pageCount, extractedText.length);
         if (!verification.passed) {
           console.log(`Text extraction verification failed: ${verification.reason}. Trying Vision AI...`);
           setProcessingStatus(`Verification: ${verification.reason}. Trying visual analysis...`);
