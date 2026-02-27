@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -34,6 +34,13 @@ export function LevelVerificationModal({
   onConfirm,
 }: LevelVerificationModalProps) {
   const [levels, setLevels] = useState<PlanLevel[]>(initialLevels);
+
+  // Sync internal state whenever the modal opens with new levels
+  useEffect(() => {
+    if (open) {
+      setLevels(initialLevels);
+    }
+  }, [open, initialLevels]);
 
   const addLevel = () => {
     const newId = String(Date.now());

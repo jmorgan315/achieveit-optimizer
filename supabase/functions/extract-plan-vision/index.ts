@@ -266,7 +266,9 @@ const extractPlanItemsSchema = {
         level2Term: { type: "string", description: "Document's actual term for Level 2 (e.g., 'Objective', 'Focus Area')" },
         level3Term: { type: "string", description: "Document's actual term for Level 3 (e.g., 'Outcome KPI', 'Goal')" },
         level4Term: { type: "string", description: "Document's actual term for Level 4 (e.g., 'Strategy', 'Initiative')" },
-        level5Term: { type: "string", description: "Document's actual term for Level 5 (e.g., 'Strategy KPI', 'Metric', 'Tollgate')" }
+        level5Term: { type: "string", description: "Document's actual term for Level 5 (e.g., 'Strategy KPI', 'Metric', 'Tollgate')" },
+        level6Term: { type: "string", description: "Document's actual term for Level 6 (if applicable)" },
+        level7Term: { type: "string", description: "Document's actual term for Level 7 (if applicable)" }
       }
     },
     items: {
@@ -326,7 +328,7 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
     }
     
     // Clean level terms
-    ['level1Term', 'level2Term', 'level3Term', 'level4Term', 'level5Term'].forEach(key => {
+    ['level1Term', 'level2Term', 'level3Term', 'level4Term', 'level5Term', 'level6Term', 'level7Term'].forEach(key => {
       if (typeof terms[key] === 'string') {
         terms[key] = (terms[key] as string).replace(/^\d+/, '').trim();
       }
@@ -348,6 +350,8 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
     if (terms.level3Term) levels.push({ depth: 3, name: terms.level3Term as string });
     if (terms.level4Term) levels.push({ depth: 4, name: terms.level4Term as string });
     if (terms.level5Term) levels.push({ depth: 5, name: terms.level5Term as string });
+    if (terms.level6Term) levels.push({ depth: 6, name: terms.level6Term as string });
+    if (terms.level7Term) levels.push({ depth: 7, name: terms.level7Term as string });
     
     if (levels.length > 0) {
       data.detectedLevels = levels;
