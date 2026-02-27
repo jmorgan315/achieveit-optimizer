@@ -9,6 +9,11 @@ const corsHeaders = {
 const MAX_IMAGES = 20;
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB per image base64
 
+// Provider retry constants
+const ANTHROPIC_MAX_RETRIES = 4;
+const ANTHROPIC_BASE_DELAY_MS = 3000;
+const RETRYABLE_ANTHROPIC_STATUSES = new Set([429, 500, 502, 503, 529]);
+
 // Safe error helper
 function createSafeError(
   status: number,
@@ -25,6 +30,50 @@ function createSafeError(
     JSON.stringify({ success: false, error: publicMessage }),
     { status, headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callAnthropicWithRetry(
+  apiKey: string,
+  payload: Record<string, unknown>
+): Promise<Response> {
+  let lastResponse: Response | null = null;
+
+  for (let attempt = 0; attempt <= ANTHROPIC_MAX_RETRIES; attempt++) {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!RETRYABLE_ANTHROPIC_STATUSES.has(response.status)) {
+      return response;
+    }
+
+    lastResponse = response;
+
+    if (attempt === ANTHROPIC_MAX_RETRIES) {
+      return response;
+    }
+
+    const retryAfterHeader = response.headers.get("retry-after");
+    const retryAfterSeconds = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+    const backoffMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+      ? retryAfterSeconds * 1000
+      : ANTHROPIC_BASE_DELAY_MS * Math.pow(2, attempt);
+
+    console.warn(`Anthropic ${response.status}. Retrying in ${backoffMs}ms (attempt ${attempt + 1}/${ANTHROPIC_MAX_RETRIES + 1})`);
+    await sleep(backoffMs);
+  }
+
+  return lastResponse ?? new Response("No response from AI provider", { status: 503 });
 }
 
 const VISION_EXTRACTION_PROMPT = `You are an expert document analyst specializing in extracting strategic plan content from visual documents.
@@ -441,32 +490,26 @@ Extract all strategic plan items with their proper hierarchy.`
       }
     }
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 16384,
-        system: VISION_EXTRACTION_PROMPT,
-        messages: [
-          { role: "user", content: anthropicContent }
-        ],
-        tools: [{
-          name: "extract_plan_items",
-          description: "Extract structured plan items from document page images with layout detection and schema discovery",
-          input_schema: extractPlanItemsSchema
-        }],
-        tool_choice: { type: "tool", name: "extract_plan_items" }
-      }),
-    });
+    const anthropicPayload = {
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 16384,
+      system: VISION_EXTRACTION_PROMPT,
+      messages: [
+        { role: "user", content: anthropicContent }
+      ],
+      tools: [{
+        name: "extract_plan_items",
+        description: "Extract structured plan items from document page images with layout detection and schema discovery",
+        input_schema: extractPlanItemsSchema
+      }],
+      tool_choice: { type: "tool", name: "extract_plan_items" }
+    };
+
+    const response = await callAnthropicWithRetry(ANTHROPIC_API_KEY, anthropicPayload);
 
     if (!response.ok) {
       if (response.status === 429) {
-        return createSafeError(429, 'Service temporarily busy. Please try again in a moment.');
+        return createSafeError(503, 'Service temporarily busy. Please try again in a moment.');
       }
       if (response.status === 402) {
         return createSafeError(503, 'Service temporarily unavailable. Please try again later.');
