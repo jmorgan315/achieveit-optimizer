@@ -40,6 +40,7 @@ interface SortableTreeItemProps {
   onDelete?: (item: PlanItem) => void;
   isOver?: boolean;
   dropPosition?: DropPosition;
+  targetItemName?: string;
 }
 
 export function SortableTreeItem({
@@ -53,6 +54,7 @@ export function SortableTreeItem({
   onDelete,
   isOver,
   dropPosition,
+  targetItemName,
 }: SortableTreeItemProps) {
   const {
     attributes,
@@ -101,20 +103,35 @@ export function SortableTreeItem({
 
   return (
     <div className="relative">
-      {/* Drop before indicator */}
+      {/* Drop before indicator — thick line with circle */}
       {showBeforeLine && (
-        <div className="absolute top-0 left-0 right-0 h-0.5 bg-primary z-10" />
+        <div className="absolute top-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
+          <div className="relative h-0.5">
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-primary border-2 border-primary" />
+            <div className="absolute left-2.5 right-0 top-0 h-0.5 bg-primary" />
+          </div>
+          <span className="absolute left-10 -top-4 text-[10px] font-medium text-primary bg-background px-1 rounded">
+            Move before
+          </span>
+        </div>
       )}
       
       <div
         ref={setNodeRef}
         style={style}
+        data-id={item.id}
         className={`flex items-center gap-2 py-3 px-4 border-b transition-colors ${
           hasIssues ? 'bg-destructive/5' : ''
         } ${isDragging ? 'bg-muted shadow-lg z-50' : 'hover:bg-muted/50'} ${
-          showInsideHighlight ? 'bg-primary/10 border-primary' : ''
+          showInsideHighlight ? 'bg-primary/10 border-l-4 border-l-primary border-b' : ''
         }`}
       >
+        {/* Nest label overlay */}
+        {showInsideHighlight && (
+          <span className="absolute right-4 top-1 text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full z-10">
+            → Nest under {item.name}
+          </span>
+        )}
         <button
           {...attributes}
           {...listeners}
@@ -228,9 +245,17 @@ export function SortableTreeItem({
         )}
       </div>
       
-      {/* Drop after indicator */}
+      {/* Drop after indicator — thick line with circle */}
       {showAfterLine && (
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary z-10" />
+        <div className="absolute bottom-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
+          <div className="relative h-0.5">
+            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-primary border-2 border-primary" />
+            <div className="absolute left-2.5 right-0 top-0 h-0.5 bg-primary" />
+          </div>
+          <span className="absolute left-10 top-0.5 text-[10px] font-medium text-primary bg-background px-1 rounded">
+            Move after
+          </span>
+        </div>
       )}
     </div>
   );

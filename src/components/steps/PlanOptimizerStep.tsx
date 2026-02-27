@@ -237,9 +237,23 @@ export function PlanOptimizerStep({
     const rect = overElement.getBoundingClientRect();
     const mouseY = pointerPositionRef.current.y;
     
-    // Calculate thresholds (20% from top and bottom for before/after, middle 60% for inside)
-    const topThreshold = rect.top + rect.height * 0.2;
-    const bottomThreshold = rect.bottom - rect.height * 0.2;
+    // 25/50/25 zones — more room for reorder
+    const topThreshold = rect.top + rect.height * 0.25;
+    const bottomThreshold = rect.bottom - rect.height * 0.25;
+    
+    // Level-based bias: same parent → bias reorder, different parent → bias nest
+    const draggedItem = items.find(i => i.id === activeIdValue);
+    const targetItem = items.find(i => i.id === dropInfo.itemId);
+    const sameLevel = draggedItem && targetItem && draggedItem.parentId === targetItem.parentId;
+    
+    if (sameLevel) {
+      // Wider reorder zones (30/40/30) for same-level items
+      const biasedTop = rect.top + rect.height * 0.3;
+      const biasedBottom = rect.bottom - rect.height * 0.3;
+      if (mouseY < biasedTop) return 'before';
+      if (mouseY > biasedBottom) return 'after';
+      return 'inside';
+    }
     
     if (mouseY < topThreshold) {
       return 'before';
@@ -248,7 +262,7 @@ export function PlanOptimizerStep({
     } else {
       return 'inside';
     }
-  }, [activeId, dropInfo?.itemId]);
+  }, [activeId, dropInfo?.itemId, items]);
 
   const handleDragOver = (event: DragOverEvent) => {
     const overId = event.over?.id as string | null;
@@ -263,14 +277,21 @@ export function PlanOptimizerStep({
     }
     
     if (overId) {
-      // Calculate position based on current pointer position
       const overElement = document.querySelector(`[data-id="${overId}"]`);
       if (overElement) {
         const rect = overElement.getBoundingClientRect();
         const mouseY = pointerPositionRef.current.y;
         
-        const topThreshold = rect.top + rect.height * 0.2;
-        const bottomThreshold = rect.bottom - rect.height * 0.2;
+        // 25/50/25 zones, with same-parent bias
+        const draggedItem = items.find(i => i.id === activeId);
+        const targetItem = items.find(i => i.id === overId);
+        const sameLevel = draggedItem && targetItem && draggedItem.parentId === targetItem.parentId;
+        
+        const topPct = sameLevel ? 0.3 : 0.25;
+        const bottomPct = sameLevel ? 0.3 : 0.25;
+        
+        const topThreshold = rect.top + rect.height * topPct;
+        const bottomThreshold = rect.bottom - rect.height * bottomPct;
         
         let position: DropPosition;
         if (mouseY < topThreshold) {
@@ -504,29 +525,40 @@ export function PlanOptimizerStep({
             >
               <div className="divide-y">
                 {flatList.map(({ item, depth }) => (
-                  <div key={item.id} data-id={item.id}>
-                    <SortableTreeItem
-                      item={item}
-                      depth={depth}
-                      hasChildren={getChildren(item.id).length > 0}
-                      isExpanded={expandedItems.has(item.id)}
-                      onToggleExpand={toggleExpand}
-                      onOptimize={handleOptimize}
-                      onEdit={handleEdit}
-                      onDelete={onDeleteItem ? handleDelete : undefined}
-                      isOver={dropInfo?.itemId === item.id}
-                      dropPosition={dropInfo?.itemId === item.id ? dropInfo.position : null}
-                    />
-                  </div>
+                  <SortableTreeItem
+                    key={item.id}
+                    item={item}
+                    depth={depth}
+                    hasChildren={getChildren(item.id).length > 0}
+                    isExpanded={expandedItems.has(item.id)}
+                    onToggleExpand={toggleExpand}
+                    onOptimize={handleOptimize}
+                    onEdit={handleEdit}
+                    onDelete={onDeleteItem ? handleDelete : undefined}
+                    isOver={dropInfo?.itemId === item.id}
+                    dropPosition={dropInfo?.itemId === item.id ? dropInfo.position : null}
+                    targetItemName={item.name}
+                  />
                 ))}
               </div>
             </SortableContext>
 
             <DragOverlay>
               {activeItem ? (
-                <div className="bg-card border rounded-lg shadow-lg p-3 opacity-90">
-                  <Badge variant="secondary" className="mr-2">{activeItem.order}</Badge>
+                <div className="bg-card border rounded-lg shadow-lg p-3 opacity-90 flex items-center gap-2">
+                  <Badge variant="secondary">{activeItem.order}</Badge>
                   <span className="font-medium">{activeItem.name}</span>
+                  {dropInfo && (
+                    <span className={`ml-2 text-xs font-medium px-2 py-0.5 rounded-full ${
+                      dropInfo.position === 'inside'
+                        ? 'bg-primary/10 text-primary'
+                        : 'bg-muted text-muted-foreground'
+                    }`}>
+                      {dropInfo.position === 'inside'
+                        ? `→ Nest under ${items.find(i => i.id === dropInfo.itemId)?.name || '...'}`
+                        : `↕ Reorder`}
+                    </span>
+                  )}
                 </div>
               ) : null}
             </DragOverlay>
