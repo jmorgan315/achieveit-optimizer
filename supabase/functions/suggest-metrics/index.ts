@@ -52,9 +52,9 @@ serve(async (req) => {
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'LOVABLE_API_KEY not set');
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
+      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'ANTHROPIC_API_KEY not set');
     }
 
     const body = await req.json();
@@ -90,41 +90,40 @@ ${trimmedDescription ? `Description: "${trimmedDescription}"` : ''}
 
 Generate a SMART metric suggestion for this strategic plan item.`;
 
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        system: systemPrompt,
         messages: [
-          { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         tools: [
           {
-            type: "function",
-            function: {
-              name: "suggest_metric",
-              description: "Return a structured metric suggestion for the plan item",
-              parameters: {
-                type: "object",
-                properties: {
-                  suggestedName: { type: "string", description: "A more specific, measurable version of the item name" },
-                  metricDescription: { type: "string", enum: ["Track to Target", "Maintain", "Stay Above", "Stay Below"], description: "The type of metric tracking" },
-                  metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage"], description: "The unit of measurement" },
-                  metricTarget: { type: "string", description: "The target value (numeric only, no symbols)" },
-                  metricBaseline: { type: "string", description: "The baseline/starting value (numeric only, no symbols)" },
-                  rationale: { type: "string", description: "Brief explanation of why this metric is appropriate" }
-                },
-                required: ["suggestedName", "metricDescription", "metricUnit", "metricTarget", "metricBaseline", "rationale"],
-                additionalProperties: false
-              }
+            name: "suggest_metric",
+            description: "Return a structured metric suggestion for the plan item",
+            input_schema: {
+              type: "object",
+              properties: {
+                suggestedName: { type: "string", description: "A more specific, measurable version of the item name" },
+                metricDescription: { type: "string", enum: ["Track to Target", "Maintain", "Stay Above", "Stay Below"], description: "The type of metric tracking" },
+                metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage"], description: "The unit of measurement" },
+                metricTarget: { type: "string", description: "The target value (numeric only, no symbols)" },
+                metricBaseline: { type: "string", description: "The baseline/starting value (numeric only, no symbols)" },
+                rationale: { type: "string", description: "Brief explanation of why this metric is appropriate" }
+              },
+              required: ["suggestedName", "metricDescription", "metricUnit", "metricTarget", "metricBaseline", "rationale"],
+              additionalProperties: false
             }
           }
         ],
-        tool_choice: { type: "function", function: { name: "suggest_metric" } }
+        tool_choice: { type: "tool", name: "suggest_metric" }
       }),
     });
 
@@ -139,13 +138,13 @@ Generate a SMART metric suggestion for this strategic plan item.`;
     }
 
     const data = await response.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    const toolUse = data.content?.find((block: { type: string }) => block.type === "tool_use");
     
-    if (!toolCall) {
-      return createSafeError(500, 'Unable to generate suggestion. Please try again.', 'No tool call in response');
+    if (!toolUse) {
+      return createSafeError(500, 'Unable to generate suggestion. Please try again.', 'No tool use in response');
     }
 
-    const suggestion = JSON.parse(toolCall.function.arguments);
+    const suggestion = toolUse.input;
 
     return new Response(
       JSON.stringify({ success: true, suggestion }),

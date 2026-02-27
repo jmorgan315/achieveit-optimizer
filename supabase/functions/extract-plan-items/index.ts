@@ -301,28 +301,26 @@ IMPORTANT CONTEXT:
 Document section:\n\n${chunkText}`;
   }
 
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "google/gemini-3-flash-preview",
+      model: "claude-sonnet-4-20250514",
       max_tokens: 16384,
+      system: EXTRACTION_SYSTEM_PROMPT,
       messages: [
-        { role: "system", content: EXTRACTION_SYSTEM_PROMPT },
         { role: "user", content: userMessage }
       ],
       tools: [{
-        type: "function",
-        function: {
-          name: "extract_plan_items",
-          description: "Extract structured plan items from a strategic planning document",
-          parameters: extractPlanItemsSchema
-        }
+        name: "extract_plan_items",
+        description: "Extract structured plan items from a strategic planning document",
+        input_schema: extractPlanItemsSchema
       }],
-      tool_choice: { type: "function", function: { name: "extract_plan_items" } }
+      tool_choice: { type: "tool", name: "extract_plan_items" }
     }),
   });
 
@@ -338,13 +336,13 @@ Document section:\n\n${chunkText}`;
   }
 
   const aiResponse = await response.json();
-  const toolCall = aiResponse.choices?.[0]?.message?.tool_calls?.[0];
+  const toolUse = aiResponse.content?.find((block: { type: string }) => block.type === "tool_use");
 
-  if (!toolCall || toolCall.function?.name !== "extract_plan_items") {
+  if (!toolUse || toolUse.name !== "extract_plan_items") {
     throw { status: 500, message: 'Unable to extract plan items. Please try again.', details: 'Unexpected AI response format' };
   }
 
-  return JSON.parse(toolCall.function.arguments);
+  return toolUse.input;
 }
 
 // Collect all item names recursively for deduplication context
@@ -364,9 +362,9 @@ serve(async (req) => {
   }
 
   try {
-    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-    if (!LOVABLE_API_KEY) {
-      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'LOVABLE_API_KEY not set');
+    const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
+    if (!ANTHROPIC_API_KEY) {
+      return createSafeError(500, 'Service configuration error. Please contact administrator.', 'ANTHROPIC_API_KEY not set');
     }
 
     const body = await req.json();
@@ -402,7 +400,7 @@ serve(async (req) => {
       } : null;
 
       try {
-        const result = await processChunk(chunks[i], i, chunks.length, previousContext, LOVABLE_API_KEY);
+        const result = await processChunk(chunks[i], i, chunks.length, previousContext, ANTHROPIC_API_KEY);
 
         if (result.items?.length > 0) {
           allItems = [...allItems, ...result.items];
