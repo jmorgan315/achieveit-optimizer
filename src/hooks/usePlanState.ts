@@ -4,7 +4,6 @@ import {
   PlanLevel,
   PlanItem,
   PersonMapping,
-  ProcessingPath,
   OrgProfile,
   DEFAULT_LEVELS,
 } from '@/types/plan';
@@ -15,7 +14,6 @@ export function usePlanState() {
     levels: DEFAULT_LEVELS,
     items: [],
     personMappings: [],
-    processingPath: null,
     rawText: '',
     orgProfile: undefined,
   });
@@ -65,9 +63,6 @@ export function usePlanState() {
     });
   }, []);
 
-  const setProcessingPath = useCallback((processingPath: ProcessingPath) => {
-    setState((prev) => ({ ...prev, processingPath }));
-  }, []);
 
   const updatePersonMapping = useCallback((id: string, email: string) => {
     setState((prev) => ({
@@ -263,7 +258,6 @@ export function usePlanState() {
       levels: DEFAULT_LEVELS,
       items: [],
       personMappings: [],
-      processingPath: null,
       rawText: '',
       orgProfile: undefined,
     });
@@ -276,7 +270,6 @@ export function usePlanState() {
     setItems,
     setOrgProfile,
     processText,
-    setProcessingPath,
     updatePersonMapping,
     applyPersonMappingsToItems,
     updateItem,

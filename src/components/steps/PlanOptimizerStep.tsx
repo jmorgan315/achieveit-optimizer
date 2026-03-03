@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import {
   DndContext,
   DragEndEvent,
@@ -39,7 +39,9 @@ import { PlanItem, PlanLevel, OrgProfile } from '@/types/plan';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings, Target } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, LayoutList, TreePine } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { toast } from '@/hooks/use-toast';
 import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
 
@@ -93,6 +95,7 @@ export function PlanOptimizerStep({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
   const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | null>(null);
+  const [viewMode, setViewMode] = useState<'summary' | 'full'>('full');
   
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
@@ -411,6 +414,27 @@ export function PlanOptimizerStep({
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
+      {/* View Mode Toggle + Stats Bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <LayoutList className={`h-4 w-4 ${viewMode === 'summary' ? 'text-primary' : 'text-muted-foreground'}`} />
+          <Switch
+            checked={viewMode === 'full'}
+            onCheckedChange={(checked) => setViewMode(checked ? 'full' : 'summary')}
+          />
+          <TreePine className={`h-4 w-4 ${viewMode === 'full' ? 'text-primary' : 'text-muted-foreground'}`} />
+          <Label className="text-sm text-muted-foreground">
+            {viewMode === 'full' ? 'Full Editor' : 'Summary'}
+          </Label>
+        </div>
+        {viewMode === 'summary' && (
+          <Button onClick={onExport} size="sm">
+            <Download className="h-4 w-4 mr-2" />
+            Download Import File
+          </Button>
+        )}
+      </div>
+
       {/* Stats Bar */}
       <div className="grid grid-cols-5 gap-4">
         {/* Total Items — always neutral */}
@@ -472,8 +496,63 @@ export function PlanOptimizerStep({
         </Card>
       </div>
 
-      {/* Tree View with Drag and Drop */}
-      <Card>
+      {/* Summary View */}
+      {viewMode === 'summary' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Plan Summary</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Items per Level */}
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-3">Items by Level</h3>
+              <div className="space-y-2">
+                {levels.map((level) => {
+                  const count = items.filter((i) => i.levelDepth === level.depth).length;
+                  const pct = items.length > 0 ? (count / items.length) * 100 : 0;
+                  return (
+                    <div key={level.id} className="flex items-center gap-3">
+                      <span className="text-sm w-36 truncate">{level.name}</span>
+                      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-medium w-8 text-right">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Coverage Stats */}
+            <div>
+              <h3 className="text-sm font-medium text-muted-foreground mb-3">Coverage</h3>
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: 'Owners Assigned', value: items.length - issueStats.missingOwner, color: ownerColor },
+                  { label: 'Dates Set', value: items.length - issueStats.missingDates, color: datesColor },
+                  { label: 'With Metrics', value: itemsWithMetrics, color: metricsColor },
+                ].map(({ label, value, color }) => {
+                  const pct = items.length > 0 ? Math.round((value / items.length) * 100) : 0;
+                  return (
+                    <div key={label} className="text-center p-4 rounded-lg bg-muted/50">
+                      <div className={`text-3xl font-bold ${color.text}`}>{pct}%</div>
+                      <div className="text-sm text-muted-foreground mt-1">{label}</div>
+                      <div className="text-xs text-muted-foreground">{value} / {items.length}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tree View with Drag and Drop — Full Editor only */}
+      {viewMode === 'full' && (
+        <Card>
         <CardHeader className="border-b">
           <div className="flex items-center justify-between">
             <div>
@@ -564,8 +643,8 @@ export function PlanOptimizerStep({
             </DragOverlay>
           </DndContext>
         </CardContent>
-      </Card>
-
+        </Card>
+      )}
 
       {/* Metric Suggestion Dialog */}
       <Dialog open={showMetricDialog} onOpenChange={setShowMetricDialog}>
