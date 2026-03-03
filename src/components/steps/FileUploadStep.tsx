@@ -9,14 +9,17 @@ import { AIExtractionResponse, AIDocumentTerminology, convertAIResponseToPlanIte
 import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
 
+import { OrgProfile } from '@/types/plan';
+
 interface FileUploadStepProps {
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
+  orgProfile?: OrgProfile;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepProps) {
+export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState('');
@@ -150,7 +153,10 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
             },
             body: JSON.stringify({ 
               pageImages: batch.map(img => img.dataUrl),
-              previousContext 
+              previousContext,
+              organizationName: orgProfile?.organizationName,
+              industry: orgProfile?.industry,
+              documentHints: orgProfile?.documentHints,
             }),
           });
 
@@ -282,7 +288,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ documentText: text }),
+        body: JSON.stringify({ 
+          documentText: text,
+          organizationName: orgProfile?.organizationName,
+          industry: orgProfile?.industry,
+          documentHints: orgProfile?.documentHints,
+        }),
       });
 
       if (!response.ok) {

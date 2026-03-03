@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -19,6 +20,7 @@ const INDUSTRIES = [
   'Local Government',
   'State Government',
   'Federal Government',
+  'Education',
   'Healthcare',
   'Non-Profit',
   'Commercial',
@@ -32,6 +34,7 @@ interface OrgProfileStepProps {
 export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
   const [orgName, setOrgName] = useState('');
   const [industry, setIndustry] = useState('');
+  const [documentHints, setDocumentHints] = useState('');
   const [isLooking, setIsLooking] = useState(false);
   const [lookupResult, setLookupResult] = useState<{
     name: string;
@@ -71,7 +74,6 @@ export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
         description: 'Could not find organization details. You can still continue with the information provided.',
         variant: 'destructive',
       });
-      // Allow continuing with just name + industry
       setLookupResult({
         name: orgName.trim(),
         website: '',
@@ -88,6 +90,7 @@ export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
       industry,
       website: lookupResult?.website,
       summary: lookupResult?.summary,
+      documentHints: documentHints.trim() || undefined,
       confirmed: true,
     });
   };
@@ -141,6 +144,22 @@ export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="documentHints">
+                Any helpful information you'd like to provide about this document?
+              </Label>
+              <Textarea
+                id="documentHints"
+                value={documentHints}
+                onChange={(e) => setDocumentHints(e.target.value)}
+                placeholder={`e.g., "The plan starts on page 8", "We have 5 levels: Pillar, Strategy, Objective, Initiative, KPI", "The plan covers pages 8-22"`}
+                rows={3}
+              />
+              <p className="text-xs text-muted-foreground">
+                Hints like page ranges, hierarchy levels, or structure notes help our AI extract your plan more accurately.
+              </p>
             </div>
 
             <div className="flex gap-3 pt-2">

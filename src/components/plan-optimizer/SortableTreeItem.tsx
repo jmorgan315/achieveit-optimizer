@@ -177,15 +177,14 @@ export function SortableTreeItem({
 
         <span className="font-medium flex-1 truncate">{item.name}</span>
 
-        {/* Metric indicator */}
+        {/* Metric indicator — icon only */}
         {hasMetric && (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Badge variant="outline" className="text-xs font-normal bg-primary/5 border-primary/30 text-primary gap-1">
-                  <Target className="h-3 w-3" />
-                  Metric
-                </Badge>
+                <span className="inline-flex items-center justify-center h-6 w-6 rounded bg-primary/10 text-primary cursor-default">
+                  <Target className="h-3.5 w-3.5" />
+                </span>
               </TooltipTrigger>
               <TooltipContent>
                 <p className="text-xs">{metricSummary}</p>
@@ -194,32 +193,55 @@ export function SortableTreeItem({
           </TooltipProvider>
         )}
 
+        {/* Date range — icon only */}
         {dateRange && (
-          <span className="text-xs text-muted-foreground flex items-center gap-1">
-            <Calendar className="h-3 w-3" />
-            {dateRange}
-          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center justify-center h-6 w-6 rounded bg-muted text-muted-foreground cursor-default">
+                  <Calendar className="h-3.5 w-3.5" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">{dateRange}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
 
+        {/* Owner — icon only */}
         {item.assignedTo && (
-          <Badge variant="outline" className="text-xs font-normal max-w-[150px] truncate">
-            <User className="h-3 w-3 mr-1" />
-            {item.assignedTo}
-          </Badge>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center justify-center h-6 w-6 rounded bg-muted text-muted-foreground cursor-default">
+                  <User className="h-3.5 w-3.5" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">{item.assignedTo}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         )}
 
+        {/* Issue badges — icon only */}
         {item.issues.map((issue, i) => (
-          <Badge
-            key={i}
-            variant="outline"
-            className={`text-xs ${getIssueColor(issue.type)}`}
-          >
-            {issue.type === 'missing-owner' && <User className="h-3 w-3 mr-1" />}
-            {issue.type === 'missing-dates' && <Calendar className="h-3 w-3 mr-1" />}
-            {issue.type === 'orphan' && <AlertCircle className="h-3 w-3 mr-1" />}
-            {issue.type === 'missing-metric' && <Target className="h-3 w-3 mr-1" />}
-            {issue.type.replace('missing-', '')}
-          </Badge>
+          <TooltipProvider key={i}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`inline-flex items-center justify-center h-6 w-6 rounded cursor-default ${getIssueColor(issue.type)}`}>
+                  {issue.type === 'missing-owner' && <User className="h-3.5 w-3.5" />}
+                  {issue.type === 'missing-dates' && <Calendar className="h-3.5 w-3.5" />}
+                  {issue.type === 'orphan' && <AlertCircle className="h-3.5 w-3.5" />}
+                  {issue.type === 'missing-metric' && <Target className="h-3.5 w-3.5" />}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">{issue.message}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         ))}
 
         <Button

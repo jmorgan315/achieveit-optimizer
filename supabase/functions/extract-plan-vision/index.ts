@@ -420,7 +420,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { pageImages, previousContext } = body;
+    const { pageImages, previousContext, organizationName, industry, documentHints } = body;
 
     // Validate pageImages
     if (!pageImages || !Array.isArray(pageImages) || pageImages.length === 0) {
@@ -455,9 +455,19 @@ serve(async (req) => {
       });
     }
 
+    // Add organization context if available
+    let orgContextText = '';
+    if (organizationName || industry || documentHints) {
+      const parts: string[] = [];
+      if (organizationName) parts.push(`Organization: ${organizationName}`);
+      if (industry) parts.push(`Industry: ${industry}`);
+      if (documentHints) parts.push(`User-provided document hints: ${documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
+      orgContextText = `\n\nORGANIZATION CONTEXT:\n${parts.join('\n')}`;
+    }
+
     content.push({
       type: "text",
-      text: `Analyze these ${pageImages.length} document page(s). 
+      text: `Analyze these ${pageImages.length} document page(s).${orgContextText}
 
 IMPORTANT INSTRUCTIONS:
 1. First, detect the layout (portrait/landscape, tabular/narrative)
