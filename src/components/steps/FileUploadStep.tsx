@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Brain, Eye } from 'lucide-react';
@@ -8,6 +8,7 @@ import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
 import { AIExtractionResponse, AIDocumentTerminology, convertAIResponseToPlanItems } from '@/utils/textParser';
 import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
+import { ProcessingOverlay, ProcessingPhase } from './ProcessingOverlay';
 
 import { OrgProfile } from '@/types/plan';
 
@@ -18,6 +19,50 @@ interface FileUploadStepProps {
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+
+interface ProgressState {
+  phase: ProcessingPhase;
+  progress: number;
+  messages: string[];
+  estimatedSecondsRemaining: number | null;
+  isVisionNeeded: boolean;
+  pageCount: number;
+}
+
+const INITIAL_PROGRESS: ProgressState = {
+  phase: 'upload',
+  progress: 0,
+  messages: [],
+  estimatedSecondsRemaining: null,
+  isVisionNeeded: false,
+  pageCount: 0,
+};
+
+// Phase weights for progress calculation
+const WEIGHTS_WITH_VISION = { upload: 0.10, analysis: 0.35, verification: 0.10, vision: 0.45 };
+const WEIGHTS_NO_VISION = { upload: 0.10, analysis: 0.80, verification: 0.10, vision: 0 };
+
+function calcOverallProgress(
+  phase: ProcessingPhase,
+  phaseProgress: number,
+  isVisionNeeded: boolean
+): number {
+  const weights = isVisionNeeded ? WEIGHTS_WITH_VISION : WEIGHTS_NO_VISION;
+  const order: ProcessingPhase[] = ['upload', 'analysis', 'verification', 'vision'];
+  const idx = order.indexOf(phase);
+  let base = 0;
+  for (let i = 0; i < idx; i++) base += weights[order[i]];
+  return Math.min(100, (base + weights[phase] * (phaseProgress / 100)) * 100);
+}
+
+function estimateTime(pageCount: number, phase: ProcessingPhase, phaseProgress: number, isVision: boolean): number | null {
+  if (pageCount === 0) return null;
+  const textSecsPerPage = 4;
+  const visionSecsPerPage = 6.5;
+  let totalEstimate = pageCount * textSecsPerPage + (isVision ? pageCount * visionSecsPerPage : 0);
+  const overallPct = calcOverallProgress(phase, phaseProgress, isVision) / 100;
+  return Math.max(0, Math.round(totalEstimate * (1 - overallPct)));
+}
 
 export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -32,8 +77,39 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   const [useVisionAI, setUseVisionAI] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Structured progress state
+  const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
+
+  const addMessage = useCallback((msg: string) => {
+    setProgressState(prev => ({
+      ...prev,
+      messages: [...prev.messages, msg],
+    }));
+    setProcessingStatus(msg);
+  }, []);
+
+  const setPhaseProgress = useCallback((phase: ProcessingPhase, phaseProgress: number, isVision?: boolean) => {
+    setProgressState(prev => {
+      const visionNeeded = isVision !== undefined ? isVision : prev.isVisionNeeded;
+      const overall = calcOverallProgress(phase, phaseProgress, visionNeeded);
+      const est = estimateTime(prev.pageCount, phase, phaseProgress, visionNeeded);
+      return {
+        ...prev,
+        phase,
+        progress: overall,
+        isVisionNeeded: visionNeeded,
+        estimatedSecondsRemaining: est,
+      };
+    });
+  }, []);
+
+  const resetProgress = useCallback((pageCount = 0) => {
+    setProgressState({ ...INITIAL_PROGRESS, pageCount });
+  }, []);
+
   const parsePdfWithEdgeFunction = async (file: File): Promise<{ text: string; pageCount: number }> => {
-    setProcessingStatus('Uploading to Cloud...');
+    addMessage('Uploading document to cloud...');
+    setPhaseProgress('upload', 30);
     
     const formData = new FormData();
     formData.append('file', file);
@@ -54,7 +130,9 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
       throw new Error(result.error || 'PDF parsing failed');
     }
 
-    setProcessingStatus(`Extracted ${result.pageCount} pages`);
+    setProgressState(prev => ({ ...prev, pageCount: result.pageCount }));
+    addMessage(`Extracted text from ${result.pageCount} pages`);
+    setPhaseProgress('upload', 100);
     return { text: result.text, pageCount: result.pageCount };
   };
 
@@ -69,30 +147,25 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
       return { passed: false, reason: 'No items extracted' };
     }
 
-    // Check nesting: at least some items should have children
     const hasNesting = items.some(item => item.children && item.children.length > 0);
     if (!hasNesting && items.length > 2) {
       return { passed: false, reason: 'All items are flat with no hierarchy — likely incomplete extraction' };
     }
 
-    // Tighter threshold: at least 1 top-level item per 2 pages
     const minTopLevel = Math.max(1, Math.floor(pageCount / 2));
     if (items.length < minTopLevel && pageCount > 3) {
       return { passed: false, reason: `Only ${items.length} top-level items for ${pageCount} pages — likely missed content` };
     }
 
-    // Count total items recursively
     const countAll = (list: PlanItem[]): number => 
       list.reduce((sum, item) => sum + 1 + countAll(item.children || []), 0);
     const totalItems = countAll(items);
 
-    // Total items should be at least 2x page count
     const minTotal = Math.max(3, pageCount * 2);
     if (totalItems < minTotal && pageCount > 2) {
       return { passed: false, reason: `Only ${totalItems} total items for ${pageCount} pages — likely incomplete` };
     }
 
-    // Text density check: if source text is rich (>500 chars/page), text extraction should yield good results
     if (sourceTextLength && pageCount > 0) {
       const charsPerPage = sourceTextLength / pageCount;
       if (charsPerPage > 500 && totalItems < pageCount) {
@@ -109,21 +182,21 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   ): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
     setIsExtracting(true);
     setUseVisionAI(true);
-    setProcessingStatus('Rendering PDF pages for visual analysis...');
+    setPhaseProgress('vision', 0, true);
+    addMessage('Rendering PDF pages for visual analysis...');
 
     try {
-      // Render PDF pages to images with optimized settings
       const { images, pageCount } = await renderPDFToImages(file, 20, 1.0);
-      setProcessingStatus(`Rendered ${images.length} of ${pageCount} pages`);
+      setProgressState(prev => ({ ...prev, pageCount }));
+      addMessage(`Rendered ${images.length} of ${pageCount} pages`);
+      setPhaseProgress('vision', 10, true);
 
-      // Batch pages for API calls (5 pages at a time for faster processing)
       const batches = batchPageImages(images, 5);
       
       let allItems: AIExtractionResponse['items'] = [];
       let detectedLevelsFromVision: AIExtractionResponse['detectedLevels'] = [];
       let previousContext = '';
 
-      // If we have level hints from text extraction, seed the context
       if (levelHints && levelHints.length > 0) {
         const levelNames = levelHints.map(l => l.name).join(', ');
         previousContext = `Document hierarchy terminology detected from text analysis: ${levelNames}. Use these SAME level terms for consistency.`;
@@ -134,9 +207,10 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
         const startPage = batchIndex * 5 + 1;
         const endPage = startPage + batch.length - 1;
         
-        setProcessingStatus(`Vision AI analyzing pages ${startPage}-${endPage}...`);
+        const batchPct = 10 + ((batchIndex + 1) / batches.length) * 85;
+        setPhaseProgress('vision', batchPct, true);
+        addMessage(`Vision AI analyzing pages ${startPage}-${endPage}...`);
 
-        // Add delay between batches to avoid rate limits (Anthropic)
         if (batchIndex > 0) {
           await new Promise(resolve => setTimeout(resolve, 3000));
         }
@@ -148,9 +222,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
         while (retries <= maxRetries) {
           const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-vision`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               pageImages: batch.map(img => img.dataUrl),
               previousContext,
@@ -162,8 +234,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
 
           if (response.status === 429 && retries < maxRetries) {
             retries++;
-            const waitTime = Math.pow(2, retries) * 2000; // 4s, 8s, 16s
-            setProcessingStatus(`Rate limited — retrying in ${waitTime / 1000}s...`);
+            const waitTime = Math.pow(2, retries) * 2000;
+            addMessage(`Rate limited — retrying in ${waitTime / 1000}s...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
             continue;
           }
@@ -187,30 +259,25 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           throw new Error(result?.error || 'Vision AI returned no data');
         }
 
-        // Merge results from this batch
         if (result.data.items?.length > 0) {
           allItems = mergeVisionResults(allItems, result.data.items);
         }
         
-        // Check for columnHierarchy in documentTerminology (first batch only)
         if (batchIndex === 0 && result.data.documentTerminology?.columnHierarchy?.length > 0) {
           detectedLevelsFromVision = result.data.documentTerminology.columnHierarchy.map(
-            (name: string, idx: number) => ({
-              depth: idx + 1,
-              name: name
-            })
+            (name: string, idx: number) => ({ depth: idx + 1, name })
           );
         } else if (result.data.detectedLevels?.length > 0 && detectedLevelsFromVision.length === 0) {
           detectedLevelsFromVision = result.data.detectedLevels;
         }
 
-        // Update context for next batch
         if (result.contextSummary) {
           previousContext = result.contextSummary;
         }
       }
 
-      // Build final response
+      setPhaseProgress('vision', 100, true);
+
       const aiResponse: AIExtractionResponse = {
         items: allItems,
         detectedLevels: detectedLevelsFromVision.length > 0 ? detectedLevelsFromVision : [
@@ -222,18 +289,16 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
         ],
       };
 
-      // Convert to standard levels
       const levels: PlanLevel[] = aiResponse.detectedLevels.map((l, idx) => ({
         id: String(idx + 1),
         name: cleanLevelName(l.name),
         depth: l.depth,
       }));
 
-      // Convert AI response to PlanItems
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
 
       const itemCount = items.length;
-      setProcessingStatus(`Vision AI found ${itemCount} trackable plan items`);
+      addMessage(`Vision AI found ${itemCount} trackable plan items`);
       
       toast({
         title: "Vision AI Analysis Complete",
@@ -255,7 +320,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
     }
   };
 
-  // Merge items from multiple vision AI batches
   const mergeVisionResults = (
     existing: AIExtractionResponse['items'],
     newItems: AIExtractionResponse['items']
@@ -267,9 +331,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
     const uniqueNewItems = newItems.filter(item => {
       if (!item?.name) return false;
       const nameLower = item.name.toLowerCase();
-      if (existingNames.has(nameLower)) {
-        return false;
-      }
+      if (existingNames.has(nameLower)) return false;
       existingNames.add(nameLower);
       return true;
     });
@@ -280,14 +342,13 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
     setIsExtracting(true);
     const chunkCount = Math.ceil(text.length / 25000);
-    setProcessingStatus(chunkCount > 1 ? `AI analyzing document (${chunkCount} chunks)...` : 'AI analyzing document for plan items...');
+    setPhaseProgress('analysis', 0);
+    addMessage(chunkCount > 1 ? `AI analyzing document (${chunkCount} chunks)...` : 'AI analyzing document for plan items...');
 
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-items`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           documentText: text,
           organizationName: orgProfile?.organizationName,
@@ -296,14 +357,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
         }),
       });
 
+      setPhaseProgress('analysis', 80);
+
       if (!response.ok) {
         const error = await response.json();
-        if (response.status === 429) {
-          throw new Error('AI rate limit reached. Please wait a moment and try again.');
-        }
-        if (response.status === 402) {
-          throw new Error('AI credits exhausted. Please add credits to continue.');
-        }
+        if (response.status === 429) throw new Error('AI rate limit reached. Please wait a moment and try again.');
+        if (response.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
         throw new Error(error.error || 'AI extraction failed');
       }
 
@@ -313,15 +372,16 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
         throw new Error(result.error || 'AI extraction returned no data');
       }
 
+      setPhaseProgress('analysis', 100);
+
       const aiResponse: AIExtractionResponse = result.data;
       
-      // Log extraction stats
       const totalItems = result.totalItems || 0;
       const bulletMarkers = result.bulletMarkersDetected || 0;
       const chunksProcessed = result.chunksProcessed || 1;
       console.log(`Extraction complete: ${totalItems} items, ${bulletMarkers} bullet markers, ${chunksProcessed} chunks`);
+      addMessage(`Found ${totalItems} total items across ${chunksProcessed} chunk(s)`);
       
-      // Convert detected levels or use defaults
       const levels: PlanLevel[] = aiResponse.detectedLevels?.length > 0
         ? aiResponse.detectedLevels.map((l, idx) => ({
             id: String(idx + 1),
@@ -330,11 +390,10 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           }))
         : DEFAULT_LEVELS;
 
-      // Convert AI response to PlanItems
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
 
       const itemCount = items.length;
-      setProcessingStatus(`Found ${itemCount} top-level items (${totalItems} total)`);
+      addMessage(`${itemCount} top-level items structured`);
       
       toast({
         title: "AI Analysis Complete",
@@ -359,11 +418,13 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   const handleFileUpload = async (file: File) => {
     setIsProcessing(true);
     setUploadedFile(file);
-    setProcessingStatus('Analyzing file...');
     setExtractedItems(null);
     setExtractedMappings(null);
     setDetectedLevels(null);
     setUseVisionAI(false);
+    resetProgress();
+    setPhaseProgress('upload', 0);
+    addMessage('Starting file analysis...');
 
     try {
       const fileName = file.name.toLowerCase();
@@ -378,13 +439,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
       let pageCount = 1;
 
       if (isPdf) {
-        // Check file size first - if over 10MB, skip text extraction and go directly to Vision AI
-        const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+        const FILE_SIZE_LIMIT = 10 * 1024 * 1024;
         const skipTextExtraction = file.size > FILE_SIZE_LIMIT;
         
         if (skipTextExtraction) {
           console.log('File over 10MB, skipping text extraction, using Vision AI directly');
-          setProcessingStatus('Large document detected, using Vision AI...');
+          addMessage('Large document detected, using Vision AI...');
           setIsProcessing(false);
           const visionResult = await extractWithVisionAI(file);
           if (visionResult) {
@@ -396,14 +456,13 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           return;
         }
         
-        // Step 1: Text extraction
         try {
           const result = await parsePdfWithEdgeFunction(file);
           extractedText = result.text;
           pageCount = result.pageCount;
         } catch (error) {
           console.log('Text extraction failed, will try vision AI', error);
-          setProcessingStatus('Text extraction unavailable, using Vision AI...');
+          addMessage('Text extraction unavailable, switching to Vision AI...');
           setIsProcessing(false);
           const visionResult = await extractWithVisionAI(file);
           if (visionResult) {
@@ -415,10 +474,9 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           return;
         }
 
-        // Step 2: Quality gate
         if (!extractedText || extractedText.trim().length < 50) {
           console.log('Text extraction returned empty/minimal content, falling back to Vision AI');
-          setProcessingStatus('No readable text found, using Vision AI...');
+          addMessage('No readable text found, switching to Vision AI...');
           setIsProcessing(false);
           const visionResult = await extractWithVisionAI(file);
           if (visionResult) {
@@ -430,12 +488,11 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           return;
         }
         
-        // Check for gibberish
         const alphanumericChars = extractedText.replace(/[^a-zA-Z0-9]/g, '').length;
         const gibberishRatio = alphanumericChars / extractedText.length;
         if (gibberishRatio < 0.3) {
           console.log(`Text appears corrupted (alphanumeric ratio: ${gibberishRatio.toFixed(2)}), falling back to Vision AI`);
-          setProcessingStatus('Text extraction corrupted, using Vision AI...');
+          addMessage('Text extraction corrupted, switching to Vision AI...');
           setIsProcessing(false);
           const visionResult = await extractWithVisionAI(file);
           if (visionResult) {
@@ -448,17 +505,17 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
         }
         
         console.log(`Text extraction successful: ${extractedText.length} chars, ${pageCount} pages, alphanumeric ratio: ${gibberishRatio.toFixed(2)}`);
+        addMessage(`Text extraction complete: ${pageCount} pages, ${extractedText.length} characters`);
         
         setFileContent(extractedText);
         setIsProcessing(false);
 
-        // Step 3: Text-based AI extraction
+        // AI text analysis
         const textResult = await extractPlanItemsWithAI(extractedText);
 
-        // Step 4: Result gate — did text AI find items?
         if (!textResult || textResult.items.length === 0) {
           console.log('Text AI found 0 items, falling back to Vision AI with level hints');
-          setProcessingStatus('Text analysis found no items, trying visual analysis...');
+          addMessage('Text analysis found no items, trying visual analysis...');
           const levelHints = textResult?.levels || undefined;
           const visionResult = await extractWithVisionAI(file, levelHints);
           if (visionResult) {
@@ -470,14 +527,17 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           return;
         }
 
-        // Step 5: Verification (with text density check)
+        // Verification
+        setPhaseProgress('verification', 0);
+        addMessage('Verifying extraction quality...');
         const verification = verifyExtractionResult(textResult.items, textResult.levels, pageCount, extractedText.length);
+        setPhaseProgress('verification', 100);
+        
         if (!verification.passed) {
           console.log(`Text extraction verification failed: ${verification.reason}. Trying Vision AI...`);
-          setProcessingStatus(`Verification: ${verification.reason}. Trying visual analysis...`);
+          addMessage(`Verification: ${verification.reason}. Trying visual analysis...`);
           const visionResult = await extractWithVisionAI(file, textResult.levels);
           if (visionResult) {
-            // Verify vision result too
             const visionVerification = verifyExtractionResult(visionResult.items, visionResult.levels, pageCount);
             if (visionVerification.passed) {
               setExtractedItems(visionResult.items);
@@ -486,7 +546,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
               setFileContent('__VISION_EXTRACTED__');
               return;
             } else {
-              // Vision also failed verification — use whichever has more items
               console.log(`Vision verification also failed: ${visionVerification.reason}. Using best result.`);
               const countAll = (list: PlanItem[]): number =>
                 list.reduce((sum, item) => sum + 1 + countAll(item.children || []), 0);
@@ -511,7 +570,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
               return;
             }
           }
-          // Vision failed entirely — use text result with warning
           setExtractedItems(textResult.items);
           setExtractedMappings(textResult.personMappings);
           setDetectedLevels(textResult.levels);
@@ -523,14 +581,14 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           return;
         }
 
-        // Text extraction passed verification
+        addMessage('Verification passed — extraction complete');
         setExtractedItems(textResult.items);
         setExtractedMappings(textResult.personMappings);
         setDetectedLevels(textResult.levels);
         return;
         
       } else if (isWord || isExcel) {
-        setProcessingStatus('Processing document...');
+        addMessage('Processing document...');
         await new Promise(resolve => setTimeout(resolve, 1000));
         extractedText = SAMPLE_RAW_TEXT;
         toast({
@@ -538,7 +596,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           description: "Using sample data for demo. Full Office support coming soon.",
         });
       } else if (isTextFile) {
-        setProcessingStatus('Reading file...');
+        addMessage('Reading file...');
         const reader = new FileReader();
         
         const content = await new Promise<string>((resolve, reject) => {
@@ -560,7 +618,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
       setFileContent(extractedText);
       setIsProcessing(false);
       
-      // For non-PDF files, run text extraction and set state directly
       const textResult = await extractPlanItemsWithAI(extractedText);
       if (textResult) {
         setExtractedItems(textResult.items);
@@ -599,6 +656,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   const loadSampleData = async () => {
     setUploadedFile({ name: 'sample-strategic-plan.txt', size: SAMPLE_RAW_TEXT.length } as File);
     setFileContent(SAMPLE_RAW_TEXT);
+    resetProgress(1);
     const textResult = await extractPlanItemsWithAI(SAMPLE_RAW_TEXT);
     if (textResult) {
       setExtractedItems(textResult.items);
@@ -608,11 +666,9 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   };
 
   const handleContinue = () => {
-    // If we have AI-extracted items, use them via the callback
     if (extractedItems && extractedMappings && detectedLevels && onAIExtraction) {
       onAIExtraction(extractedItems, extractedMappings, detectedLevels);
     } else if (fileContent.trim() && fileContent !== '__VISION_EXTRACTED__') {
-      // Fallback to basic text parsing
       onTextSubmit(fileContent);
     }
   };
@@ -625,6 +681,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
     setDetectedLevels(null);
     setProcessingStatus('');
     setUseVisionAI(false);
+    resetProgress();
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -692,7 +749,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
                   </div>
                 </div>
               </div>
-
             </>
           ) : (
             <div className="space-y-4">
@@ -718,63 +774,40 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
                 </Button>
               </div>
 
-              {/* AI extraction status */}
-              {(fileContent || useVisionAI) && (
-                <div className={`flex items-center justify-between p-4 rounded-lg border ${
-                  isExtracting 
-                    ? 'bg-primary/5 border-primary/20' 
-                    : extractedItems 
-                      ? 'bg-success/10 border-success/20'
-                      : 'bg-muted/50 border-border'
-                }`}>
+              {/* Processing Overlay - shown during active processing */}
+              {isLoading && (
+                <ProcessingOverlay
+                  phase={progressState.phase}
+                  progress={progressState.progress}
+                  statusMessages={progressState.messages}
+                  industry={orgProfile?.industry}
+                  orgName={orgProfile?.organizationName}
+                  estimatedSecondsRemaining={progressState.estimatedSecondsRemaining}
+                  isVisionNeeded={progressState.isVisionNeeded}
+                />
+              )}
+
+              {/* Completed extraction status - shown when done */}
+              {!isLoading && extractedItems && (
+                <div className="flex items-center justify-between p-4 rounded-lg border bg-success/10 border-success/20">
                   <div className="flex items-center gap-3">
-                    <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
-                      isExtracting 
-                        ? 'bg-primary/20' 
-                        : extractedItems 
-                          ? 'bg-success/20'
-                          : 'bg-muted'
-                    }`}>
-                      {isExtracting ? (
-                        useVisionAI ? (
-                          <Eye className="h-5 w-5 text-primary animate-pulse" />
-                        ) : (
-                          <Brain className="h-5 w-5 text-primary animate-pulse" />
-                        )
-                      ) : extractedItems ? (
-                        <CheckCircle2 className="h-5 w-5 text-success" />
-                      ) : (
-                        <AlertCircle className="h-5 w-5 text-muted-foreground" />
-                      )}
+                    <div className="h-10 w-10 rounded-full bg-success/20 flex items-center justify-center">
+                      <CheckCircle2 className="h-5 w-5 text-success" />
                     </div>
                     <div>
-                      <p className="font-medium text-foreground">
-                        {isExtracting 
-                          ? (useVisionAI ? 'Vision AI Analysis' : 'AI Analysis')
-                          : extractedItems 
-                            ? 'Plan Items Found' 
-                            : 'Awaiting Analysis'
-                        }
-                      </p>
+                      <p className="font-medium text-foreground">Plan Items Found</p>
                       <p className="text-sm text-muted-foreground">
-                        {isExtracting 
-                          ? processingStatus || 'Identifying trackable items...'
-                          : extractedItems 
-                            ? `${extractedItems.length} items extracted${useVisionAI ? ' with Vision AI' : ' with AI'}`
-                            : 'Will use basic parsing'
-                        }
+                        {extractedItems.length} items extracted{useVisionAI ? ' with Vision AI' : ' with AI'}
                       </p>
                     </div>
                   </div>
-                  {extractedItems && (
-                    <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                      useVisionAI 
-                        ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400' 
-                        : 'bg-success/20 text-success'
-                    }`}>
-                      {useVisionAI ? 'Vision AI' : 'AI Enhanced'}
-                    </span>
-                  )}
+                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                    useVisionAI 
+                      ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400' 
+                      : 'bg-success/20 text-success'
+                  }`}>
+                    {useVisionAI ? 'Vision AI' : 'AI Enhanced'}
+                  </span>
                 </div>
               )}
 
