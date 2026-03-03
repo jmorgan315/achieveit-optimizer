@@ -407,12 +407,23 @@ async function processChunk(
   chunkIndex: number,
   totalChunks: number,
   previousContext: { detectedLevels: { depth: number; name: string }[]; extractedItemNames: string[] } | null,
-  apiKey: string
+  apiKey: string,
+  orgContext?: { organizationName?: string; industry?: string; documentHints?: string }
 ): Promise<ExtractedChunkResult> {
   const bulletCount = countBulletMarkers(chunkText);
   console.log(`Chunk ${chunkIndex + 1}: detected ~${bulletCount} bullet markers in text`);
 
-  let userMessage = `Please analyze this strategic planning document and extract EVERY trackable plan item. There are approximately ${bulletCount} bullet/list markers in this text — make sure you capture all of them.\n\n${chunkText}`;
+  let orgContextPrefix = '';
+  if (orgContext && chunkIndex === 0) {
+    const parts: string[] = [];
+    if (orgContext.organizationName) parts.push(`Organization: ${orgContext.organizationName}`);
+    if (orgContext.industry) parts.push(`Industry: ${orgContext.industry}`);
+    if (orgContext.documentHints) parts.push(`User-provided document hints: ${orgContext.documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
+    if (parts.length > 0) orgContextPrefix = `ORGANIZATION CONTEXT:\n${parts.join('\n')}\n\n`;
+  }
+
+  let userMessage = `${orgContextPrefix}Please analyze this strategic planning document and extract EVERY trackable plan item. There are approximately ${bulletCount} bullet/list markers in this text — make sure you capture all of them.\n\n${chunkText}`;
+
 
   if (previousContext && chunkIndex > 0) {
     const levelsList = previousContext.detectedLevels.map(l => `${l.name} (depth ${l.depth})`).join(', ');
@@ -584,7 +595,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { documentText } = body;
+    const { documentText, organizationName, industry, documentHints } = body;
 
     if (!documentText || typeof documentText !== "string") {
       return createSafeError(400, "Document text is required and must be a string.");
@@ -624,7 +635,7 @@ serve(async (req) => {
       } : null;
 
       try {
-        const result = await processChunk(chunks[i], i, chunks.length, previousContext, ANTHROPIC_API_KEY);
+        const result = await processChunk(chunks[i], i, chunks.length, previousContext, ANTHROPIC_API_KEY, { organizationName, industry, documentHints });
 
         if (result.items?.length > 0) {
           allItems = [...allItems, ...result.items];

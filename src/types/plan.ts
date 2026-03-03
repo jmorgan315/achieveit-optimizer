@@ -64,6 +64,7 @@ export interface OrgProfile {
   industry: string;
   website?: string;
   summary?: string;
+  documentHints?: string;
   confirmed: boolean;
 }
 

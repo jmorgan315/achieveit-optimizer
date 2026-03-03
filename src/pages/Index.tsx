@@ -26,8 +26,8 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const WIZARD_STEPS = [
-  { id: 'upload', title: 'Upload Plan' },
   { id: 'org', title: 'Organization' },
+  { id: 'upload', title: 'Upload Plan' },
   { id: 'path', title: 'Choose Path' },
   { id: 'people', title: 'Map People' },
   { id: 'optimize', title: 'Review & Export' },
@@ -76,6 +76,16 @@ const Index = () => {
     if (stepIndex < currentStep) setCurrentStep(stepIndex);
   };
 
+  const handleOrgProfileComplete = (profile: OrgProfile) => {
+    setOrgProfile(profile);
+    setCurrentStep(1);
+  };
+
+  const handleOrgProfileSkip = () => {
+    setOrgProfile(undefined);
+    setCurrentStep(1);
+  };
+
   const handleTextSubmit = (text: string) => {
     setRawText(text);
     setPendingAIData(null);
@@ -99,17 +109,7 @@ const Index = () => {
       processText();
     }
     
-    // Go to org profile step
-    setCurrentStep(1);
-  };
-
-  const handleOrgProfileComplete = (profile: OrgProfile) => {
-    setOrgProfile(profile);
-    setCurrentStep(2);
-  };
-
-  const handleOrgProfileSkip = () => {
-    setOrgProfile(undefined);
+    // Go to path step
     setCurrentStep(2);
   };
 
@@ -187,16 +187,17 @@ const Index = () => {
 
         <div className="mt-8">
           {currentStep === 0 && (
-            <FileUploadStep 
-              onTextSubmit={handleTextSubmit} 
-              onAIExtraction={handleAIExtraction}
+            <OrgProfileStep
+              onComplete={handleOrgProfileComplete}
+              onSkip={handleOrgProfileSkip}
             />
           )}
 
           {currentStep === 1 && (
-            <OrgProfileStep
-              onComplete={handleOrgProfileComplete}
-              onSkip={handleOrgProfileSkip}
+            <FileUploadStep 
+              onTextSubmit={handleTextSubmit} 
+              onAIExtraction={handleAIExtraction}
+              orgProfile={state.orgProfile}
             />
           )}
 
