@@ -6,6 +6,7 @@ import { SAMPLE_RAW_TEXT, PlanItem, PersonMapping, PlanLevel, DEFAULT_LEVELS } f
 import { toast } from '@/hooks/use-toast';
 import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
 import { AIExtractionResponse, AIDocumentTerminology, convertAIResponseToPlanItems } from '@/utils/textParser';
+import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
 
 interface FileUploadStepProps {
@@ -218,7 +219,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       // Convert to standard levels
       const levels: PlanLevel[] = aiResponse.detectedLevels.map((l, idx) => ({
         id: String(idx + 1),
-        name: l.name,
+        name: cleanLevelName(l.name),
         depth: l.depth,
       }));
 
@@ -313,7 +314,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction }: FileUploadStepP
       const levels: PlanLevel[] = aiResponse.detectedLevels?.length > 0
         ? aiResponse.detectedLevels.map((l, idx) => ({
             id: String(idx + 1),
-            name: l.name,
+            name: cleanLevelName(l.name),
             depth: l.depth,
           }))
         : DEFAULT_LEVELS;

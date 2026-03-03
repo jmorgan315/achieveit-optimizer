@@ -59,12 +59,21 @@ export interface PlanItemIssue {
 
 export type ProcessingPath = 'direct' | 'optimizer' | null;
 
+export interface OrgProfile {
+  organizationName: string;
+  industry: string;
+  website?: string;
+  summary?: string;
+  confirmed: boolean;
+}
+
 export interface PlanState {
   levels: PlanLevel[];
   items: PlanItem[];
   personMappings: PersonMapping[];
   processingPath: ProcessingPath;
   rawText: string;
+  orgProfile?: OrgProfile;
 }
 
 export const DEFAULT_LEVELS: PlanLevel[] = [

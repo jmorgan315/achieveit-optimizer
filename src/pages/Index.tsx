@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { Header } from '@/components/Header';
 import { WizardProgress } from '@/components/WizardProgress';
 import { FileUploadStep } from '@/components/steps/FileUploadStep';
+import { OrgProfileStep } from '@/components/steps/OrgProfileStep';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { PathSelectorStep } from '@/components/steps/PathSelectorStep';
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
 import { usePlanState } from '@/hooks/usePlanState';
-import { ProcessingPath, PlanItem, PersonMapping, PlanLevel } from '@/types/plan';
+import { ProcessingPath, PlanItem, PersonMapping, PlanLevel, OrgProfile } from '@/types/plan';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,7 @@ import {
 
 const WIZARD_STEPS = [
   { id: 'upload', title: 'Upload Plan' },
+  { id: 'org', title: 'Organization' },
   { id: 'path', title: 'Choose Path' },
   { id: 'people', title: 'Map People' },
   { id: 'optimize', title: 'Review & Export' },
@@ -46,6 +48,7 @@ const Index = () => {
     setLevels,
     setRawText,
     setItems,
+    setOrgProfile,
     processText,
     setProcessingPath,
     updatePersonMapping,
@@ -75,42 +78,49 @@ const Index = () => {
 
   const handleTextSubmit = (text: string) => {
     setRawText(text);
-    setPendingAIData(null); // Clear any pending AI data
+    setPendingAIData(null);
     setShowLevelModal(true);
   };
 
-  // Handle AI-extracted items - show level verification modal with detected levels
   const handleAIExtraction = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
-    setLevels(levels); // Pre-populate with AI-detected levels
-    setPendingAIData({ items, personMappings }); // Store items temporarily
-    setShowLevelModal(true); // Show level verification modal
+    setLevels(levels);
+    setPendingAIData({ items, personMappings });
+    setShowLevelModal(true);
   };
 
   const handleLevelConfirm = (levels: PlanLevel[]) => {
     setLevels(levels);
     
     if (pendingAIData) {
-      // AI extraction path: apply levels to pending items and recalculate order strings
       setItems(pendingAIData.items, pendingAIData.personMappings);
-      // Recalculate with the confirmed levels
       updateLevelsAndRecalculate(levels);
       setPendingAIData(null);
     } else {
-      // Manual text parsing path
       processText();
     }
     
+    // Go to org profile step
     setCurrentStep(1);
+  };
+
+  const handleOrgProfileComplete = (profile: OrgProfile) => {
+    setOrgProfile(profile);
+    setCurrentStep(2);
+  };
+
+  const handleOrgProfileSkip = () => {
+    setOrgProfile(undefined);
+    setCurrentStep(2);
   };
 
   const handlePathSelect = (path: ProcessingPath) => {
     setProcessingPath(path);
-    setCurrentStep(2);
+    setCurrentStep(3);
   };
 
   const handlePeopleMappingComplete = () => {
     applyPersonMappingsToItems();
-    setCurrentStep(3);
+    setCurrentStep(4);
   };
 
   const handleExport = () => {
@@ -141,7 +151,7 @@ const Index = () => {
             </Button>
 
             <div className="flex items-center gap-3">
-              {currentStep === 3 && (
+              {currentStep === 4 && (
                 <>
                   <Button onClick={handleExport} size="sm">
                     <Download className="h-4 w-4 mr-2" />
@@ -184,10 +194,17 @@ const Index = () => {
           )}
 
           {currentStep === 1 && (
-            <PathSelectorStep onSelect={handlePathSelect} onBack={handleBack} />
+            <OrgProfileStep
+              onComplete={handleOrgProfileComplete}
+              onSkip={handleOrgProfileSkip}
+            />
           )}
 
           {currentStep === 2 && (
+            <PathSelectorStep onSelect={handlePathSelect} onBack={handleBack} />
+          )}
+
+          {currentStep === 3 && (
             <PeopleMapperStep
               personMappings={state.personMappings}
               onUpdateMapping={updatePersonMapping}
@@ -196,10 +213,11 @@ const Index = () => {
             />
           )}
 
-          {currentStep === 3 && (
+          {currentStep === 4 && (
             <PlanOptimizerStep
               items={state.items}
               levels={state.levels}
+              orgProfile={state.orgProfile}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}

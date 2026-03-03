@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
-import { CalendarIcon } from 'lucide-react';
+import { CalendarIcon, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
@@ -28,6 +28,11 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -38,8 +43,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { PlanItem, PlanLevel } from '@/types/plan';
-import { Trash2 } from 'lucide-react';
+import { PlanItem, PlanLevel, MetricDescription, MetricUnit, MetricRollup } from '@/types/plan';
+import { Trash2, Target } from 'lucide-react';
 
 interface EditItemDialogProps {
   open: boolean;
@@ -58,6 +63,12 @@ interface EditFormData {
   startDate: Date | undefined;
   dueDate: Date | undefined;
   assignedTo: string;
+  metricDescription: MetricDescription;
+  metricUnit: MetricUnit;
+  metricRollup: MetricRollup;
+  metricBaseline: string;
+  metricTarget: string;
+  currentValue: string;
 }
 
 export function EditItemDialog({
@@ -76,9 +87,15 @@ export function EditItemDialog({
     startDate: undefined,
     dueDate: undefined,
     assignedTo: '',
+    metricDescription: '',
+    metricUnit: '',
+    metricRollup: '',
+    metricBaseline: '',
+    metricTarget: '',
+    currentValue: '',
   });
+  const [metricsOpen, setMetricsOpen] = useState(false);
 
-  // Reset form when item changes
   useEffect(() => {
     if (item) {
       setFormData({
@@ -88,11 +105,17 @@ export function EditItemDialog({
         startDate: item.startDate ? new Date(item.startDate) : undefined,
         dueDate: item.dueDate ? new Date(item.dueDate) : undefined,
         assignedTo: item.assignedTo,
+        metricDescription: item.metricDescription,
+        metricUnit: item.metricUnit,
+        metricRollup: item.metricRollup,
+        metricBaseline: item.metricBaseline,
+        metricTarget: item.metricTarget,
+        currentValue: item.currentValue,
       });
+      setMetricsOpen(!!item.metricDescription);
     }
   }, [item]);
 
-  // Date validation: both or neither
   const bothDatesEmpty = !formData.startDate && !formData.dueDate;
   const bothDatesFilled = formData.startDate && formData.dueDate;
   const onlyOneDate = (formData.startDate && !formData.dueDate) || (!formData.startDate && formData.dueDate);
@@ -102,7 +125,6 @@ export function EditItemDialog({
   const handleSave = () => {
     if (!item || !canSave) return;
 
-    // Check if level changed
     if (formData.levelDepth !== item.levelDepth && onChangeLevel) {
       onChangeLevel(item.id, formData.levelDepth);
     }
@@ -113,6 +135,12 @@ export function EditItemDialog({
       startDate: formData.startDate ? format(formData.startDate, 'yyyy-MM-dd') : '',
       dueDate: formData.dueDate ? format(formData.dueDate, 'yyyy-MM-dd') : '',
       assignedTo: formData.assignedTo,
+      metricDescription: formData.metricDescription,
+      metricUnit: formData.metricUnit,
+      metricRollup: formData.metricRollup,
+      metricBaseline: formData.metricBaseline,
+      metricTarget: formData.metricTarget,
+      currentValue: formData.currentValue,
     });
 
     onOpenChange(false);
@@ -122,7 +150,7 @@ export function EditItemDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit Plan Item</DialogTitle>
           <DialogDescription>
@@ -178,7 +206,6 @@ export function EditItemDialog({
 
           {/* Dates */}
           <div className="grid grid-cols-2 gap-4">
-            {/* Start Date */}
             <div className="space-y-2">
               <Label>Start Date</Label>
               <Popover>
@@ -206,7 +233,6 @@ export function EditItemDialog({
               </Popover>
             </div>
 
-            {/* Due Date */}
             <div className="space-y-2">
               <Label>Due Date</Label>
               <Popover>
@@ -255,6 +281,115 @@ export function EditItemDialog({
               placeholder="owner@company.com"
             />
           </div>
+
+          {/* Metrics Section */}
+          <Collapsible open={metricsOpen} onOpenChange={setMetricsOpen}>
+            <CollapsibleTrigger asChild>
+              <Button variant="ghost" className="w-full justify-between p-2 h-auto">
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <Target className="h-4 w-4" />
+                  Metrics
+                  {formData.metricDescription && (
+                    <span className="text-xs text-primary font-normal">({formData.metricDescription})</span>
+                  )}
+                </span>
+                <ChevronDown className={cn("h-4 w-4 transition-transform", metricsOpen && "rotate-180")} />
+              </Button>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-3 pt-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Metric Description</Label>
+                  <Select
+                    value={formData.metricDescription || 'none'}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({ ...prev, metricDescription: (value === 'none' ? '' : value) as MetricDescription }))
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="Track to Target">Track to Target</SelectItem>
+                      <SelectItem value="Maintain">Maintain</SelectItem>
+                      <SelectItem value="Stay Above">Stay Above</SelectItem>
+                      <SelectItem value="Stay Below">Stay Below</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Metric Unit</Label>
+                  <Select
+                    value={formData.metricUnit || 'none'}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({ ...prev, metricUnit: (value === 'none' ? '' : value) as MetricUnit }))
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue placeholder="Select unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None</SelectItem>
+                      <SelectItem value="Number">Number</SelectItem>
+                      <SelectItem value="Dollar">Dollar</SelectItem>
+                      <SelectItem value="Percentage">Percentage</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Rollup</Label>
+                <Select
+                  value={formData.metricRollup || 'none'}
+                  onValueChange={(value) =>
+                    setFormData((prev) => ({ ...prev, metricRollup: (value === 'none' ? '' : value) as MetricRollup }))
+                  }
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Select rollup" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">None</SelectItem>
+                    <SelectItem value="Manual">Manual</SelectItem>
+                    <SelectItem value="Sum Children">Sum Children</SelectItem>
+                    <SelectItem value="Average Children">Average Children</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Baseline</Label>
+                  <Input
+                    className="h-8 text-xs"
+                    value={formData.metricBaseline}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, metricBaseline: e.target.value }))}
+                    placeholder="0"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Target</Label>
+                  <Input
+                    className="h-8 text-xs"
+                    value={formData.metricTarget}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, metricTarget: e.target.value }))}
+                    placeholder="100"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Current</Label>
+                  <Input
+                    className="h-8 text-xs"
+                    value={formData.currentValue}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, currentValue: e.target.value }))}
+                    placeholder="—"
+                  />
+                </div>
+              </div>
+            </CollapsibleContent>
+          </Collapsible>
         </div>
 
         <DialogFooter className="flex justify-between sm:justify-between">

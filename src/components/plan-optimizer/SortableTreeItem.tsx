@@ -16,6 +16,12 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import {
   ChevronRight,
   ChevronDown,
   AlertCircle,
@@ -25,6 +31,7 @@ import {
   GripVertical,
   Settings2,
   Trash2,
+  Target,
 } from 'lucide-react';
 
 export type DropPosition = 'before' | 'after' | 'inside' | null;
@@ -84,12 +91,15 @@ export function SortableTreeItem({
         return 'bg-warning/10 border-warning/30 text-warning';
       case 'orphan':
         return 'bg-info/10 border-info/30 text-info';
+      case 'missing-metric':
+        return 'bg-muted border-muted-foreground/30 text-muted-foreground';
       default:
         return 'bg-muted';
     }
   };
 
   const hasIssues = item.issues.length > 0;
+  const hasMetric = !!item.metricDescription;
 
   const formatDateRange = () => {
     if (!item.startDate && !item.dueDate) return null;
@@ -100,14 +110,16 @@ export function SortableTreeItem({
 
   const dateRange = formatDateRange();
 
-  // Determine visual indicator based on drop position
   const showBeforeLine = isOver && dropPosition === 'before';
   const showAfterLine = isOver && dropPosition === 'after';
   const showInsideHighlight = isOver && dropPosition === 'inside';
 
+  const metricSummary = hasMetric
+    ? `${item.metricDescription} · ${item.metricUnit || 'No unit'} · Target: ${item.metricTarget || '—'}`
+    : null;
+
   return (
     <div className="relative">
-      {/* Drop before indicator — full-width separator line */}
       {showBeforeLine && (
         <div className="absolute top-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
           <div className="h-0.5 bg-primary rounded-full" />
@@ -127,7 +139,6 @@ export function SortableTreeItem({
           showInsideHighlight ? 'bg-primary/10 border-l-4 border-l-primary border-b' : ''
         }`}
       >
-        {/* Nest label overlay */}
         {showInsideHighlight && (
           <span className="absolute right-4 top-1 text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full z-10">
             → Nest under "{item.name}"{nestLevelName ? ` as ${nestLevelName}` : ''}
@@ -166,7 +177,23 @@ export function SortableTreeItem({
 
         <span className="font-medium flex-1 truncate">{item.name}</span>
 
-        {/* Inline date display */}
+        {/* Metric indicator */}
+        {hasMetric && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="text-xs font-normal bg-primary/5 border-primary/30 text-primary gap-1">
+                  <Target className="h-3 w-3" />
+                  Metric
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">{metricSummary}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+
         {dateRange && (
           <span className="text-xs text-muted-foreground flex items-center gap-1">
             <Calendar className="h-3 w-3" />
@@ -174,7 +201,6 @@ export function SortableTreeItem({
           </span>
         )}
 
-        {/* Inline owner display */}
         {item.assignedTo && (
           <Badge variant="outline" className="text-xs font-normal max-w-[150px] truncate">
             <User className="h-3 w-3 mr-1" />
@@ -191,6 +217,7 @@ export function SortableTreeItem({
             {issue.type === 'missing-owner' && <User className="h-3 w-3 mr-1" />}
             {issue.type === 'missing-dates' && <Calendar className="h-3 w-3 mr-1" />}
             {issue.type === 'orphan' && <AlertCircle className="h-3 w-3 mr-1" />}
+            {issue.type === 'missing-metric' && <Target className="h-3 w-3 mr-1" />}
             {issue.type.replace('missing-', '')}
           </Badge>
         ))}
@@ -246,7 +273,6 @@ export function SortableTreeItem({
         )}
       </div>
       
-      {/* Drop after indicator — full-width separator line */}
       {showAfterLine && (
         <div className="absolute bottom-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
           <div className="h-0.5 bg-primary rounded-full" />

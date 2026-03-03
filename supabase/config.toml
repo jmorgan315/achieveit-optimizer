@@ -11,3 +11,6 @@ verify_jwt = false
 
 [functions.extract-plan-vision]
 verify_jwt = false
+
+[functions.lookup-organization]
+verify_jwt = false

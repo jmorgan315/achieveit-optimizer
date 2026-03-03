@@ -35,11 +35,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { PlanItem, PlanLevel } from '@/types/plan';
+import { PlanItem, PlanLevel, OrgProfile } from '@/types/plan';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings, Target } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
 
@@ -48,6 +48,7 @@ type DropInfo = { itemId: string; position: DropPosition };
 interface PlanOptimizerStepProps {
   items: PlanItem[];
   levels: PlanLevel[];
+  orgProfile?: OrgProfile;
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
@@ -73,6 +74,7 @@ const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 export function PlanOptimizerStep({
   items,
   levels,
+  orgProfile,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
@@ -90,12 +92,10 @@ export function PlanOptimizerStep({
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
-  const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | null>(null);
   
-  // Track live pointer position for accurate drop detection
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
-  // AI suggestion state
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
   const [suggestion, setSuggestion] = useState<MetricSuggestion | null>(null);
 
@@ -131,6 +131,11 @@ export function PlanOptimizerStep({
         body: JSON.stringify({
           name: item.name,
           description: item.description,
+          orgProfile: orgProfile ? {
+            organizationName: orgProfile.organizationName,
+            industry: orgProfile.industry,
+            summary: orgProfile.summary,
+          } : undefined,
         }),
       });
 
@@ -155,7 +160,7 @@ export function PlanOptimizerStep({
     } finally {
       setIsLoadingSuggestion(false);
     }
-  }, []);
+  }, [orgProfile]);
 
   const handleOptimize = (item: PlanItem) => {
     setSelectedItem(item);
@@ -208,16 +213,13 @@ export function PlanOptimizerStep({
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string);
-    // Initialize pointer position from activator event
     const mouseEvent = event.activatorEvent as MouseEvent;
     if (mouseEvent) {
       pointerPositionRef.current = { x: mouseEvent.clientX, y: mouseEvent.clientY };
     }
   };
 
-  // Track live pointer position during drag
   const handleDragMove = (event: DragMoveEvent) => {
-    // Use delta to calculate current position from initial position
     const mouseEvent = event.activatorEvent as MouseEvent;
     if (mouseEvent && event.delta) {
       pointerPositionRef.current = {
@@ -230,7 +232,6 @@ export function PlanOptimizerStep({
   const EDGE_ZONE_PX = 12;
 
   const computeDropPosition = useCallback((rect: DOMRect, mouseY: number): DropPosition => {
-    // 12px from top edge → before, 12px from bottom edge → after, everything else → nest
     if (mouseY < rect.top + EDGE_ZONE_PX) return 'before';
     if (mouseY > rect.bottom - EDGE_ZONE_PX) return 'after';
     return 'inside';
@@ -239,7 +240,6 @@ export function PlanOptimizerStep({
   const handleDragOver = (event: DragOverEvent) => {
     const overId = event.over?.id as string | null;
     
-    // Update pointer position from drag over event
     const mouseEvent = event.activatorEvent as MouseEvent;
     if (mouseEvent && event.delta) {
       pointerPositionRef.current = {
@@ -279,7 +279,6 @@ export function PlanOptimizerStep({
 
     if (!draggedItem || !targetItem) return;
 
-    // Prevent dropping on own descendants
     const isDescendant = (parentId: string, childId: string): boolean => {
       const child = items.find((i) => i.id === childId);
       if (!child || !child.parentId) return false;
@@ -299,27 +298,22 @@ export function PlanOptimizerStep({
     const position = currentDropInfo?.position || 'inside';
 
     if (position === 'inside') {
-      // Nest: make dragged item a child of target item
       onMoveItem(draggedId, targetId);
       toast({
         title: 'Item moved',
         description: `"${draggedItem.name}" is now under "${targetItem.name}"`,
       });
     } else if (onReorderSiblings) {
-      // Reorder: place before or after target
       const targetParentId = targetItem.parentId;
       const siblings = items.filter((i) => i.parentId === targetParentId);
       const targetIndex = siblings.findIndex((s) => s.id === targetId);
       
-      // If dragged item has a different parent, first move it to target's parent
       if (draggedItem.parentId !== targetParentId) {
         onMoveItem(draggedId, targetParentId);
       }
       
-      // Calculate new index based on drop position
       let newIndex = position === 'before' ? targetIndex : targetIndex + 1;
       
-      // Adjust if dragged item was in same list and before target
       const draggedIndex = siblings.findIndex((s) => s.id === draggedId);
       if (draggedIndex !== -1 && draggedIndex < targetIndex) {
         newIndex = Math.max(0, newIndex - 1);
@@ -337,14 +331,24 @@ export function PlanOptimizerStep({
   const rootItems = items.filter((i) => !i.parentId);
   const getChildren = (parentId: string) => items.filter((i) => i.parentId === parentId);
 
-  // Compute visible items based on active filter
+  const itemsWithMetrics = items.filter((i) => !!i.metricDescription).length;
+  const itemsWithoutMetrics = items.length - itemsWithMetrics;
+
   const getVisibleItemIds = useCallback((): Set<string> | null => {
-    if (!activeFilter) return null; // null means show all
-    const matchingItems = items.filter((i) => i.issues.some((is) => is.type === activeFilter));
+    if (!activeFilter) return null;
+
+    let matchingItems: PlanItem[];
+    if (activeFilter === 'has-metric') {
+      matchingItems = items.filter((i) => !!i.metricDescription);
+    } else if (activeFilter === 'missing-metric') {
+      matchingItems = items.filter((i) => !i.metricDescription);
+    } else {
+      matchingItems = items.filter((i) => i.issues.some((is) => is.type === activeFilter));
+    }
+
     const visibleIds = new Set<string>();
     for (const item of matchingItems) {
       visibleIds.add(item.id);
-      // Walk up parent chain to include ancestors
       let current = item;
       while (current.parentId) {
         visibleIds.add(current.parentId);
@@ -358,18 +362,15 @@ export function PlanOptimizerStep({
 
   const visibleItemIds = getVisibleItemIds();
 
-  // Auto-expand ancestors when filter is activated
-  const handleFilterClick = (filter: 'missing-owner' | 'missing-dates' | 'orphan') => {
+  const handleFilterClick = (filter: typeof activeFilter) => {
     if (activeFilter === filter) {
       setActiveFilter(null);
     } else {
       setActiveFilter(filter);
-      // Auto-expand all items so filtered items are visible
       setExpandedItems(new Set(items.map((i) => i.id)));
     }
   };
 
-  // Build flat list for sortable context
   const buildFlatList = (parentId: string | null, depth: number): { item: PlanItem; depth: number }[] => {
     const result: { item: PlanItem; depth: number }[] = [];
     const children = parentId === null ? rootItems : getChildren(parentId);
@@ -397,7 +398,7 @@ export function PlanOptimizerStep({
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
       {/* Stats Bar */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-5 gap-4">
         <Card
           className={`cursor-pointer transition-all hover:shadow-md ${!activeFilter ? 'ring-2 ring-primary' : ''}`}
           onClick={() => setActiveFilter(null)}
@@ -438,6 +439,20 @@ export function PlanOptimizerStep({
               {issueStats.orphans}
             </div>
             <div className="text-sm text-muted-foreground">Orphan Items</div>
+          </CardContent>
+        </Card>
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'has-metric' || activeFilter === 'missing-metric' ? 'ring-2 ring-primary' : ''}`}
+          onClick={() => handleFilterClick(activeFilter === 'has-metric' ? 'missing-metric' : activeFilter === 'missing-metric' ? null : 'has-metric')}
+        >
+          <CardContent className="p-4">
+            <div className="flex items-center gap-1">
+              <Target className="h-4 w-4 text-primary" />
+              <span className="text-2xl font-bold text-foreground">{itemsWithMetrics}/{items.length}</span>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {activeFilter === 'has-metric' ? 'With Metrics (click: missing)' : activeFilter === 'missing-metric' ? 'Missing Metrics (click: clear)' : 'Items with Metrics'}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -547,6 +562,11 @@ export function PlanOptimizerStep({
             </DialogTitle>
             <DialogDescription>
               Get intelligent metric recommendations for "{selectedItem?.name}"
+              {orgProfile && (
+                <span className="block text-xs mt-1 text-primary">
+                  Context: {orgProfile.organizationName} ({orgProfile.industry})
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
 

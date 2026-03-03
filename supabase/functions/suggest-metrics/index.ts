@@ -27,7 +27,8 @@ function createSafeError(
   );
 }
 
-const systemPrompt = `You are an expert strategic planning consultant specializing in creating SMART metrics for AchieveIt plans.
+function buildSystemPrompt(orgProfile?: { organizationName?: string; industry?: string; summary?: string }): string {
+  let prompt = `You are an expert strategic planning consultant specializing in creating SMART metrics for AchieveIt plans.
 
 When given a plan item name and description, suggest an appropriate metric configuration.
 
@@ -46,6 +47,23 @@ Return your suggestion as a JSON object with these fields:
 
 Make metrics SMART: Specific, Measurable, Achievable, Relevant, Time-bound.`;
 
+  if (orgProfile?.organizationName || orgProfile?.industry) {
+    prompt += `\n\n=== ORGANIZATION CONTEXT ===`;
+    if (orgProfile.organizationName) {
+      prompt += `\nOrganization: ${orgProfile.organizationName}`;
+    }
+    if (orgProfile.industry) {
+      prompt += `\nIndustry: ${orgProfile.industry}`;
+    }
+    if (orgProfile.summary) {
+      prompt += `\nAbout: ${orgProfile.summary}`;
+    }
+    prompt += `\n\nUse this organizational context to make your metric suggestions more specific and relevant to this organization's sector, typical KPIs, and strategic priorities. Reference industry-standard benchmarks where applicable.`;
+  }
+
+  return prompt;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -58,7 +76,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { name, description } = body;
+    const { name, description, orgProfile } = body;
 
     // Validate name
     if (!name || typeof name !== 'string') {
@@ -84,6 +102,8 @@ serve(async (req) => {
         return createSafeError(400, `Description must be under ${MAX_DESC_LENGTH} characters.`);
       }
     }
+
+    const systemPrompt = buildSystemPrompt(orgProfile);
 
     const userPrompt = `Plan Item: "${trimmedName}"
 ${trimmedDescription ? `Description: "${trimmedDescription}"` : ''}
