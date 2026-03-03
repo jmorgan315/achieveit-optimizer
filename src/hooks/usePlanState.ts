@@ -5,6 +5,7 @@ import {
   PlanItem,
   PersonMapping,
   ProcessingPath,
+  OrgProfile,
   DEFAULT_LEVELS,
 } from '@/types/plan';
 import { parseTextToPlanItems } from '@/utils/textParser';
@@ -16,6 +17,7 @@ export function usePlanState() {
     personMappings: [],
     processingPath: null,
     rawText: '',
+    orgProfile: undefined,
   });
 
   const setLevels = useCallback((levels: PlanLevel[]) => {
@@ -28,6 +30,10 @@ export function usePlanState() {
 
   const setItems = useCallback((items: PlanItem[], personMappings: PersonMapping[]) => {
     setState((prev) => ({ ...prev, items, personMappings }));
+  }, []);
+
+  const setOrgProfile = useCallback((orgProfile: OrgProfile | undefined) => {
+    setState((prev) => ({ ...prev, orgProfile }));
   }, []);
 
   const processText = useCallback(() => {
@@ -44,12 +50,10 @@ export function usePlanState() {
       const currentIndex = siblings.findIndex((s) => s.id === itemId);
       if (currentIndex === -1 || currentIndex === newIndex) return prev;
 
-      // Reorder siblings
       const reordered = [...siblings];
       const [moved] = reordered.splice(currentIndex, 1);
       reordered.splice(newIndex, 0, moved);
 
-      // Update orders
       const siblingIds = new Set(reordered.map((s) => s.id));
       const updatedItems = prev.items.map((i) => {
         if (!siblingIds.has(i.id)) return i;
@@ -84,7 +88,6 @@ export function usePlanState() {
 
       const updatedItems = prev.items.map((item) => {
         const updatedItem = { ...item };
-        // Find any matching person and assign email
         for (const [name, email] of emailMap) {
           if (item.name.toLowerCase().includes(name) || item.description.toLowerCase().includes(name)) {
             updatedItem.assignedTo = email;
@@ -154,10 +157,8 @@ export function usePlanState() {
     });
   }, []);
 
-  // Update levels and recalculate all items to match new level names
   const updateLevelsAndRecalculate = useCallback((newLevels: PlanLevel[]) => {
     setState((prev) => {
-      // Update level names on items based on their depth
       const updatedItems = prev.items.map((item) => {
         const matchingLevel = newLevels.find((l) => l.depth === item.levelDepth);
         return {
@@ -174,7 +175,6 @@ export function usePlanState() {
     });
   }, []);
 
-  // Change an item's level and handle re-parenting
   const changeItemLevel = useCallback((itemId: string, newLevelDepth: number) => {
     setState((prev) => {
       const item = prev.items.find((i) => i.id === itemId);
@@ -186,19 +186,14 @@ export function usePlanState() {
       let newParentId: string | null = null;
 
       if (newLevelDepth === 1) {
-        // Moving to root level - no parent needed
         newParentId = null;
       } else if (newLevelDepth > currentDepth) {
-        // Moving to a lower level (deeper) - find a sibling at the previous level to become parent
-        // Look for the previous sibling at the same level to become parent
         const siblings = prev.items.filter((i) => i.parentId === item.parentId && i.id !== itemId);
         const itemOrderParts = item.order.split('.').map(Number);
         
-        // Find the closest sibling that comes before this item
         let closestSibling: PlanItem | null = null;
         for (const sibling of siblings) {
           const siblingOrderParts = sibling.order.split('.').map(Number);
-          // Check if sibling comes before item
           const siblingOrderNum = siblingOrderParts[siblingOrderParts.length - 1];
           const itemOrderNum = itemOrderParts[itemOrderParts.length - 1];
           if (siblingOrderNum < itemOrderNum) {
@@ -216,8 +211,6 @@ export function usePlanState() {
         
         newParentId = closestSibling?.id || item.parentId;
       } else {
-        // Moving to a higher level (shallower) - find appropriate parent
-        // Walk up the tree to find a parent at the correct level
         let currentParentId = item.parentId;
         let targetParentDepth = newLevelDepth - 1;
         
@@ -229,7 +222,6 @@ export function usePlanState() {
             newParentId = parent.id;
             break;
           } else if (parent.levelDepth < targetParentDepth) {
-            // We've gone too high, use this parent
             newParentId = parent.id;
             break;
           }
@@ -237,13 +229,11 @@ export function usePlanState() {
           currentParentId = parent.parentId;
         }
         
-        // If targetParentDepth is 0, we want root level
         if (targetParentDepth === 0) {
           newParentId = null;
         }
       }
 
-      // Update the item with new parent and level
       const levelName = prev.levels.find((l) => l.depth === newLevelDepth)?.name || `Level ${newLevelDepth}`;
       
       const updatedItems = prev.items.map((i) =>
@@ -258,7 +248,6 @@ export function usePlanState() {
 
   const deleteItem = useCallback((id: string) => {
     setState((prev) => {
-      // Collect all descendant IDs recursively
       const getDescendantIds = (parentId: string): string[] => {
         const children = prev.items.filter((i) => i.parentId === parentId);
         return children.flatMap((child) => [child.id, ...getDescendantIds(child.id)]);
@@ -276,6 +265,7 @@ export function usePlanState() {
       personMappings: [],
       processingPath: null,
       rawText: '',
+      orgProfile: undefined,
     });
   }, []);
 
@@ -284,6 +274,7 @@ export function usePlanState() {
     setLevels,
     setRawText,
     setItems,
+    setOrgProfile,
     processText,
     setProcessingPath,
     updatePersonMapping,
@@ -307,7 +298,6 @@ function recalculateOrders(items: PlanItem[], levels: PlanLevel[]): PlanItem[] {
     const children = items.filter((i) => i.parentId === parentId);
     children.forEach((child, index) => {
       const order = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
-      // Assign level name based on actual tree depth, not the original levelDepth
       const levelName = levels.find((l) => l.depth === treeDepth)?.name || `Level ${treeDepth}`;
       result.push({ 
         ...child, 

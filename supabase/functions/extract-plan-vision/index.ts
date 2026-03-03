@@ -310,18 +310,26 @@ const extractPlanItemsSchema = {
   required: ["items", "detectedLevels", "documentTerminology"]
 };
 
+// Clean level name: replace underscores with spaces and apply Title Case
+function cleanLevelName(name: string): string {
+  if (!name) return name;
+  return name
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c: string) => c.toUpperCase())
+    .trim();
+}
+
 // Clean and normalize the AI response
 function normalizeResponse(data: Record<string, unknown>): Record<string, unknown> {
   // Clean up documentTerminology
   if (data.documentTerminology) {
     const terms = data.documentTerminology as Record<string, unknown>;
     
-    // Clean columnHierarchy - remove numeric prefixes like "6130Pillar"
+    // Clean columnHierarchy - remove numeric prefixes like "6130Pillar" and apply title case
     if (Array.isArray(terms.columnHierarchy)) {
       terms.columnHierarchy = terms.columnHierarchy.map((term: string) => {
         if (typeof term === 'string') {
-          // Remove leading numbers
-          return term.replace(/^\d+/, '').trim();
+          return cleanLevelName(term.replace(/^\d+/, '').trim());
         }
         return term;
       }).filter((term: string) => term && term.length > 0);
@@ -330,7 +338,7 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
     // Clean level terms
     ['level1Term', 'level2Term', 'level3Term', 'level4Term', 'level5Term', 'level6Term', 'level7Term'].forEach(key => {
       if (typeof terms[key] === 'string') {
-        terms[key] = (terms[key] as string).replace(/^\d+/, '').trim();
+        terms[key] = cleanLevelName((terms[key] as string).replace(/^\d+/, '').trim());
       }
     });
   }
@@ -340,18 +348,18 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
   if (terms?.columnHierarchy && Array.isArray(terms.columnHierarchy) && terms.columnHierarchy.length > 0) {
     data.detectedLevels = (terms.columnHierarchy as string[]).map((name: string, idx: number) => ({
       depth: idx + 1,
-      name: name
+      name: cleanLevelName(name)
     }));
   } else if (terms) {
     // Build from level terms
     const levels: Array<{depth: number, name: string}> = [];
-    if (terms.level1Term) levels.push({ depth: 1, name: terms.level1Term as string });
-    if (terms.level2Term) levels.push({ depth: 2, name: terms.level2Term as string });
-    if (terms.level3Term) levels.push({ depth: 3, name: terms.level3Term as string });
-    if (terms.level4Term) levels.push({ depth: 4, name: terms.level4Term as string });
-    if (terms.level5Term) levels.push({ depth: 5, name: terms.level5Term as string });
-    if (terms.level6Term) levels.push({ depth: 6, name: terms.level6Term as string });
-    if (terms.level7Term) levels.push({ depth: 7, name: terms.level7Term as string });
+    if (terms.level1Term) levels.push({ depth: 1, name: cleanLevelName(terms.level1Term as string) });
+    if (terms.level2Term) levels.push({ depth: 2, name: cleanLevelName(terms.level2Term as string) });
+    if (terms.level3Term) levels.push({ depth: 3, name: cleanLevelName(terms.level3Term as string) });
+    if (terms.level4Term) levels.push({ depth: 4, name: cleanLevelName(terms.level4Term as string) });
+    if (terms.level5Term) levels.push({ depth: 5, name: cleanLevelName(terms.level5Term as string) });
+    if (terms.level6Term) levels.push({ depth: 6, name: cleanLevelName(terms.level6Term as string) });
+    if (terms.level7Term) levels.push({ depth: 7, name: cleanLevelName(terms.level7Term as string) });
     
     if (levels.length > 0) {
       data.detectedLevels = levels;

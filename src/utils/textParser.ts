@@ -651,7 +651,7 @@ export function convertAIResponseToPlanItems(
 
     // Use tree depth (based on nesting position) instead of AI's levelType
     const levelName = levels.find(l => l.depth === treeDepth)?.name || 
-      aiItem.levelType.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+      aiItem.levelType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     
     const id = String(itemId++);
 
