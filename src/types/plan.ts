@@ -57,8 +57,6 @@ export interface PlanItemIssue {
   message: string;
 }
 
-export type ProcessingPath = 'direct' | 'optimizer' | null;
-
 export interface OrgProfile {
   organizationName: string;
   industry: string;
@@ -72,7 +70,6 @@ export interface PlanState {
   levels: PlanLevel[];
   items: PlanItem[];
   personMappings: PersonMapping[];
-  processingPath: ProcessingPath;
   rawText: string;
   orgProfile?: OrgProfile;
 }
