@@ -395,64 +395,79 @@ export function PlanOptimizerStep({
     orphans: items.filter((i) => i.issues.some((is) => is.type === 'orphan')).length,
   };
 
+  const getCompletionColor = (pct: number) => {
+    if (pct < 0.5) return { text: 'text-destructive', border: 'border-destructive/50' };
+    if (pct < 0.75) return { text: 'text-warning', border: 'border-warning/50' };
+    return { text: 'text-success', border: 'border-success/50' };
+  };
+
+  const total = items.length || 1;
+  const ownerColor = getCompletionColor((total - issueStats.missingOwner) / total);
+  const datesColor = getCompletionColor((total - issueStats.missingDates) / total);
+  const metricsColor = getCompletionColor(itemsWithMetrics / total);
+  const orphansColor = getCompletionColor((total - issueStats.orphans) / total);
+
+  const metricLabel = activeFilter === 'has-metric' ? 'With Metrics' : activeFilter === 'missing-metric' ? 'Missing Metrics' : 'With Metrics';
+
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
       {/* Stats Bar */}
       <div className="grid grid-cols-5 gap-4">
+        {/* Total Items — always neutral */}
         <Card
           className={`cursor-pointer transition-all hover:shadow-md ${!activeFilter ? 'ring-2 ring-primary' : ''}`}
           onClick={() => setActiveFilter(null)}
         >
           <CardContent className="p-4">
-            <div className="text-2xl font-bold text-foreground">{items.length}</div>
+            <div className="text-2xl font-bold text-muted-foreground">{items.length}</div>
             <div className="text-sm text-muted-foreground">Total Items</div>
           </CardContent>
         </Card>
+
+        {/* Missing Owners */}
         <Card
-          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'missing-owner' ? 'ring-2 ring-primary' : ''} ${issueStats.missingOwner > 0 ? 'border-destructive/50' : ''}`}
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'missing-owner' ? 'ring-2 ring-primary' : ''} ${ownerColor.border}`}
           onClick={() => handleFilterClick('missing-owner')}
         >
           <CardContent className="p-4">
-            <div className={`text-2xl font-bold ${issueStats.missingOwner > 0 ? 'text-destructive' : 'text-success'}`}>
-              {issueStats.missingOwner}
-            </div>
+            <div className={`text-2xl font-bold ${ownerColor.text}`}>{issueStats.missingOwner}</div>
             <div className="text-sm text-muted-foreground">Missing Owners</div>
           </CardContent>
         </Card>
+
+        {/* Missing Dates */}
         <Card
-          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'missing-dates' ? 'ring-2 ring-primary' : ''} ${issueStats.missingDates > 0 ? 'border-warning/50' : ''}`}
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'missing-dates' ? 'ring-2 ring-primary' : ''} ${datesColor.border}`}
           onClick={() => handleFilterClick('missing-dates')}
         >
           <CardContent className="p-4">
-            <div className={`text-2xl font-bold ${issueStats.missingDates > 0 ? 'text-warning' : 'text-success'}`}>
-              {issueStats.missingDates}
-            </div>
+            <div className={`text-2xl font-bold ${datesColor.text}`}>{issueStats.missingDates}</div>
             <div className="text-sm text-muted-foreground">Missing Dates</div>
           </CardContent>
         </Card>
+
+        {/* With Metrics */}
         <Card
-          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'orphan' ? 'ring-2 ring-primary' : ''} ${issueStats.orphans > 0 ? 'border-info/50' : ''}`}
-          onClick={() => handleFilterClick('orphan')}
-        >
-          <CardContent className="p-4">
-            <div className={`text-2xl font-bold ${issueStats.orphans > 0 ? 'text-info' : 'text-success'}`}>
-              {issueStats.orphans}
-            </div>
-            <div className="text-sm text-muted-foreground">Orphan Items</div>
-          </CardContent>
-        </Card>
-        <Card
-          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'has-metric' || activeFilter === 'missing-metric' ? 'ring-2 ring-primary' : ''}`}
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'has-metric' || activeFilter === 'missing-metric' ? 'ring-2 ring-primary' : ''} ${metricsColor.border}`}
           onClick={() => handleFilterClick(activeFilter === 'has-metric' ? 'missing-metric' : activeFilter === 'missing-metric' ? null : 'has-metric')}
         >
           <CardContent className="p-4">
             <div className="flex items-center gap-1">
               <Target className="h-4 w-4 text-primary" />
-              <span className="text-2xl font-bold text-foreground">{itemsWithMetrics}/{items.length}</span>
+              <span className={`text-2xl font-bold ${metricsColor.text}`}>{itemsWithMetrics}/{items.length}</span>
             </div>
-            <div className="text-sm text-muted-foreground">
-              {activeFilter === 'has-metric' ? 'With Metrics (click: missing)' : activeFilter === 'missing-metric' ? 'Missing Metrics (click: clear)' : 'Items with Metrics'}
-            </div>
+            <div className="text-sm text-muted-foreground">{metricLabel}</div>
+          </CardContent>
+        </Card>
+
+        {/* Orphan Items */}
+        <Card
+          className={`cursor-pointer transition-all hover:shadow-md ${activeFilter === 'orphan' ? 'ring-2 ring-primary' : ''} ${orphansColor.border}`}
+          onClick={() => handleFilterClick('orphan')}
+        >
+          <CardContent className="p-4">
+            <div className={`text-2xl font-bold ${orphansColor.text}`}>{issueStats.orphans}</div>
+            <div className="text-sm text-muted-foreground">Orphan Items</div>
           </CardContent>
         </Card>
       </div>
