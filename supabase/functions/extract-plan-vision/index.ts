@@ -289,7 +289,7 @@ const extractPlanItemsSchema = {
         type: "object",
         properties: {
           name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
-          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"], description: "The hierarchy level type" },
+          levelType: { type: "string", description: "A label for this item's hierarchy level using the document's actual terminology (e.g., 'goal_area', 'key_priority', 'focus_area', 'strategy'). Items at the same hierarchy depth should use the same levelType string." },
           description: { type: "string", description: "Brief description adding context (optional)" },
           owner: { type: "string", description: "Person, role, or department responsible (if visible)" },
           metricTarget: { type: "string", description: "Target value for KPIs (e.g., '10%', '500', '$2M')" },
@@ -417,6 +417,47 @@ function normalizeItems(items: unknown[]): unknown[] {
     
     return itemObj;
   }).filter(item => item !== null);
+}
+
+// Deduplicate summary-page items: if a short-named root item with no children
+// is a substring match of another root item that HAS children, remove the short one.
+function deduplicateSummaryItems(items: unknown[]): unknown[] {
+  const typed = items as Array<{ name?: string; children?: unknown[]; [key: string]: unknown }>;
+  
+  const toRemove = new Set<number>();
+  
+  for (let i = 0; i < typed.length; i++) {
+    const a = typed[i];
+    if (!a.name) continue;
+    const aChildren = Array.isArray(a.children) ? a.children.length : 0;
+    
+    for (let j = 0; j < typed.length; j++) {
+      if (i === j) continue;
+      const b = typed[j];
+      if (!b.name) continue;
+      const bChildren = Array.isArray(b.children) ? b.children.length : 0;
+      
+      const aLower = a.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      const bLower = b.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      
+      // Check if one name contains the other (fuzzy substring match)
+      const isSubstring = bLower.includes(aLower) || aLower.includes(bLower);
+      if (!isSubstring) continue;
+      
+      // Remove the one with no children in favor of the one with children
+      if (aChildren === 0 && bChildren > 0) {
+        console.log(`Dedup: removing "${a.name}" (no children) — matched by "${b.name}" (${bChildren} children)`);
+        toRemove.add(i);
+        break;
+      }
+    }
+  }
+  
+  if (toRemove.size > 0) {
+    console.log(`Deduplication removed ${toRemove.size} summary-only items`);
+    return typed.filter((_, idx) => !toRemove.has(idx));
+  }
+  return items;
 }
 
 serve(async (req) => {
@@ -561,6 +602,11 @@ Extract all strategic plan items with their proper hierarchy.`
     
     // Normalize and clean the response
     extractedData = normalizeResponse(extractedData);
+    
+    // Deduplicate summary/ghost items
+    if (Array.isArray(extractedData.items)) {
+      extractedData.items = deduplicateSummaryItems(extractedData.items);
+    }
     
     console.log(`Vision AI extracted ${extractedData.items?.length || 0} top-level items`);
     if (extractedData.layoutInfo) {
