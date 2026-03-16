@@ -249,7 +249,7 @@ Before returning, verify:
 2. Are items properly NESTED with children arrays (not flat)?
 3. Did I detect the document's actual terminology for levels?
 4. For tables: Did I handle merged cells by filling down parent values?
-5. Root level items should be 3-8 strategic priorities, not 20+ flat items`;
+5. Root level items should match the document's actual top-level groupings. If the document has 7 goal areas each with numbered sub-items, you should have 7 root items with children — NOT 7 root items + 40 flat items at the same level.`;
 
 const extractPlanItemsSchema = {
   type: "object",

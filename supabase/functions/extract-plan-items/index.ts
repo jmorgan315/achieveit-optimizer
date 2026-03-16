@@ -123,6 +123,22 @@ Examples of level detection:
 
 Look for definition sections like "Terms definitions:", "Key terms:", "Glossary" that explain the document's terminology.
 
+=== SIMPLE HIERARCHIES ARE VALID ===
+
+Not every document has 4-5 levels. Many plans have just 2 levels:
+- A plan with 7 "Focus Areas" each containing numbered priorities = 2 levels
+- A plan with "Goals" and "Strategies" = 2 levels
+
+When you see a pattern like:
+  BOLD HEADING or SIDEBAR LABEL (e.g., "BUILD A UNIVERSAL PATH TO EARLY LEARNING")
+    1. First numbered item
+    2. Second numbered item
+    3. Third numbered item
+
+The heading is Level 1 (parent) and the numbered items are Level 2 (children).
+Do NOT flatten this into one level. The heading and its numbered items are DIFFERENT levels.
+Even if headings and numbered items could both be called "goals", they are at DIFFERENT hierarchy levels — the heading groups the numbered items beneath it.
+
 EXTRACT these types of items (trackable, actionable items at any level):
 - Top-level themes/priorities/pillars
 - Mid-level groupings/objectives/focus areas
