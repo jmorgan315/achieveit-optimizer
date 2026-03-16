@@ -676,6 +676,9 @@ serve(async (req) => {
       }
     }
 
+    // Post-extraction deduplication: remove summary-page duplicates
+    allItems = deduplicateSummaryItems(allItems);
+
     const totalExtracted = countAllItems(allItems);
     console.log(`Total extracted: ${allItems.length} top-level, ${totalExtracted} total items, ${finalDetectedLevels.length} levels, ~${totalBulletMarkers} bullet markers, from ${chunks.length} chunk(s)`);
 
