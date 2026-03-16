@@ -326,43 +326,17 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   ): AIExtractionResponse['items'] => {
     if (existing.length === 0) return newItems;
     
-    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-    const result = [...existing];
-    const resultNormalized = result.map(item => normalize(item.name));
+    const existingNames = new Set(existing.map(item => item.name.toLowerCase()));
     
-    for (const newItem of newItems) {
-      if (!newItem?.name) continue;
-      const newNorm = normalize(newItem.name);
-      const newHasChildren = newItem.children && newItem.children.length > 0;
-      
-      // Find fuzzy match index in existing results
-      const matchIdx = resultNormalized.findIndex(existingNorm => 
-        existingNorm === newNorm || 
-        existingNorm.includes(newNorm) || 
-        newNorm.includes(existingNorm)
-      );
-      
-      if (matchIdx === -1) {
-        // No match — add as new
-        result.push(newItem);
-        resultNormalized.push(newNorm);
-      } else {
-        const existingHasChildren = result[matchIdx].children && result[matchIdx].children!.length > 0;
-        
-        if (newHasChildren && !existingHasChildren) {
-          // New item is richer — replace the childless summary item
-          result[matchIdx] = newItem;
-          resultNormalized[matchIdx] = newNorm;
-        } else if (newHasChildren && existingHasChildren) {
-          // Both have children — keep both, they're likely distinct
-          result.push(newItem);
-          resultNormalized.push(newNorm);
-        }
-        // else: existing has children, new doesn't — drop new (correct)
-      }
-    }
+    const uniqueNewItems = newItems.filter(item => {
+      if (!item?.name) return false;
+      const nameLower = item.name.toLowerCase();
+      if (existingNames.has(nameLower)) return false;
+      existingNames.add(nameLower);
+      return true;
+    });
 
-    return result;
+    return [...existing, ...uniqueNewItems];
   };
 
   const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {

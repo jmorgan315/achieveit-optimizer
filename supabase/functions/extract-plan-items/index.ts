@@ -123,22 +123,6 @@ Examples of level detection:
 
 Look for definition sections like "Terms definitions:", "Key terms:", "Glossary" that explain the document's terminology.
 
-=== SIMPLE HIERARCHIES ARE VALID ===
-
-Not every document has 4-5 levels. Many plans have just 2 levels:
-- A plan with 7 "Focus Areas" each containing numbered priorities = 2 levels
-- A plan with "Goals" and "Strategies" = 2 levels
-
-When you see a pattern like:
-  BOLD HEADING or SIDEBAR LABEL (e.g., "BUILD A UNIVERSAL PATH TO EARLY LEARNING")
-    1. First numbered item
-    2. Second numbered item
-    3. Third numbered item
-
-The heading is Level 1 (parent) and the numbered items are Level 2 (children).
-Do NOT flatten this into one level. The heading and its numbered items are DIFFERENT levels.
-Even if headings and numbered items could both be called "goals", they are at DIFFERENT hierarchy levels — the heading groups the numbered items beneath it.
-
 EXTRACT these types of items (trackable, actionable items at any level):
 - Top-level themes/priorities/pillars
 - Mid-level groupings/objectives/focus areas
@@ -154,7 +138,6 @@ SKIP these (do NOT include as plan items):
 - Image captions, chart titles, infographic descriptions
 - Achievements from previous years (unless they set baselines)
 - General descriptions without actionable outcomes
-- Summary or overview pages that list plan themes/goals as short labels when those same themes appear later as full section headings with sub-items. Extract the FULL version (the section heading with its children), NOT the summary version. If you see the same theme name appear both as a standalone label on a summary page AND as a heading with items beneath it, use ONLY the heading version with its children.
 
 === TABULAR/MATRIX STRUCTURE HANDLING ===
 
@@ -600,47 +583,6 @@ function findItemByName(items: unknown[], name: string): { children?: unknown[];
   return null;
 }
 
-// Deduplicate summary-page items: if a short-named root item with no children
-// is a substring match of another root item that HAS children, remove the short one.
-function deduplicateSummaryItems(items: unknown[]): unknown[] {
-  const typed = items as Array<{ name?: string; children?: unknown[]; [key: string]: unknown }>;
-  
-  const toRemove = new Set<number>();
-  
-  for (let i = 0; i < typed.length; i++) {
-    const a = typed[i];
-    if (!a.name) continue;
-    const aChildren = Array.isArray(a.children) ? a.children.length : 0;
-    
-    for (let j = 0; j < typed.length; j++) {
-      if (i === j) continue;
-      const b = typed[j];
-      if (!b.name) continue;
-      const bChildren = Array.isArray(b.children) ? b.children.length : 0;
-      
-      const aLower = a.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-      const bLower = b.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-      
-      // Check if one name contains the other (fuzzy substring match)
-      const isSubstring = bLower.includes(aLower) || aLower.includes(bLower);
-      if (!isSubstring) continue;
-      
-      // Remove the one with no children in favor of the one with children
-      if (aChildren === 0 && bChildren > 0) {
-        console.log(`Dedup: removing "${a.name}" (no children) — matched by "${b.name}" (${bChildren} children)`);
-        toRemove.add(i);
-        break;
-      }
-    }
-  }
-  
-  if (toRemove.size > 0) {
-    console.log(`Deduplication removed ${toRemove.size} summary-only items`);
-    return typed.filter((_, idx) => !toRemove.has(idx));
-  }
-  return items;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -716,9 +658,6 @@ serve(async (req) => {
         }
       }
     }
-
-    // Post-extraction deduplication: remove summary-page duplicates
-    allItems = deduplicateSummaryItems(allItems);
 
     const totalExtracted = countAllItems(allItems);
     console.log(`Total extracted: ${allItems.length} top-level, ${totalExtracted} total items, ${finalDetectedLevels.length} levels, ~${totalBulletMarkers} bullet markers, from ${chunks.length} chunk(s)`);

@@ -168,16 +168,6 @@ For non-tabular documents, detect hierarchy from:
 - Bullet point nesting
 - Bold/styled text for section headers
 
-**SIMPLE 2-LEVEL STRUCTURES (CRITICAL):**
-Not every document has 4-5 levels. Many plans have just 2 levels. When you see:
-  BOLD HEADING or SIDEBAR LABEL (e.g., "BUILD A UNIVERSAL PATH TO EARLY LEARNING")
-    1. First numbered item
-    2. Second numbered item
-    3. Third numbered item
-
-The heading is Level 1 (parent) and the numbered items are Level 2 (children).
-Do NOT flatten this into one level. Even if both could be called "goals", they are DIFFERENT hierarchy levels — the heading groups the numbered items beneath it.
-
 === STEP 5: OUTPUT STRUCTURE ===
 
 Return items in PROPERLY NESTED JSON format.
@@ -240,7 +230,6 @@ Return items in PROPERLY NESTED JSON format.
 - Copyright notices, disclaimers
 - Decorative graphics
 - Definition sections (extract terms, not definitions)
-- Summary or overview pages that list plan themes/goals as short labels when those same themes appear later as full section headings with sub-items. Extract the FULL version (the section heading with its children), NOT the summary version.
 
 === VALIDATION CHECKLIST ===
 
@@ -249,7 +238,7 @@ Before returning, verify:
 2. Are items properly NESTED with children arrays (not flat)?
 3. Did I detect the document's actual terminology for levels?
 4. For tables: Did I handle merged cells by filling down parent values?
-5. Root level items should match the document's actual top-level groupings. If the document has 7 goal areas each with numbered sub-items, you should have 7 root items with children — NOT 7 root items + 40 flat items at the same level.`;
+5. Root level items should be 3-8 strategic priorities, not 20+ flat items`;
 
 const extractPlanItemsSchema = {
   type: "object",
@@ -289,7 +278,7 @@ const extractPlanItemsSchema = {
         type: "object",
         properties: {
           name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
-          levelType: { type: "string", description: "A label for this item's hierarchy level using the document's actual terminology (e.g., 'goal_area', 'key_priority', 'focus_area', 'strategy'). Items at the same hierarchy depth should use the same levelType string." },
+          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"], description: "The hierarchy level type" },
           description: { type: "string", description: "Brief description adding context (optional)" },
           owner: { type: "string", description: "Person, role, or department responsible (if visible)" },
           metricTarget: { type: "string", description: "Target value for KPIs (e.g., '10%', '500', '$2M')" },
@@ -417,47 +406,6 @@ function normalizeItems(items: unknown[]): unknown[] {
     
     return itemObj;
   }).filter(item => item !== null);
-}
-
-// Deduplicate summary-page items: if a short-named root item with no children
-// is a substring match of another root item that HAS children, remove the short one.
-function deduplicateSummaryItems(items: unknown[]): unknown[] {
-  const typed = items as Array<{ name?: string; children?: unknown[]; [key: string]: unknown }>;
-  
-  const toRemove = new Set<number>();
-  
-  for (let i = 0; i < typed.length; i++) {
-    const a = typed[i];
-    if (!a.name) continue;
-    const aChildren = Array.isArray(a.children) ? a.children.length : 0;
-    
-    for (let j = 0; j < typed.length; j++) {
-      if (i === j) continue;
-      const b = typed[j];
-      if (!b.name) continue;
-      const bChildren = Array.isArray(b.children) ? b.children.length : 0;
-      
-      const aLower = a.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-      const bLower = b.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-      
-      // Check if one name contains the other (fuzzy substring match)
-      const isSubstring = bLower.includes(aLower) || aLower.includes(bLower);
-      if (!isSubstring) continue;
-      
-      // Remove the one with no children in favor of the one with children
-      if (aChildren === 0 && bChildren > 0) {
-        console.log(`Dedup: removing "${a.name}" (no children) — matched by "${b.name}" (${bChildren} children)`);
-        toRemove.add(i);
-        break;
-      }
-    }
-  }
-  
-  if (toRemove.size > 0) {
-    console.log(`Deduplication removed ${toRemove.size} summary-only items`);
-    return typed.filter((_, idx) => !toRemove.has(idx));
-  }
-  return items;
 }
 
 serve(async (req) => {
@@ -602,11 +550,6 @@ Extract all strategic plan items with their proper hierarchy.`
     
     // Normalize and clean the response
     extractedData = normalizeResponse(extractedData);
-    
-    // Deduplicate summary/ghost items
-    if (Array.isArray(extractedData.items)) {
-      extractedData.items = deduplicateSummaryItems(extractedData.items);
-    }
     
     console.log(`Vision AI extracted ${extractedData.items?.length || 0} top-level items`);
     if (extractedData.layoutInfo) {
