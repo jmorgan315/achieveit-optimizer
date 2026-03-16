@@ -562,6 +562,11 @@ Extract all strategic plan items with their proper hierarchy.`
     // Normalize and clean the response
     extractedData = normalizeResponse(extractedData);
     
+    // Deduplicate summary/ghost items
+    if (Array.isArray(extractedData.items)) {
+      extractedData.items = deduplicateSummaryItems(extractedData.items);
+    }
+    
     console.log(`Vision AI extracted ${extractedData.items?.length || 0} top-level items`);
     if (extractedData.layoutInfo) {
       console.log(`Layout: ${extractedData.layoutInfo.orientation}, ${extractedData.layoutInfo.contentType}, ${extractedData.layoutInfo.columnCount || 0} columns`);
