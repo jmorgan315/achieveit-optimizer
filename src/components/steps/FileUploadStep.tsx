@@ -327,25 +327,42 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
     if (existing.length === 0) return newItems;
     
     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
-    const existingNormalized = existing.map(item => normalize(item.name));
+    const result = [...existing];
+    const resultNormalized = result.map(item => normalize(item.name));
     
-    const uniqueNewItems = newItems.filter(item => {
-      if (!item?.name) return false;
-      const newNorm = normalize(item.name);
+    for (const newItem of newItems) {
+      if (!newItem?.name) continue;
+      const newNorm = normalize(newItem.name);
+      const newHasChildren = newItem.children && newItem.children.length > 0;
       
-      // Check exact match OR fuzzy substring match against existing items
-      const isDuplicate = existingNormalized.some(existingNorm => 
+      // Find fuzzy match index in existing results
+      const matchIdx = resultNormalized.findIndex(existingNorm => 
         existingNorm === newNorm || 
         existingNorm.includes(newNorm) || 
         newNorm.includes(existingNorm)
       );
       
-      if (isDuplicate) return false;
-      existingNormalized.push(newNorm);
-      return true;
-    });
+      if (matchIdx === -1) {
+        // No match — add as new
+        result.push(newItem);
+        resultNormalized.push(newNorm);
+      } else {
+        const existingHasChildren = result[matchIdx].children && result[matchIdx].children!.length > 0;
+        
+        if (newHasChildren && !existingHasChildren) {
+          // New item is richer — replace the childless summary item
+          result[matchIdx] = newItem;
+          resultNormalized[matchIdx] = newNorm;
+        } else if (newHasChildren && existingHasChildren) {
+          // Both have children — keep both, they're likely distinct
+          result.push(newItem);
+          resultNormalized.push(newNorm);
+        }
+        // else: existing has children, new doesn't — drop new (correct)
+      }
+    }
 
-    return [...existing, ...uniqueNewItems];
+    return result;
   };
 
   const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
