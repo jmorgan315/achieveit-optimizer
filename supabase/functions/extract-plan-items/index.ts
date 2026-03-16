@@ -138,6 +138,7 @@ SKIP these (do NOT include as plan items):
 - Image captions, chart titles, infographic descriptions
 - Achievements from previous years (unless they set baselines)
 - General descriptions without actionable outcomes
+- Summary or overview pages that list plan themes/goals as short labels when those same themes appear later as full section headings with sub-items. Extract the FULL version (the section heading with its children), NOT the summary version. If you see the same theme name appear both as a standalone label on a summary page AND as a heading with items beneath it, use ONLY the heading version with its children.
 
 === TABULAR/MATRIX STRUCTURE HANDLING ===
 
