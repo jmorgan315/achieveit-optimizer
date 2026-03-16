@@ -240,6 +240,7 @@ Return items in PROPERLY NESTED JSON format.
 - Copyright notices, disclaimers
 - Decorative graphics
 - Definition sections (extract terms, not definitions)
+- Summary or overview pages that list plan themes/goals as short labels when those same themes appear later as full section headings with sub-items. Extract the FULL version (the section heading with its children), NOT the summary version.
 
 === VALIDATION CHECKLIST ===
 
