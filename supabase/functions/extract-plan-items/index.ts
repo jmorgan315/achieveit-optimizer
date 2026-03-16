@@ -600,6 +600,47 @@ function findItemByName(items: unknown[], name: string): { children?: unknown[];
   return null;
 }
 
+// Deduplicate summary-page items: if a short-named root item with no children
+// is a substring match of another root item that HAS children, remove the short one.
+function deduplicateSummaryItems(items: unknown[]): unknown[] {
+  const typed = items as Array<{ name?: string; children?: unknown[]; [key: string]: unknown }>;
+  
+  const toRemove = new Set<number>();
+  
+  for (let i = 0; i < typed.length; i++) {
+    const a = typed[i];
+    if (!a.name) continue;
+    const aChildren = Array.isArray(a.children) ? a.children.length : 0;
+    
+    for (let j = 0; j < typed.length; j++) {
+      if (i === j) continue;
+      const b = typed[j];
+      if (!b.name) continue;
+      const bChildren = Array.isArray(b.children) ? b.children.length : 0;
+      
+      const aLower = a.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      const bLower = b.name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+      
+      // Check if one name contains the other (fuzzy substring match)
+      const isSubstring = bLower.includes(aLower) || aLower.includes(bLower);
+      if (!isSubstring) continue;
+      
+      // Remove the one with no children in favor of the one with children
+      if (aChildren === 0 && bChildren > 0) {
+        console.log(`Dedup: removing "${a.name}" (no children) — matched by "${b.name}" (${bChildren} children)`);
+        toRemove.add(i);
+        break;
+      }
+    }
+  }
+  
+  if (toRemove.size > 0) {
+    console.log(`Deduplication removed ${toRemove.size} summary-only items`);
+    return typed.filter((_, idx) => !toRemove.has(idx));
+  }
+  return items;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
