@@ -326,13 +326,22 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
   ): AIExtractionResponse['items'] => {
     if (existing.length === 0) return newItems;
     
-    const existingNames = new Set(existing.map(item => item.name.toLowerCase()));
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    const existingNormalized = existing.map(item => normalize(item.name));
     
     const uniqueNewItems = newItems.filter(item => {
       if (!item?.name) return false;
-      const nameLower = item.name.toLowerCase();
-      if (existingNames.has(nameLower)) return false;
-      existingNames.add(nameLower);
+      const newNorm = normalize(item.name);
+      
+      // Check exact match OR fuzzy substring match against existing items
+      const isDuplicate = existingNormalized.some(existingNorm => 
+        existingNorm === newNorm || 
+        existingNorm.includes(newNorm) || 
+        newNorm.includes(existingNorm)
+      );
+      
+      if (isDuplicate) return false;
+      existingNormalized.push(newNorm);
       return true;
     });
 
