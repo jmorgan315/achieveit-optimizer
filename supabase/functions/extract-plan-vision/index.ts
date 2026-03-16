@@ -289,7 +289,7 @@ const extractPlanItemsSchema = {
         type: "object",
         properties: {
           name: { type: "string", description: "Concise name for the plan item (max 100 chars)" },
-          levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"], description: "The hierarchy level type" },
+          levelType: { type: "string", description: "A label for this item's hierarchy level using the document's actual terminology (e.g., 'goal_area', 'key_priority', 'focus_area', 'strategy'). Items at the same hierarchy depth should use the same levelType string." },
           description: { type: "string", description: "Brief description adding context (optional)" },
           owner: { type: "string", description: "Person, role, or department responsible (if visible)" },
           metricTarget: { type: "string", description: "Target value for KPIs (e.g., '10%', '500', '$2M')" },
