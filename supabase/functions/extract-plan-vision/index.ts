@@ -168,6 +168,16 @@ For non-tabular documents, detect hierarchy from:
 - Bullet point nesting
 - Bold/styled text for section headers
 
+**SIMPLE 2-LEVEL STRUCTURES (CRITICAL):**
+Not every document has 4-5 levels. Many plans have just 2 levels. When you see:
+  BOLD HEADING or SIDEBAR LABEL (e.g., "BUILD A UNIVERSAL PATH TO EARLY LEARNING")
+    1. First numbered item
+    2. Second numbered item
+    3. Third numbered item
+
+The heading is Level 1 (parent) and the numbered items are Level 2 (children).
+Do NOT flatten this into one level. Even if both could be called "goals", they are DIFFERENT hierarchy levels — the heading groups the numbered items beneath it.
+
 === STEP 5: OUTPUT STRUCTURE ===
 
 Return items in PROPERLY NESTED JSON format.
@@ -230,6 +240,7 @@ Return items in PROPERLY NESTED JSON format.
 - Copyright notices, disclaimers
 - Decorative graphics
 - Definition sections (extract terms, not definitions)
+- Summary or overview pages that list plan themes/goals as short labels when those same themes appear later as full section headings with sub-items. Extract the FULL version (the section heading with its children), NOT the summary version.
 
 === VALIDATION CHECKLIST ===
 
@@ -238,7 +249,7 @@ Before returning, verify:
 2. Are items properly NESTED with children arrays (not flat)?
 3. Did I detect the document's actual terminology for levels?
 4. For tables: Did I handle merged cells by filling down parent values?
-5. Root level items should be 3-8 strategic priorities, not 20+ flat items`;
+5. Root level items should match the document's actual top-level groupings. If the document has 7 goal areas each with numbered sub-items, you should have 7 root items with children — NOT 7 root items + 40 flat items at the same level.`;
 
 const extractPlanItemsSchema = {
   type: "object",
