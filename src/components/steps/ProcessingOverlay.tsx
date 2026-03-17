@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, Eye, FileText, CheckCircle2, ChevronDown, Clock, Lightbulb, BarChart3, Sparkles, Info } from 'lucide-react';
+import { Brain, Eye, FileText, CheckCircle2, ChevronDown, Clock, Lightbulb, BarChart3, Sparkles, Info, GitBranch, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type ProcessingPhase = 'upload' | 'analysis' | 'verification' | 'vision';
