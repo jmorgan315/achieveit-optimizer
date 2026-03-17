@@ -169,8 +169,8 @@ export function ProcessingOverlay({
             {phases.map((p, idx) => {
               const config = PHASE_CONFIG[p];
               const Icon = config.icon;
-              const isActive = idx === currentPhaseIndex;
-              const isDone = idx < currentPhaseIndex;
+              const isActive = idx === effectivePhaseIndex;
+              const isDone = idx < effectivePhaseIndex;
               return (
                 <div key={p} className="flex items-center flex-1">
                   <div className={cn(
