@@ -51,6 +51,7 @@ interface PlanOptimizerStepProps {
   items: PlanItem[];
   levels: PlanLevel[];
   orgProfile?: OrgProfile;
+  sessionId?: string;
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
