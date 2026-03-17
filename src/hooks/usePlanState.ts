@@ -275,6 +275,7 @@ export function usePlanState() {
     setRawText,
     setItems,
     setOrgProfile,
+    setSessionId,
     processText,
     updatePersonMapping,
     applyPersonMappingsToItems,
