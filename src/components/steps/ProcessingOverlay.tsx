@@ -119,8 +119,12 @@ export function ProcessingOverlay({
     return () => clearInterval(interval);
   }, []);
 
-  const phases = isVisionNeeded ? PHASE_ORDER : PHASE_ORDER.filter(p => p !== 'vision');
+  const phases = isVisionNeeded 
+    ? PHASE_ORDER.filter(p => p !== 'audit' && p !== 'validate') // Vision path: upload → vision
+    : PHASE_ORDER; // Text path: upload → analysis → audit → validate
   const currentPhaseIndex = phases.indexOf(phase);
+  // Handle phases not in the filtered list (verification, vision in non-vision mode, etc.)
+  const effectivePhaseIndex = currentPhaseIndex >= 0 ? currentPhaseIndex : phases.length - 1;
   const currentTip = tips[currentTipIndex];
   const TipIcon = currentTip?.icon || Lightbulb;
 
