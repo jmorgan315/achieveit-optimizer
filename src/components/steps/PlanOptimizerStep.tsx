@@ -78,6 +78,7 @@ export function PlanOptimizerStep({
   items,
   levels,
   orgProfile,
+  sessionId,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
