@@ -76,6 +76,7 @@ serve(async (req) => {
 
     const body = await req.json();
     const { name, description, orgProfile, sessionId: incomingSessionId } = body;
+    console.log('[suggest-metrics] Received sessionId:', incomingSessionId);
 
     if (!name || typeof name !== 'string') {
       return createSafeError(400, 'Item name is required and must be a string.');
