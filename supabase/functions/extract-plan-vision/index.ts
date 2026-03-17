@@ -428,6 +428,7 @@ serve(async (req) => {
     }
 
     const sessionId = await ensureSession(incomingSessionId);
+    console.log('[extract-plan-vision] Resolved sessionId:', sessionId);
 
     console.log(`Processing ${pageImages.length} page images with vision AI`);
 

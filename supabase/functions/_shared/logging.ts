@@ -96,11 +96,29 @@ export async function updateSession(sessionId: string, updates: SessionUpdate): 
   }
 }
 
-/** Ensure a session exists — create if it doesn't. Returns sessionId. */
+/** Ensure a session exists — upsert if needed. Returns sessionId. */
 export async function ensureSession(sessionId: string | undefined): Promise<string> {
   const id = sessionId || crypto.randomUUID();
-  if (!sessionId) {
-    await createSession({ id });
+  try {
+    const client = getClient();
+    // Upsert: if the row already exists (created by frontend), this is a no-op.
+    // If it doesn't exist (safety net), it gets created.
+    const { error } = await client.from("processing_sessions").upsert(
+      { id, status: "in_progress" },
+      { onConflict: "id", ignoreDuplicates: true }
+    );
+    if (error) {
+      console.error("[Logging] ensureSession upsert failed:", {
+        error: error.message,
+        code: error.code,
+        details: error.details,
+        sessionId: id,
+      });
+    } else {
+      console.log(`[Logging] ensureSession OK: ${id} (provided=${!!sessionId})`);
+    }
+  } catch (e) {
+    console.error("[Logging] ensureSession exception:", e);
   }
   return id;
 }

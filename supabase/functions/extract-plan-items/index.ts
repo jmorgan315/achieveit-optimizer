@@ -644,6 +644,7 @@ serve(async (req) => {
     }
 
     const sessionId = await ensureSession(incomingSessionId);
+    console.log('[extract-plan-items] Resolved sessionId:', sessionId);
 
     const totalBulletMarkers = countBulletMarkers(trimmedText);
     const chunks = splitDocumentIntoChunks(trimmedText, CHUNK_SIZE);

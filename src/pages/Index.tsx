@@ -99,8 +99,9 @@ const Index = () => {
     supabase.from('processing_sessions').update({
       org_name: profile.organizationName,
       org_industry: profile.industry,
-    }).eq('id', sid).then(({ error }) => {
-      if (error) console.error('Failed to update session with org info:', error);
+    }).eq('id', sid).then(({ data, error, count }) => {
+      if (error) console.error('[Session] Failed to update session with org info:', error);
+      else console.log('[Session] Org info updated for session:', sid, '| matched rows:', count ?? 'unknown');
     });
     setCurrentStep(1);
   };

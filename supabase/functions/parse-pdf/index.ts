@@ -103,7 +103,9 @@ serve(async (req) => {
       return createSafeError(400, 'Unsupported content type. Use multipart/form-data, application/pdf, or application/json with base64 PDF.');
     }
 
+    console.log('[parse-pdf] Received sessionId:', incomingSessionId);
     const sessionId = await ensureSession(incomingSessionId);
+    console.log('[parse-pdf] Resolved sessionId:', sessionId);
     const startTime = Date.now();
 
     const { text, pageCount } = await extractTextFromPdf(pdfBuffer);

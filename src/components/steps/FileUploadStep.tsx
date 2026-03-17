@@ -286,6 +286,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         const maxRetries = 3;
 
         while (retries <= maxRetries) {
+          console.log(`[FileUpload] Calling extract-plan-vision batch ${batchIndex + 1}/${batches.length} with sessionId:`, sessionId);
           const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-vision`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
