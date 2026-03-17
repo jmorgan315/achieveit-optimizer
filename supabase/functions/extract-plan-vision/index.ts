@@ -407,6 +407,7 @@ serve(async (req) => {
 
     const body = await req.json();
     const { pageImages, previousContext, organizationName, industry, documentHints, sessionId: incomingSessionId } = body;
+    console.log('[extract-plan-vision] Received sessionId:', incomingSessionId);
 
     if (!pageImages || !Array.isArray(pageImages) || pageImages.length === 0) {
       return createSafeError(400, "Page images are required as a non-empty array.");
