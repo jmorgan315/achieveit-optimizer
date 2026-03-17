@@ -265,6 +265,7 @@ export function usePlanState() {
       personMappings: [],
       rawText: '',
       orgProfile: undefined,
+      sessionId: undefined,
     });
   }, []);
 
