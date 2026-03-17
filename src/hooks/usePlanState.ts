@@ -35,6 +35,10 @@ export function usePlanState() {
     setState((prev) => ({ ...prev, orgProfile }));
   }, []);
 
+  const setSessionId = useCallback((sessionId: string | undefined) => {
+    setState((prev) => ({ ...prev, sessionId }));
+  }, []);
+
   const processText = useCallback(() => {
     const { items, personMappings } = parseTextToPlanItems(state.rawText, state.levels);
     setState((prev) => ({ ...prev, items, personMappings }));
