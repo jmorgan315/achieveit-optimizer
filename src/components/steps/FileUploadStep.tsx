@@ -616,12 +616,12 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         setFileContent(extractedText);
         setIsProcessing(false);
 
-        // AI text analysis
+        // AI pipeline (3-agent extraction via process-plan)
         const textResult = await extractPlanItemsWithAI(extractedText);
 
         if (!textResult || textResult.items.length === 0) {
-          console.log('Text AI found 0 items, falling back to Vision AI with level hints');
-          addMessage('Text analysis found no items, trying visual analysis...');
+          console.log('Pipeline found 0 items, falling back to Vision AI with level hints');
+          addMessage('Pipeline found no items, trying visual analysis...');
           const levelHints = textResult?.levels || undefined;
           const visionResult = await extractWithVisionAI(file, levelHints);
           if (visionResult) {
@@ -634,63 +634,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           return;
         }
 
-        // Verification
-        setPhaseProgress('verification', 0);
-        addMessage('Verifying extraction quality...');
-        const verification = verifyExtractionResult(textResult.items, textResult.levels, pageCount, extractedText.length);
-        setPhaseProgress('verification', 100);
-        
-        if (!verification.passed) {
-          console.log(`Text extraction verification failed: ${verification.reason}. Trying Vision AI...`);
-          addMessage(`Verification: ${verification.reason}. Trying visual analysis...`);
-          const visionResult = await extractWithVisionAI(file, textResult.levels);
-          if (visionResult) {
-            const visionVerification = verifyExtractionResult(visionResult.items, visionResult.levels, pageCount);
-            if (visionVerification.passed) {
-              setExtractedItems(visionResult.items);
-              setExtractedMappings(visionResult.personMappings);
-              setDetectedLevels(visionResult.levels);
-              setFileContent('__VISION_EXTRACTED__');
-              finalizeExtraction(visionResult.items, 'vision');
-              return;
-            } else {
-              console.log(`Vision verification also failed: ${visionVerification.reason}. Using best result.`);
-              const textTotal = countAllItems(textResult.items);
-              const visionTotal = countAllItems(visionResult.items);
-              
-              if (visionTotal > textTotal) {
-                setExtractedItems(visionResult.items);
-                setExtractedMappings(visionResult.personMappings);
-                setDetectedLevels(visionResult.levels);
-                setFileContent('__VISION_EXTRACTED__');
-                finalizeExtraction(visionResult.items, 'vision');
-              } else {
-                setExtractedItems(textResult.items);
-                setExtractedMappings(textResult.personMappings);
-                setDetectedLevels(textResult.levels);
-                finalizeExtraction(textResult.items, 'text');
-              }
-              toast({
-                title: "Extraction may be incomplete",
-                description: "We extracted what we could, but some items may be missing. Please review carefully.",
-                variant: "destructive",
-              });
-              return;
-            }
-          }
-          setExtractedItems(textResult.items);
-          setExtractedMappings(textResult.personMappings);
-          setDetectedLevels(textResult.levels);
-          finalizeExtraction(textResult.items, 'text');
-          toast({
-            title: "Extraction may be incomplete",
-            description: verification.reason + ". Please review carefully.",
-            variant: "destructive",
-          });
-          return;
-        }
-
-        addMessage('Verification passed — extraction complete');
+        addMessage('Multi-agent pipeline complete');
         setExtractedItems(textResult.items);
         setExtractedMappings(textResult.personMappings);
         setDetectedLevels(textResult.levels);
