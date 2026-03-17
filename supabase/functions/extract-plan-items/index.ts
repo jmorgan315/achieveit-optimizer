@@ -97,6 +97,10 @@ function splitDocumentIntoChunks(text: string, maxChunkSize: number): string[] {
 
 const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
 
+=== VERBATIM TEXT EXTRACTION (CRITICAL) ===
+
+For the 'name' field of each item, use the EXACT text from the document. Do not rephrase, summarize, shorten, or 'clean up' the text. Copy it character-for-character. If an item says 'Increase year-over-year revenue growth by 15% through strategic market expansion', that entire string is the name — do not shorten it to 'Increase revenue growth'. The only acceptable modification is removing leading bullet characters or numbering (e.g., "1." or "•").
+
 === COMPLETENESS IS CRITICAL ===
 
 You MUST extract EVERY SINGLE bullet point, numbered item, goal, strategy, action, KPI, and metric in the document. Do NOT summarize, skip, or combine items you consider minor or redundant. If the document has 15 bullets under a heading, your output MUST have 15 children under that parent. Count the bullets in each section and ensure your output has AT LEAST that many children.

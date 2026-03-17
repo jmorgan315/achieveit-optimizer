@@ -50,6 +50,8 @@ export interface PlanItem {
   parentId: string | null;
   children: PlanItem[];
   issues: PlanItemIssue[];
+  confidence?: number;
+  corrections?: string[];
 }
 
 export interface PlanItemIssue {

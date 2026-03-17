@@ -19,12 +19,14 @@ interface ProcessingOverlayProps {
 
 const PHASE_CONFIG: Record<ProcessingPhase, { label: string; icon: typeof Brain; description: string }> = {
   upload: { label: 'Upload & Parse', icon: FileText, description: 'Extracting text from your document...' },
-  analysis: { label: 'AI Analysis', icon: Brain, description: 'AI is reading and structuring your plan...' },
+  analysis: { label: 'AI Extraction', icon: Brain, description: 'Step 1/3: Extracting plan items...' },
   verification: { label: 'Verification', icon: CheckCircle2, description: 'Verifying extraction quality...' },
   vision: { label: 'Vision AI', icon: Eye, description: 'Visual analysis of document pages...' },
+  audit: { label: 'Completeness Audit', icon: Shield, description: 'Step 2/3: Cross-checking for missing items...' },
+  validate: { label: 'Hierarchy Check', icon: GitBranch, description: 'Step 3/3: Validating structure and fixing issues...' },
 };
 
-const PHASE_ORDER: ProcessingPhase[] = ['upload', 'analysis', 'verification', 'vision'];
+const PHASE_ORDER: ProcessingPhase[] = ['upload', 'analysis', 'audit', 'validate'];
 
 // Contextual tips organized by category
 const GENERAL_TIPS = [
