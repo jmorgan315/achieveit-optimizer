@@ -221,13 +221,19 @@ Return items in PROPERLY NESTED JSON format.
 - Target values and metrics (e.g., "10%", "500", "$2M")
 - Dates and deadlines
 
-✗ SKIP:
+✗ SKIP (DO NOT EXTRACT THESE):
 - Page numbers, headers, footers
-- Table of contents entries
+- Table of contents entries that duplicate actual plan items elsewhere in the document
 - Title pages, cover pages
 - Copyright notices, disclaimers
 - Decorative graphics
 - Definition sections (extract terms, not definitions)
+- Core values, guiding principles, or philosophical statements (these are guideposts, not trackable plan items)
+- Vision statements or aspirational narratives
+- Statistical indicators or measurement summary tables (unless explicitly tied as sub-items to a goal)
+- Section introductions or contextual background text
+
+If an item does not have a clear parent-child relationship within the plan hierarchy, it is likely not a plan item.
 
 === VALIDATION CHECKLIST ===
 
