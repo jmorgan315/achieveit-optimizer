@@ -503,7 +503,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           console.log('Text extraction returned empty/minimal content, falling back to Vision AI');
           addMessage('No readable text found, switching to Vision AI...');
           setIsProcessing(false);
-          const visionResult = await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionPipeline(file);
           if (visionResult) {
             setExtractedItems(visionResult.items);
             setExtractedMappings(visionResult.personMappings);
