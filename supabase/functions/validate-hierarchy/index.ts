@@ -135,8 +135,8 @@ serve(async (req) => {
     const body = await req.json();
     const { sourceText, extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry } = body;
 
-    if (!sourceText || !extractedItems) {
-      return new Response(JSON.stringify({ success: false, error: "sourceText and extractedItems required" }), {
+    if (!extractedItems) {
+      return new Response(JSON.stringify({ success: false, error: "extractedItems required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
