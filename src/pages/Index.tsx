@@ -85,11 +85,13 @@ const Index = () => {
 
   const handleOrgProfileComplete = (profile: OrgProfile) => {
     setOrgProfile(profile);
+    ensureSessionId();
     setCurrentStep(1);
   };
 
   const handleOrgProfileSkip = () => {
     setOrgProfile(undefined);
+    ensureSessionId();
     setCurrentStep(1);
   };
 
