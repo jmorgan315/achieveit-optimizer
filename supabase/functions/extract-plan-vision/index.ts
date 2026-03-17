@@ -1,20 +1,18 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { logApiCall, ensureSession, extractTokenUsage, truncateImagePayload } from "../_shared/logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-// Validation constants
 const MAX_IMAGES = 20;
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB per image base64
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
-// Provider retry constants
 const ANTHROPIC_MAX_RETRIES = 4;
 const ANTHROPIC_BASE_DELAY_MS = 3000;
 const RETRYABLE_ANTHROPIC_STATUSES = new Set([429, 500, 502, 503, 529]);
 
-// Safe error helper
 function createSafeError(
   status: number,
   publicMessage: string,
@@ -260,15 +258,15 @@ const extractPlanItemsSchema = {
         columnHierarchy: { 
           type: "array", 
           items: { type: "string" },
-          description: "Table column headers in LEFT-TO-RIGHT order representing hierarchy (e.g., ['Pillar', 'Objective', 'Outcome KPI', 'Strategy', 'Strategy KPI'])"
+          description: "Table column headers in LEFT-TO-RIGHT order representing hierarchy"
         },
-        level1Term: { type: "string", description: "Document's actual term for Level 1 (e.g., 'Pillar', 'Theme', 'Strategic Priority')" },
-        level2Term: { type: "string", description: "Document's actual term for Level 2 (e.g., 'Objective', 'Focus Area')" },
-        level3Term: { type: "string", description: "Document's actual term for Level 3 (e.g., 'Outcome KPI', 'Goal')" },
-        level4Term: { type: "string", description: "Document's actual term for Level 4 (e.g., 'Strategy', 'Initiative')" },
-        level5Term: { type: "string", description: "Document's actual term for Level 5 (e.g., 'Strategy KPI', 'Metric', 'Tollgate')" },
-        level6Term: { type: "string", description: "Document's actual term for Level 6 (if applicable)" },
-        level7Term: { type: "string", description: "Document's actual term for Level 7 (if applicable)" }
+        level1Term: { type: "string" },
+        level2Term: { type: "string" },
+        level3Term: { type: "string" },
+        level4Term: { type: "string" },
+        level5Term: { type: "string" },
+        level6Term: { type: "string" },
+        level7Term: { type: "string" }
       }
     },
     items: {
@@ -281,13 +279,13 @@ const extractPlanItemsSchema = {
           levelType: { type: "string", enum: ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"], description: "The hierarchy level type" },
           description: { type: "string", description: "Brief description adding context (optional)" },
           owner: { type: "string", description: "Person, role, or department responsible (if visible)" },
-          metricTarget: { type: "string", description: "Target value for KPIs (e.g., '10%', '500', '$2M')" },
+          metricTarget: { type: "string", description: "Target value for KPIs" },
           metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage", "None"], description: "Unit type for metrics" },
           startDate: { type: "string", description: "Start date in YYYY-MM-DD format (if visible)" },
           dueDate: { type: "string", description: "Due/target date in YYYY-MM-DD format (if visible)" },
           children: { 
             type: "array", 
-            description: "Nested child items - MUST be objects, not strings",
+            description: "Nested child items",
             items: { $ref: "#/properties/items/items" } 
           }
         },
@@ -301,7 +299,7 @@ const extractPlanItemsSchema = {
         type: "object",
         properties: {
           depth: { type: "number", description: "Hierarchy depth (1 = top level)" },
-          name: { type: "string", description: "Actual term used in document (e.g., 'Pillar', not 'Level 1')" }
+          name: { type: "string", description: "Actual term used in document" }
         },
         required: ["depth", "name"]
       }
@@ -310,7 +308,6 @@ const extractPlanItemsSchema = {
   required: ["items", "detectedLevels", "documentTerminology"]
 };
 
-// Clean level name: replace underscores with spaces and apply Title Case
 function cleanLevelName(name: string): string {
   if (!name) return name;
   return name
@@ -319,13 +316,10 @@ function cleanLevelName(name: string): string {
     .trim();
 }
 
-// Clean and normalize the AI response
 function normalizeResponse(data: Record<string, unknown>): Record<string, unknown> {
-  // Clean up documentTerminology
   if (data.documentTerminology) {
     const terms = data.documentTerminology as Record<string, unknown>;
     
-    // Clean columnHierarchy - remove numeric prefixes like "6130Pillar" and apply title case
     if (Array.isArray(terms.columnHierarchy)) {
       terms.columnHierarchy = terms.columnHierarchy.map((term: string) => {
         if (typeof term === 'string') {
@@ -335,7 +329,6 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
       }).filter((term: string) => term && term.length > 0);
     }
     
-    // Clean level terms
     ['level1Term', 'level2Term', 'level3Term', 'level4Term', 'level5Term', 'level6Term', 'level7Term'].forEach(key => {
       if (typeof terms[key] === 'string') {
         terms[key] = cleanLevelName((terms[key] as string).replace(/^\d+/, '').trim());
@@ -343,7 +336,6 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
     });
   }
   
-  // Rebuild detectedLevels from documentTerminology if available
   const terms = data.documentTerminology as Record<string, unknown> | undefined;
   if (terms?.columnHierarchy && Array.isArray(terms.columnHierarchy) && terms.columnHierarchy.length > 0) {
     data.detectedLevels = (terms.columnHierarchy as string[]).map((name: string, idx: number) => ({
@@ -351,7 +343,6 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
       name: cleanLevelName(name)
     }));
   } else if (terms) {
-    // Build from level terms
     const levels: Array<{depth: number, name: string}> = [];
     if (terms.level1Term) levels.push({ depth: 1, name: cleanLevelName(terms.level1Term as string) });
     if (terms.level2Term) levels.push({ depth: 2, name: cleanLevelName(terms.level2Term as string) });
@@ -366,7 +357,6 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
     }
   }
   
-  // Normalize items - ensure children are objects, not strings
   if (Array.isArray(data.items)) {
     data.items = normalizeItems(data.items as unknown[]);
   }
@@ -374,19 +364,16 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
   return data;
 }
 
-// Recursively normalize items
 function normalizeItems(items: unknown[]): unknown[] {
   return items.map(item => {
     if (!item || typeof item !== 'object') return null;
     
     const itemObj = item as Record<string, unknown>;
     
-    // If children is an array of strings, convert to objects
     if (Array.isArray(itemObj.children)) {
       itemObj.children = itemObj.children
         .map((child: unknown) => {
           if (typeof child === 'string') {
-            // Convert string to object - try to guess levelType
             const parentType = itemObj.levelType as string;
             let childType = 'action_item';
             if (parentType === 'strategic_priority') childType = 'focus_area';
@@ -400,7 +387,6 @@ function normalizeItems(items: unknown[]): unknown[] {
         })
         .filter((child: unknown) => child !== null && child !== undefined);
       
-      // Recursively normalize children
       itemObj.children = normalizeItems(itemObj.children as unknown[]);
     }
     
@@ -420,9 +406,8 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { pageImages, previousContext, organizationName, industry, documentHints } = body;
+    const { pageImages, previousContext, organizationName, industry, documentHints, sessionId: incomingSessionId } = body;
 
-    // Validate pageImages
     if (!pageImages || !Array.isArray(pageImages) || pageImages.length === 0) {
       return createSafeError(400, "Page images are required as a non-empty array.");
     }
@@ -431,7 +416,6 @@ serve(async (req) => {
       return createSafeError(413, `Too many images. Maximum ${MAX_IMAGES} pages allowed per request.`);
     }
 
-    // Validate each image
     for (let i = 0; i < pageImages.length; i++) {
       const img = pageImages[i];
       if (typeof img !== "string") {
@@ -442,12 +426,12 @@ serve(async (req) => {
       }
     }
 
+    const sessionId = await ensureSession(incomingSessionId);
+
     console.log(`Processing ${pageImages.length} page images with vision AI`);
 
-    // Build content array with images
     const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
 
-    // Add context from previous pages if available
     if (previousContext) {
       content.push({
         type: "text",
@@ -455,7 +439,6 @@ serve(async (req) => {
       });
     }
 
-    // Add organization context if available
     let orgContextText = '';
     if (organizationName || industry || documentHints) {
       const parts: string[] = [];
@@ -479,7 +462,6 @@ IMPORTANT INSTRUCTIONS:
 Extract all strategic plan items with their proper hierarchy.`
     });
 
-    // Add each page image
     pageImages.forEach((base64Image: string) => {
       content.push({
         type: "image_url",
@@ -489,14 +471,12 @@ Extract all strategic plan items with their proper hierarchy.`
       });
     });
 
-    // Convert content array to Anthropic format
     const anthropicContent: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
     
     for (const item of content) {
       if (item.type === "text" && item.text) {
         anthropicContent.push({ type: "text", text: item.text });
       } else if (item.type === "image_url" && item.image_url) {
-        // Extract base64 data and media type from data URL
         const url = item.image_url.url;
         const match = url.match(/^data:(image\/[^;]+);base64,(.+)$/);
         if (match) {
@@ -512,7 +492,7 @@ Extract all strategic plan items with their proper hierarchy.`
       }
     }
 
-    const anthropicPayload = {
+    const anthropicPayload: Record<string, unknown> = {
       model: "claude-sonnet-4-20250514",
       max_tokens: 16384,
       system: VISION_EXTRACTION_PROMPT,
@@ -527,7 +507,9 @@ Extract all strategic plan items with their proper hierarchy.`
       tool_choice: { type: "tool", name: "extract_plan_items" }
     };
 
+    const startTime = Date.now();
     const response = await callAnthropicWithRetry(ANTHROPIC_API_KEY, anthropicPayload);
+    const durationMs = Date.now() - startTime;
 
     if (!response.ok) {
       if (response.status === 429) {
@@ -540,6 +522,24 @@ Extract all strategic plan items with their proper hierarchy.`
     }
 
     const aiResponse = await response.json();
+
+    // Log vision call with truncated image data
+    if (sessionId) {
+      const tokens = extractTokenUsage(aiResponse);
+      logApiCall({
+        session_id: sessionId,
+        edge_function: "extract-plan-vision",
+        step_label: `Vision Batch (${pageImages.length} pages)`,
+        model: "claude-sonnet-4-20250514",
+        request_payload: truncateImagePayload(anthropicPayload),
+        response_payload: aiResponse,
+        input_tokens: tokens.input_tokens,
+        output_tokens: tokens.output_tokens,
+        duration_ms: durationMs,
+        status: "success",
+      });
+    }
+
     const toolUse = aiResponse.content?.find((block: { type: string }) => block.type === "tool_use");
     
     if (!toolUse || toolUse.name !== "extract_plan_items") {
@@ -547,34 +547,36 @@ Extract all strategic plan items with their proper hierarchy.`
     }
 
     let extractedData = toolUse.input as Record<string, unknown>;
-    
-    // Normalize and clean the response
     extractedData = normalizeResponse(extractedData);
     
-    console.log(`Vision AI extracted ${extractedData.items?.length || 0} top-level items`);
+    console.log(`Vision AI extracted ${(extractedData.items as unknown[])?.length || 0} top-level items`);
     if (extractedData.layoutInfo) {
-      console.log(`Layout: ${extractedData.layoutInfo.orientation}, ${extractedData.layoutInfo.contentType}, ${extractedData.layoutInfo.columnCount || 0} columns`);
+      const li = extractedData.layoutInfo as Record<string, unknown>;
+      console.log(`Layout: ${li.orientation}, ${li.contentType}, ${li.columnCount || 0} columns`);
     }
-    if (extractedData.documentTerminology?.columnHierarchy) {
-      console.log(`Detected hierarchy: ${extractedData.documentTerminology.columnHierarchy.join(' → ')}`);
+    if (extractedData.documentTerminology) {
+      const dt = extractedData.documentTerminology as Record<string, unknown>;
+      if (Array.isArray(dt.columnHierarchy)) {
+        console.log(`Detected hierarchy: ${(dt.columnHierarchy as string[]).join(' → ')}`);
+      }
     }
 
-    // Build context summary for next batch
     let contextSummary = "";
-    if (extractedData.items?.length > 0) {
-      const topLevelNames = extractedData.items.slice(0, 5).map((item: { name: string }) => item.name);
+    if ((extractedData.items as unknown[])?.length > 0) {
+      const topLevelNames = (extractedData.items as Array<{ name: string }>).slice(0, 5).map((item) => item.name);
       contextSummary = `Previously found Level 1 items: ${topLevelNames.join(", ")}`;
       
       if (extractedData.documentTerminology) {
-        const terms = extractedData.documentTerminology;
-        const hierarchy = terms.columnHierarchy?.join(' → ') || 
+        const terms = extractedData.documentTerminology as Record<string, unknown>;
+        const hierarchy = (terms.columnHierarchy as string[])?.join(' → ') || 
           [terms.level1Term, terms.level2Term, terms.level3Term, terms.level4Term, terms.level5Term]
             .filter(Boolean).join(' → ');
         contextSummary += `\nDocument hierarchy: ${hierarchy}`;
       }
       
       if (extractedData.layoutInfo) {
-        contextSummary += `\nLayout: ${extractedData.layoutInfo.orientation} ${extractedData.layoutInfo.contentType}`;
+        const li = extractedData.layoutInfo as Record<string, unknown>;
+        contextSummary += `\nLayout: ${li.orientation} ${li.contentType}`;
       }
     }
 
@@ -582,7 +584,8 @@ Extract all strategic plan items with their proper hierarchy.`
       JSON.stringify({ 
         success: true, 
         data: extractedData,
-        contextSummary
+        contextSummary,
+        sessionId,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
