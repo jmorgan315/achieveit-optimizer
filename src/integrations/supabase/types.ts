@@ -14,7 +14,110 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      api_call_logs: {
+        Row: {
+          created_at: string
+          duration_ms: number | null
+          edge_function: string
+          error_message: string | null
+          id: string
+          input_tokens: number | null
+          model: string | null
+          output_tokens: number | null
+          request_payload: Json | null
+          response_payload: Json | null
+          session_id: string
+          status: string | null
+          step_label: string | null
+        }
+        Insert: {
+          created_at?: string
+          duration_ms?: number | null
+          edge_function: string
+          error_message?: string | null
+          id?: string
+          input_tokens?: number | null
+          model?: string | null
+          output_tokens?: number | null
+          request_payload?: Json | null
+          response_payload?: Json | null
+          session_id: string
+          status?: string | null
+          step_label?: string | null
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number | null
+          edge_function?: string
+          error_message?: string | null
+          id?: string
+          input_tokens?: number | null
+          model?: string | null
+          output_tokens?: number | null
+          request_payload?: Json | null
+          response_payload?: Json | null
+          session_id?: string
+          status?: string | null
+          step_label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "api_call_logs_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "processing_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      processing_sessions: {
+        Row: {
+          created_at: string
+          document_name: string | null
+          document_size_bytes: number | null
+          extraction_method: string | null
+          id: string
+          org_industry: string | null
+          org_name: string | null
+          status: string
+          total_api_calls: number
+          total_duration_ms: number
+          total_input_tokens: number
+          total_items_extracted: number | null
+          total_output_tokens: number
+        }
+        Insert: {
+          created_at?: string
+          document_name?: string | null
+          document_size_bytes?: number | null
+          extraction_method?: string | null
+          id?: string
+          org_industry?: string | null
+          org_name?: string | null
+          status?: string
+          total_api_calls?: number
+          total_duration_ms?: number
+          total_input_tokens?: number
+          total_items_extracted?: number | null
+          total_output_tokens?: number
+        }
+        Update: {
+          created_at?: string
+          document_name?: string | null
+          document_size_bytes?: number | null
+          extraction_method?: string | null
+          id?: string
+          org_industry?: string | null
+          org_name?: string | null
+          status?: string
+          total_api_calls?: number
+          total_duration_ms?: number
+          total_input_tokens?: number
+          total_items_extracted?: number | null
+          total_output_tokens?: number
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

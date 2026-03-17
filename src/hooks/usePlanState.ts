@@ -16,6 +16,7 @@ export function usePlanState() {
     personMappings: [],
     rawText: '',
     orgProfile: undefined,
+    sessionId: undefined,
   });
 
   const setLevels = useCallback((levels: PlanLevel[]) => {
@@ -32,6 +33,10 @@ export function usePlanState() {
 
   const setOrgProfile = useCallback((orgProfile: OrgProfile | undefined) => {
     setState((prev) => ({ ...prev, orgProfile }));
+  }, []);
+
+  const setSessionId = useCallback((sessionId: string | undefined) => {
+    setState((prev) => ({ ...prev, sessionId }));
   }, []);
 
   const processText = useCallback(() => {
@@ -260,6 +265,7 @@ export function usePlanState() {
       personMappings: [],
       rawText: '',
       orgProfile: undefined,
+      sessionId: undefined,
     });
   }, []);
 
@@ -269,6 +275,7 @@ export function usePlanState() {
     setRawText,
     setItems,
     setOrgProfile,
+    setSessionId,
     processText,
     updatePersonMapping,
     applyPersonMappingsToItems,

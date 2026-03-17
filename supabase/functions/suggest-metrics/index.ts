@@ -1,15 +1,14 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { logApiCall, ensureSession, extractTokenUsage } from "../_shared/logging.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Validation constants
 const MAX_NAME_LENGTH = 500;
 const MAX_DESC_LENGTH = 2000;
 
-// Safe error helper
 function createSafeError(
   status: number,
   publicMessage: string,
@@ -76,9 +75,8 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { name, description, orgProfile } = body;
+    const { name, description, orgProfile, sessionId: incomingSessionId } = body;
 
-    // Validate name
     if (!name || typeof name !== 'string') {
       return createSafeError(400, 'Item name is required and must be a string.');
     }
@@ -91,7 +89,6 @@ serve(async (req) => {
       return createSafeError(400, `Item name must be under ${MAX_NAME_LENGTH} characters.`);
     }
 
-    // Validate description if provided
     let trimmedDescription = '';
     if (description !== undefined && description !== null) {
       if (typeof description !== 'string') {
@@ -103,6 +100,7 @@ serve(async (req) => {
       }
     }
 
+    const sessionId = await ensureSession(incomingSessionId);
     const systemPrompt = buildSystemPrompt(orgProfile);
 
     const userPrompt = `Plan Item: "${trimmedName}"
@@ -110,6 +108,36 @@ ${trimmedDescription ? `Description: "${trimmedDescription}"` : ''}
 
 Generate a SMART metric suggestion for this strategic plan item.`;
 
+    const requestBody = {
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [
+        { role: "user", content: userPrompt },
+      ],
+      tools: [
+        {
+          name: "suggest_metric",
+          description: "Return a structured metric suggestion for the plan item",
+          input_schema: {
+            type: "object",
+            properties: {
+              suggestedName: { type: "string", description: "A more specific, measurable version of the item name" },
+              metricDescription: { type: "string", enum: ["Track to Target", "Maintain", "Stay Above", "Stay Below"], description: "The type of metric tracking" },
+              metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage"], description: "The unit of measurement" },
+              metricTarget: { type: "string", description: "The target value (numeric only, no symbols)" },
+              metricBaseline: { type: "string", description: "The baseline/starting value (numeric only, no symbols)" },
+              rationale: { type: "string", description: "Brief explanation of why this metric is appropriate" }
+            },
+            required: ["suggestedName", "metricDescription", "metricUnit", "metricTarget", "metricBaseline", "rationale"],
+            additionalProperties: false
+          }
+        }
+      ],
+      tool_choice: { type: "tool", name: "suggest_metric" }
+    };
+
+    const startTime = Date.now();
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -117,35 +145,9 @@ Generate a SMART metric suggestion for this strategic plan item.`;
         "anthropic-version": "2023-06-01",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [
-          { role: "user", content: userPrompt },
-        ],
-        tools: [
-          {
-            name: "suggest_metric",
-            description: "Return a structured metric suggestion for the plan item",
-            input_schema: {
-              type: "object",
-              properties: {
-                suggestedName: { type: "string", description: "A more specific, measurable version of the item name" },
-                metricDescription: { type: "string", enum: ["Track to Target", "Maintain", "Stay Above", "Stay Below"], description: "The type of metric tracking" },
-                metricUnit: { type: "string", enum: ["Number", "Dollar", "Percentage"], description: "The unit of measurement" },
-                metricTarget: { type: "string", description: "The target value (numeric only, no symbols)" },
-                metricBaseline: { type: "string", description: "The baseline/starting value (numeric only, no symbols)" },
-                rationale: { type: "string", description: "Brief explanation of why this metric is appropriate" }
-              },
-              required: ["suggestedName", "metricDescription", "metricUnit", "metricTarget", "metricBaseline", "rationale"],
-              additionalProperties: false
-            }
-          }
-        ],
-        tool_choice: { type: "tool", name: "suggest_metric" }
-      }),
+      body: JSON.stringify(requestBody),
     });
+    const durationMs = Date.now() - startTime;
 
     if (!response.ok) {
       if (response.status === 429) {
@@ -154,11 +156,45 @@ Generate a SMART metric suggestion for this strategic plan item.`;
       if (response.status === 402) {
         return createSafeError(503, 'Service temporarily unavailable. Please try again later.');
       }
-      return createSafeError(500, 'Unable to generate suggestion. Please try again.', await response.text());
+      const errText = await response.text();
+
+      // Log error
+      if (sessionId) {
+        logApiCall({
+          session_id: sessionId,
+          edge_function: "suggest-metrics",
+          step_label: "Metric Suggestion",
+          model: "claude-sonnet-4-20250514",
+          request_payload: requestBody as unknown as Record<string, unknown>,
+          duration_ms: durationMs,
+          status: "error",
+          error_message: `HTTP ${response.status}: ${errText.slice(0, 500)}`,
+        });
+      }
+
+      return createSafeError(500, 'Unable to generate suggestion. Please try again.', errText);
     }
 
     const data = await response.json();
     const toolUse = data.content?.find((block: { type: string }) => block.type === "tool_use");
+
+    // Log the call
+    if (sessionId) {
+      const tokens = extractTokenUsage(data);
+      logApiCall({
+        session_id: sessionId,
+        edge_function: "suggest-metrics",
+        step_label: "Metric Suggestion",
+        model: "claude-sonnet-4-20250514",
+        request_payload: requestBody as unknown as Record<string, unknown>,
+        response_payload: data,
+        input_tokens: tokens.input_tokens,
+        output_tokens: tokens.output_tokens,
+        duration_ms: durationMs,
+        status: toolUse ? "success" : "error",
+        error_message: toolUse ? undefined : "No tool_use in response",
+      });
+    }
     
     if (!toolUse) {
       return createSafeError(500, 'Unable to generate suggestion. Please try again.', 'No tool use in response');
@@ -167,7 +203,7 @@ Generate a SMART metric suggestion for this strategic plan item.`;
     const suggestion = toolUse.input;
 
     return new Response(
-      JSON.stringify({ success: true, suggestion }),
+      JSON.stringify({ success: true, suggestion, sessionId }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {

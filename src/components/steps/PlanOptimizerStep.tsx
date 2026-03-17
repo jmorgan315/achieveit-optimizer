@@ -51,6 +51,7 @@ interface PlanOptimizerStepProps {
   items: PlanItem[];
   levels: PlanLevel[];
   orgProfile?: OrgProfile;
+  sessionId?: string;
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
@@ -77,6 +78,7 @@ export function PlanOptimizerStep({
   items,
   levels,
   orgProfile,
+  sessionId,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
@@ -134,6 +136,7 @@ export function PlanOptimizerStep({
         body: JSON.stringify({
           name: item.name,
           description: item.description,
+          sessionId,
           orgProfile: orgProfile ? {
             organizationName: orgProfile.organizationName,
             industry: orgProfile.industry,

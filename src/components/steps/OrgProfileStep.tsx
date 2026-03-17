@@ -29,9 +29,10 @@ const INDUSTRIES = [
 interface OrgProfileStepProps {
   onComplete: (profile: OrgProfile) => void;
   onSkip: () => void;
+  sessionId?: string;
 }
 
-export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
+export function OrgProfileStep({ onComplete, onSkip, sessionId }: OrgProfileStepProps) {
   const [orgName, setOrgName] = useState('');
   const [industry, setIndustry] = useState('');
   const [documentHints, setDocumentHints] = useState('');
@@ -57,7 +58,7 @@ export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
 
     try {
       const { data, error } = await supabase.functions.invoke('lookup-organization', {
-        body: { organizationName: orgName.trim(), industry },
+        body: { organizationName: orgName.trim(), industry, sessionId },
       });
 
       if (error) throw error;

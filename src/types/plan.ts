@@ -72,6 +72,7 @@ export interface PlanState {
   personMappings: PersonMapping[];
   rawText: string;
   orgProfile?: OrgProfile;
+  sessionId?: string;
 }
 
 export const DEFAULT_LEVELS: PlanLevel[] = [

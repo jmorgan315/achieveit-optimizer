@@ -9,6 +9,7 @@ import { AIExtractionResponse, AIDocumentTerminology, convertAIResponseToPlanIte
 import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
 import { ProcessingOverlay, ProcessingPhase } from './ProcessingOverlay';
+import { supabase } from '@/integrations/supabase/client';
 
 import { OrgProfile } from '@/types/plan';
 
@@ -16,6 +17,7 @@ interface FileUploadStepProps {
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
+  sessionId?: string;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -64,7 +66,7 @@ function estimateTime(pageCount: number, phase: ProcessingPhase, phaseProgress: 
   return Math.max(0, Math.round(totalEstimate * (1 - overallPct)));
 }
 
-export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: FileUploadStepProps) {
+export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessionId }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState('');
@@ -229,6 +231,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
               organizationName: orgProfile?.organizationName,
               industry: orgProfile?.industry,
               documentHints: orgProfile?.documentHints,
+              sessionId,
             }),
           });
 
@@ -354,6 +357,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: Fil
           organizationName: orgProfile?.organizationName,
           industry: orgProfile?.industry,
           documentHints: orgProfile?.documentHints,
+          sessionId,
         }),
       });
 

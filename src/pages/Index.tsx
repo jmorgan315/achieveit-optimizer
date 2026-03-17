@@ -46,6 +46,7 @@ const Index = () => {
     setRawText,
     setItems,
     setOrgProfile,
+    setSessionId,
     processText,
     updatePersonMapping,
     applyPersonMappingsToItems,
@@ -57,6 +58,16 @@ const Index = () => {
     deleteItem,
     resetState,
   } = usePlanState();
+
+  // Generate sessionId when entering the upload step
+  const ensureSessionId = () => {
+    if (!state.sessionId) {
+      const id = crypto.randomUUID();
+      setSessionId(id);
+      return id;
+    }
+    return state.sessionId;
+  };
 
   const handleBack = () => {
     if (currentStep > 0) setCurrentStep(currentStep - 1);
@@ -74,11 +85,13 @@ const Index = () => {
 
   const handleOrgProfileComplete = (profile: OrgProfile) => {
     setOrgProfile(profile);
+    ensureSessionId();
     setCurrentStep(1);
   };
 
   const handleOrgProfileSkip = () => {
     setOrgProfile(undefined);
+    ensureSessionId();
     setCurrentStep(1);
   };
 
@@ -181,6 +194,7 @@ const Index = () => {
             <OrgProfileStep
               onComplete={handleOrgProfileComplete}
               onSkip={handleOrgProfileSkip}
+              sessionId={state.sessionId}
             />
           )}
 
@@ -189,6 +203,7 @@ const Index = () => {
               onTextSubmit={handleTextSubmit} 
               onAIExtraction={handleAIExtraction}
               orgProfile={state.orgProfile}
+              sessionId={state.sessionId || ensureSessionId()}
             />
           )}
 
@@ -206,6 +221,7 @@ const Index = () => {
               items={state.items}
               levels={state.levels}
               orgProfile={state.orgProfile}
+              sessionId={state.sessionId}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}
