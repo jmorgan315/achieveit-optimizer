@@ -1,30 +1,85 @@
 
 
-# Option C: Remove Path Step, Add Simple/Full Toggle to Review Step
+# Plan: Add API Call Logging Database Layer
 
-## Summary
-Remove the standalone "Choose Path" wizard step entirely. Add a "Simple View / Full Editor" toggle inside `PlanOptimizerStep`. Simple view shows a summary table with stats and a direct download button. Full view is the existing tree editor. Wizard goes from 5 steps to 4.
+## Overview
+Add two database tables (`processing_sessions`, `api_call_logs`) and instrument all edge functions to log every AI API call with full payloads, token counts, and timing. Frontend generates a `sessionId` and passes it through the flow.
 
-## Changes
+## Step 1: Database Migration
 
-### 1. Remove Path Step from Wizard (`src/pages/Index.tsx`)
-- Remove `PathSelectorStep` import and `ProcessingPath` import
-- Update `WIZARD_STEPS` to 4 steps: Organization → Upload Plan → Map People → Review & Export
-- Remove `handlePathSelect` handler and `setProcessingPath` from destructuring
-- After level confirmation, go directly to People Mapper (step 2 instead of step 3)
-- Shift all step indices down by 1 (people = 2, review = 3)
-- Update sticky action bar condition from `currentStep === 4` to `currentStep === 3`
+Create tables via migration:
 
-### 2. Delete `src/components/steps/PathSelectorStep.tsx`
+**`processing_sessions`** — one row per wizard run
+- Columns as specified (id, created_at, org_name, org_industry, document_name, document_size_bytes, extraction_method, total_items_extracted, total_api_calls, total_input_tokens, total_output_tokens, total_duration_ms, status)
 
-### 3. Clean up types and state
-- Remove `ProcessingPath` type from `src/types/plan.ts`
-- Remove `processingPath` from `PlanState` interface
-- Remove `setProcessingPath` from `src/hooks/usePlanState.ts`
+**`api_call_logs`** — one row per AI API call
+- Columns as specified (id, created_at, session_id FK → processing_sessions, edge_function, step_label, model, request_payload, response_payload, input_tokens, output_tokens, duration_ms, status, error_message)
 
-### 4. Add Simple/Full toggle to `PlanOptimizerStep.tsx`
-- Add local state `viewMode: 'simple' | 'full'` (default: `'full'`)
-- Add a toggle near the top (next to the stats bar) with two options: "Summary" and "Full Editor"
-- **Summary view**: Compact card showing item counts per level, owner/date/metric coverage percentages, and a prominent "Download" button. No tree editing.
-- **Full Editor view**: The existing tree view with drag-and-drop, editing, etc. (current behavior)
+**RLS**: Enable on both tables with permissive `USING (true)` policies for all operations (anon + authenticated).
+
+## Step 2: Create Shared Logging Helper
+
+Create `supabase/functions/_shared/logging.ts` with a `logApiCall()` function that:
+- Creates a Supabase client using `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`
+- Inserts into `api_call_logs` with all fields
+- Is fire-and-forget (errors logged but don't break the main flow)
+- Also exports `createSession()` and `updateSession()` helpers for `processing_sessions`
+
+## Step 3: Instrument Edge Functions
+
+### `extract-plan-items/index.ts`
+- Accept optional `sessionId` in request body
+- In `processChunk()`: wrap `callAnthropicWithRetry` with timing + log call with step_label like `"Chunk 1/3 Extraction"`
+- In `runVerificationPass()`: wrap with timing + log with step_label `"Chunk 1/3 Verification"`
+- Return `sessionId` in response
+
+### `extract-plan-vision/index.ts`
+- Accept optional `sessionId` in request body
+- Wrap the `callAnthropicWithRetry` call with timing + log with step_label like `"Vision Batch 1 (pages 1-5)"`
+- Return `sessionId` in response
+
+### `suggest-metrics/index.ts`
+- Accept optional `sessionId` in request body
+- Wrap the Anthropic fetch with timing + log with step_label `"Metric Suggestion"`
+- Return `sessionId` in response
+
+### `lookup-organization/index.ts`
+- Accept optional `sessionId` in request body
+- Wrap the Lovable AI fetch with timing + log with step_label `"Organization Lookup"`
+- Return `sessionId` in response
+
+**What gets logged in `request_payload`**: The full body sent to the AI API (system prompt, user messages, tools config, model). For vision, image data will be truncated to avoid huge payloads (store image count + sizes instead of full base64).
+
+**What gets logged in `response_payload`**: The full AI response JSON. Token counts extracted from `usage.input_tokens` / `usage.output_tokens` (Anthropic) or `usage.prompt_tokens` / `usage.completion_tokens` (OpenAI/Lovable AI).
+
+## Step 4: Frontend Session Tracking
+
+### `src/types/plan.ts`
+- Add `sessionId?: string` to `PlanState`
+
+### `src/hooks/usePlanState.ts`
+- Add `setSessionId` callback
+- Expose `sessionId` in state
+
+### `src/components/steps/FileUploadStep.tsx`
+- Generate `sessionId` (via `crypto.randomUUID()`) when processing starts
+- Pass `sessionId` to all edge function calls (`extract-plan-items`, `extract-plan-vision`)
+- After extraction completes, insert/update `processing_sessions` row via direct Supabase client call with aggregate stats
+
+### `src/components/steps/OrgProfileStep.tsx`
+- Pass `sessionId` to `lookup-organization` calls
+
+### `src/components/plan-optimizer/EditItemDialog.tsx` (or wherever suggest-metrics is called)
+- Pass `sessionId` to `suggest-metrics` calls
+
+### `src/pages/Index.tsx`
+- Generate the `sessionId` at the top level when the user enters the Upload step
+- Thread it down through props to FileUploadStep and PlanOptimizerStep
+
+## Technical Notes
+
+- **Image payload truncation**: For vision calls, `request_payload` will store image metadata (count, sizes) rather than full base64 to keep rows manageable. The actual images are ephemeral.
+- **Service role key**: The logging helper uses `SUPABASE_SERVICE_ROLE_KEY` (already available) to bypass RLS from edge functions.
+- **Non-blocking**: All logging is async/fire-and-forget so it never slows down the main extraction flow.
+- **5 files modified** (4 edge functions + shared helper), **3-4 frontend files** modified, **1 migration**.
 
