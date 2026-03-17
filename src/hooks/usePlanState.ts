@@ -16,6 +16,7 @@ export function usePlanState() {
     personMappings: [],
     rawText: '',
     orgProfile: undefined,
+    sessionId: undefined,
   });
 
   const setLevels = useCallback((levels: PlanLevel[]) => {
