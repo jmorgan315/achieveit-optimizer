@@ -194,6 +194,7 @@ const Index = () => {
             <OrgProfileStep
               onComplete={handleOrgProfileComplete}
               onSkip={handleOrgProfileSkip}
+              sessionId={state.sessionId}
             />
           )}
 
@@ -202,6 +203,7 @@ const Index = () => {
               onTextSubmit={handleTextSubmit} 
               onAIExtraction={handleAIExtraction}
               orgProfile={state.orgProfile}
+              sessionId={state.sessionId || ensureSessionId()}
             />
           )}
 
