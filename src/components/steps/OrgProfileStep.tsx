@@ -29,6 +29,7 @@ const INDUSTRIES = [
 interface OrgProfileStepProps {
   onComplete: (profile: OrgProfile) => void;
   onSkip: () => void;
+  sessionId?: string;
 }
 
 export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
