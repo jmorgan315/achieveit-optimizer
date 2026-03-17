@@ -520,7 +520,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           console.log(`Text appears corrupted (alphanumeric ratio: ${gibberishRatio.toFixed(2)}), falling back to Vision AI`);
           addMessage('Text extraction corrupted, switching to Vision AI...');
           setIsProcessing(false);
-          const visionResult = await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionPipeline(file);
           if (visionResult) {
             setExtractedItems(visionResult.items);
             setExtractedMappings(visionResult.personMappings);
