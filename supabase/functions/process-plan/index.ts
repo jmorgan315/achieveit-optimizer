@@ -148,6 +148,41 @@ function calculateConfidence(
   processItems(correctedItems);
 }
 
+// Batch page images into groups of N
+function batchImages(images: string[], batchSize: number): string[][] {
+  const batches: string[][] = [];
+  for (let i = 0; i < images.length; i += batchSize) {
+    batches.push(images.slice(i, i + batchSize));
+  }
+  return batches;
+}
+
+// Merge vision batch results, deduplicating by name
+function mergeVisionBatchResults(
+  existing: unknown[],
+  newItems: unknown[]
+): unknown[] {
+  if (existing.length === 0) return newItems;
+  const names = new Set<string>();
+  function collectNames(items: unknown[]) {
+    for (const item of items) {
+      const i = item as { name?: string; children?: unknown[] };
+      if (i.name) names.add(i.name.toLowerCase());
+      if (i.children?.length) collectNames(i.children);
+    }
+  }
+  collectNames(existing);
+  const unique = newItems.filter((item) => {
+    const i = item as { name?: string };
+    if (!i.name) return false;
+    const lower = i.name.toLowerCase();
+    if (names.has(lower)) return false;
+    names.add(lower);
+    return true;
+  });
+  return [...existing, ...unique];
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -184,18 +219,69 @@ serve(async (req) => {
 
     if (useVision) {
       extractionMethod = "vision";
-      const result = await callEdgeFunction("extract-plan-vision", {
-        pageImages,
-        organizationName,
-        industry,
-        documentHints,
-        sessionId,
-      });
-      if (result.ok && (result.data as { success: boolean }).success) {
-        const d = (result.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
-        agent1Data = { items: d.items || [], detectedLevels: d.detectedLevels || [] };
+      // Batch vision images in groups of 5, same as frontend used to do
+      const images = pageImages as string[];
+      const batches = batchImages(images, 5);
+      let allItems: unknown[] = [];
+      let detectedLevels: { depth: number; name: string }[] = [];
+      let previousContext = "";
+
+      console.log(`[process-plan] Agent 1 vision: ${images.length} images in ${batches.length} batches`);
+
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        const batch = batches[batchIdx];
+
+        // Rate limit between batches
+        if (batchIdx > 0) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
+        const result = await callEdgeFunction("extract-plan-vision", {
+          pageImages: batch,
+          previousContext,
+          organizationName,
+          industry,
+          documentHints,
+          sessionId,
+        });
+
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const d = (result.data as { data: { items?: unknown[]; detectedLevels?: { depth: number; name: string }[]; documentTerminology?: { columnHierarchy?: string[] } }; contextSummary?: string }).data;
+
+          if (d.items?.length) {
+            allItems = mergeVisionBatchResults(allItems, d.items);
+          }
+
+          // Capture levels from first batch or first non-empty
+          if (batchIdx === 0 && d.documentTerminology?.columnHierarchy?.length) {
+            detectedLevels = d.documentTerminology.columnHierarchy.map(
+              (name: string, idx: number) => ({ depth: idx + 1, name })
+            );
+          } else if (d.detectedLevels?.length && detectedLevels.length === 0) {
+            detectedLevels = d.detectedLevels;
+          }
+
+          // Carry context forward for next batch
+          const ctx = (result.data as { contextSummary?: string }).contextSummary;
+          if (ctx) previousContext = ctx;
+        } else {
+          console.warn(`[process-plan] Vision batch ${batchIdx + 1} failed:`, (result.data as { error?: string }).error);
+        }
+      }
+
+      if (allItems.length > 0) {
+        agent1Data = {
+          items: allItems,
+          detectedLevels: detectedLevels.length > 0 ? detectedLevels : [
+            { depth: 1, name: "Strategic Priority" },
+            { depth: 2, name: "Objective" },
+            { depth: 3, name: "Goal" },
+            { depth: 4, name: "Strategy" },
+            { depth: 5, name: "KPI" },
+          ],
+        };
       } else {
-        agent1Error = (result.data as { error?: string }).error || "Vision extraction failed";
+        agent1Error = "Vision extraction produced no items across all batches";
       }
     } else {
       const result = await callEdgeFunction("extract-plan-items", {
