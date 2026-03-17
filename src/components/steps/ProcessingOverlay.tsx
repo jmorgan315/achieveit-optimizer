@@ -2,10 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, Eye, FileText, CheckCircle2, ChevronDown, Clock, Lightbulb, BarChart3, Sparkles, Info } from 'lucide-react';
+import { Brain, Eye, FileText, CheckCircle2, ChevronDown, Clock, Lightbulb, BarChart3, Sparkles, Info, GitBranch, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type ProcessingPhase = 'upload' | 'analysis' | 'verification' | 'vision';
+export type ProcessingPhase = 'upload' | 'analysis' | 'verification' | 'vision' | 'audit' | 'validate';
 
 interface ProcessingOverlayProps {
   phase: ProcessingPhase;
@@ -19,12 +19,14 @@ interface ProcessingOverlayProps {
 
 const PHASE_CONFIG: Record<ProcessingPhase, { label: string; icon: typeof Brain; description: string }> = {
   upload: { label: 'Upload & Parse', icon: FileText, description: 'Extracting text from your document...' },
-  analysis: { label: 'AI Analysis', icon: Brain, description: 'AI is reading and structuring your plan...' },
+  analysis: { label: 'AI Extraction', icon: Brain, description: 'Step 1/3: Extracting plan items...' },
   verification: { label: 'Verification', icon: CheckCircle2, description: 'Verifying extraction quality...' },
   vision: { label: 'Vision AI', icon: Eye, description: 'Visual analysis of document pages...' },
+  audit: { label: 'Completeness Audit', icon: Shield, description: 'Step 2/3: Cross-checking for missing items...' },
+  validate: { label: 'Hierarchy Check', icon: GitBranch, description: 'Step 3/3: Validating structure and fixing issues...' },
 };
 
-const PHASE_ORDER: ProcessingPhase[] = ['upload', 'analysis', 'verification', 'vision'];
+const PHASE_ORDER: ProcessingPhase[] = ['upload', 'analysis', 'audit', 'validate'];
 
 // Contextual tips organized by category
 const GENERAL_TIPS = [
@@ -117,8 +119,12 @@ export function ProcessingOverlay({
     return () => clearInterval(interval);
   }, []);
 
-  const phases = isVisionNeeded ? PHASE_ORDER : PHASE_ORDER.filter(p => p !== 'vision');
+  const phases = isVisionNeeded 
+    ? PHASE_ORDER.filter(p => p !== 'audit' && p !== 'validate') // Vision path: upload → vision
+    : PHASE_ORDER; // Text path: upload → analysis → audit → validate
   const currentPhaseIndex = phases.indexOf(phase);
+  // Handle phases not in the filtered list (verification, vision in non-vision mode, etc.)
+  const effectivePhaseIndex = currentPhaseIndex >= 0 ? currentPhaseIndex : phases.length - 1;
   const currentTip = tips[currentTipIndex];
   const TipIcon = currentTip?.icon || Lightbulb;
 
@@ -163,8 +169,8 @@ export function ProcessingOverlay({
             {phases.map((p, idx) => {
               const config = PHASE_CONFIG[p];
               const Icon = config.icon;
-              const isActive = idx === currentPhaseIndex;
-              const isDone = idx < currentPhaseIndex;
+              const isActive = idx === effectivePhaseIndex;
+              const isDone = idx < effectivePhaseIndex;
               return (
                 <div key={p} className="flex items-center flex-1">
                   <div className={cn(
@@ -189,7 +195,7 @@ export function ProcessingOverlay({
           <Progress value={progress} className="h-2.5" />
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>{Math.round(progress)}% complete</span>
-            <span>Step {currentPhaseIndex + 1} of {phases.length}</span>
+            <span>Step {effectivePhaseIndex + 1} of {phases.length}</span>
           </div>
         </div>
 

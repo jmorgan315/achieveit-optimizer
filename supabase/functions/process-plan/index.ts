@@ -1,0 +1,344 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { ensureSession } from "../_shared/logging.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+
+interface PipelineProgress {
+  agent: number;
+  totalAgents: number;
+  agentName: string;
+  status: string;
+}
+
+async function callEdgeFunction(
+  functionName: string,
+  body: Record<string, unknown>
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  const url = `${SUPABASE_URL}/functions/v1/${functionName}`;
+  console.log(`[process-plan] Calling ${functionName}...`);
+  const startTime = Date.now();
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const elapsed = Date.now() - startTime;
+  const data = await response.json();
+  console.log(`[process-plan] ${functionName} completed in ${elapsed}ms, ok=${response.ok}`);
+
+  return { ok: response.ok, status: response.status, data };
+}
+
+// Count all items recursively
+function countAllItems(items: unknown[]): number {
+  let count = 0;
+  for (const item of items) {
+    count++;
+    const i = item as { children?: unknown[] };
+    if (i.children?.length) count += countAllItems(i.children);
+  }
+  return count;
+}
+
+// Collect all item IDs from nested tree
+function collectItemIds(items: unknown[]): Set<string> {
+  const ids = new Set<string>();
+  for (const item of items) {
+    const i = item as { id?: string; children?: unknown[] };
+    if (i.id) ids.add(i.id);
+    if (i.children?.length) {
+      for (const id of collectItemIds(i.children)) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+// Collect item names for matching
+function collectItemNames(items: unknown[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const item of items) {
+    const i = item as { id?: string; name?: string; children?: unknown[] };
+    if (i.id && i.name) map.set(i.id, i.name);
+    if (i.children?.length) {
+      for (const [k, v] of collectItemNames(i.children)) map.set(k, v);
+    }
+  }
+  return map;
+}
+
+interface AuditFindings {
+  missingItems?: { sourceText: string }[];
+  mergedItems?: { extractedItemName: string }[];
+  rephrasedItems?: { extractedItemId?: string; extractedName: string }[];
+  auditSummary?: Record<string, number>;
+}
+
+interface ValidationResult {
+  correctedItems: unknown[];
+  corrections: { itemId: string; type: string; description: string }[];
+  detectedLevels?: { depth: number; name: string }[];
+}
+
+// Calculate confidence scores for each item
+function calculateConfidence(
+  correctedItems: unknown[],
+  agent1Ids: Set<string>,
+  agent1Names: Map<string, string>,
+  auditFindings: AuditFindings | null,
+  corrections: { itemId: string; type: string }[]
+): void {
+  const rephrasedIds = new Set(
+    (auditFindings?.rephrasedItems || [])
+      .map(r => r.extractedItemId)
+      .filter(Boolean)
+  );
+
+  const correctionMap = new Map<string, string[]>();
+  for (const c of corrections) {
+    if (!correctionMap.has(c.itemId)) correctionMap.set(c.itemId, []);
+    correctionMap.get(c.itemId)!.push(c.type);
+  }
+
+  function processItems(items: unknown[]): void {
+    for (const item of items) {
+      const i = item as { id?: string; confidence?: number; corrections?: string[]; children?: unknown[] };
+      const id = i.id || "";
+      const itemCorrections = correctionMap.get(id) || [];
+
+      // Build corrections strings
+      const correctionDescs: string[] = [];
+      for (const c of corrections.filter(x => x.itemId === id)) {
+        correctionDescs.push(`${(c as { agent?: string }).agent || "Agent 3"}: ${(c as { description?: string }).description || c.type}`);
+      }
+      i.corrections = correctionDescs;
+
+      // Calculate confidence
+      if (id.startsWith("new-")) {
+        // Item was missing from Agent 1, added by Agent 3
+        i.confidence = 40;
+      } else if (!agent1Ids.has(id)) {
+        // Unknown origin — Agent 3's best guess
+        i.confidence = 20;
+      } else if (rephrasedIds.has(id)) {
+        // Was rephrased, corrected by Agent 3
+        i.confidence = 60;
+      } else if (itemCorrections.length > 0) {
+        // Existed but had minor corrections
+        i.confidence = 80;
+      } else {
+        // All 3 agents agree
+        i.confidence = 100;
+      }
+
+      if (i.children?.length) processItems(i.children);
+    }
+  }
+
+  processItems(correctedItems);
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const body = await req.json();
+    const {
+      documentText,
+      organizationName,
+      industry,
+      documentHints,
+      sessionId: incomingSessionId,
+      pageImages,
+    } = body;
+
+    if (!documentText && !pageImages) {
+      return new Response(JSON.stringify({ success: false, error: "documentText or pageImages required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const sessionId = await ensureSession(incomingSessionId);
+    console.log("[process-plan] Pipeline starting, sessionId:", sessionId);
+
+    // ==============================
+    // AGENT 1: Extraction
+    // ==============================
+    let agent1Data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } | null = null;
+    let extractionMethod = "text";
+    let agent1Error: string | null = null;
+
+    const useVision = !!pageImages && (!documentText || documentText.trim().length < 50);
+
+    if (useVision) {
+      extractionMethod = "vision";
+      const result = await callEdgeFunction("extract-plan-vision", {
+        pageImages,
+        organizationName,
+        industry,
+        documentHints,
+        sessionId,
+      });
+      if (result.ok && (result.data as { success: boolean }).success) {
+        const d = (result.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
+        agent1Data = { items: d.items || [], detectedLevels: d.detectedLevels || [] };
+      } else {
+        agent1Error = (result.data as { error?: string }).error || "Vision extraction failed";
+      }
+    } else {
+      const result = await callEdgeFunction("extract-plan-items", {
+        documentText,
+        organizationName,
+        industry,
+        documentHints,
+        sessionId,
+      });
+      if (result.ok && (result.data as { success: boolean }).success) {
+        const d = (result.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
+        agent1Data = { items: d.items || [], detectedLevels: d.detectedLevels || [] };
+      } else {
+        agent1Error = (result.data as { error?: string }).error || "Text extraction failed";
+      }
+    }
+
+    if (!agent1Data || agent1Data.items.length === 0) {
+      console.error("[process-plan] Agent 1 failed:", agent1Error);
+      return new Response(JSON.stringify({
+        success: false,
+        error: agent1Error || "Extraction produced no items",
+        pipelineStep: "agent1",
+      }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const agent1ItemCount = countAllItems(agent1Data.items);
+    const agent1Ids = collectItemIds(agent1Data.items);
+    const agent1Names = collectItemNames(agent1Data.items);
+    console.log(`[process-plan] Agent 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels`);
+
+    // ==============================
+    // AGENT 2: Completeness Audit
+    // ==============================
+    let auditFindings: AuditFindings | null = null;
+
+    // Only run audit if we have source text
+    const sourceForAudit = documentText || "";
+    if (sourceForAudit.length > 100) {
+      const auditResult = await callEdgeFunction("audit-completeness", {
+        sourceText: sourceForAudit,
+        extractedItems: agent1Data.items,
+        sessionId,
+        organizationName,
+        industry,
+      });
+
+      if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
+        auditFindings = (auditResult.data as { data: AuditFindings }).data;
+        console.log("[process-plan] Agent 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
+      } else {
+        console.warn("[process-plan] Agent 2 failed (non-fatal):", (auditResult.data as { error?: string }).error);
+      }
+    } else {
+      console.log("[process-plan] Skipping Agent 2 — no source text for audit");
+    }
+
+    // ==============================
+    // AGENT 3: Hierarchy Validation
+    // ==============================
+    let validationResult: ValidationResult | null = null;
+
+    const validateResult = await callEdgeFunction("validate-hierarchy", {
+      sourceText: sourceForAudit,
+      extractedItems: agent1Data.items,
+      auditFindings,
+      detectedLevels: agent1Data.detectedLevels,
+      sessionId,
+      organizationName,
+      industry,
+    });
+
+    if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
+      validationResult = (validateResult.data as { data: ValidationResult }).data;
+      console.log("[process-plan] Agent 3 complete:", validationResult.corrections?.length || 0, "corrections");
+    } else {
+      console.warn("[process-plan] Agent 3 failed (non-fatal):", (validateResult.data as { error?: string }).error);
+    }
+
+    // ==============================
+    // MERGE & CONFIDENCE SCORING
+    // ==============================
+    let finalItems: unknown[];
+    let finalLevels: { depth: number; name: string }[];
+    let corrections: { itemId: string; type: string; description: string }[] = [];
+
+    if (validationResult?.correctedItems?.length > 0) {
+      finalItems = validationResult.correctedItems;
+      finalLevels = validationResult.detectedLevels?.length
+        ? validationResult.detectedLevels
+        : agent1Data.detectedLevels;
+      corrections = validationResult.corrections || [];
+    } else {
+      // Fallback to Agent 1 output
+      finalItems = agent1Data.items;
+      finalLevels = agent1Data.detectedLevels;
+    }
+
+    // Calculate confidence scores
+    calculateConfidence(finalItems, agent1Ids, agent1Names, auditFindings, corrections);
+
+    // Calculate session confidence
+    const allConfidences: number[] = [];
+    function gatherConfidences(items: unknown[]) {
+      for (const item of items) {
+        const i = item as { confidence?: number; children?: unknown[] };
+        if (typeof i.confidence === "number") allConfidences.push(i.confidence);
+        if (i.children?.length) gatherConfidences(i.children);
+      }
+    }
+    gatherConfidences(finalItems);
+    const sessionConfidence = allConfidences.length > 0
+      ? Math.round(allConfidences.reduce((a, b) => a + b, 0) / allConfidences.length)
+      : 0;
+
+    const finalItemCount = countAllItems(finalItems);
+    console.log(`[process-plan] Pipeline complete: ${finalItemCount} items, ${corrections.length} corrections, confidence=${sessionConfidence}%`);
+
+    return new Response(JSON.stringify({
+      success: true,
+      data: {
+        items: finalItems,
+        detectedLevels: finalLevels,
+      },
+      totalItems: finalItemCount,
+      corrections,
+      sessionConfidence,
+      auditSummary: auditFindings?.auditSummary || null,
+      extractionMethod,
+      pipelineComplete: true,
+      sessionId,
+    }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("[process-plan] Pipeline error:", error);
+    return new Response(JSON.stringify({
+      success: false,
+      error: "Pipeline processing failed. Please try again.",
+    }), {
+      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+});
