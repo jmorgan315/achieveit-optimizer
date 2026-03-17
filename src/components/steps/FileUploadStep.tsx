@@ -242,10 +242,11 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     return { passed: true, reason: 'OK' };
   };
 
-  const extractWithVisionAI = async (
+  // Render PDF to images and run through the pipeline with pageImages
+  const extractWithVisionPipeline = async (
     file: File,
-    levelHints?: PlanLevel[]
-  ): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
+    _levelHints?: PlanLevel[]
+  ): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[]; sessionConfidence?: number } | null> => {
     setIsExtracting(true);
     setUseVisionAI(true);
     setPhaseProgress('vision', 0, true);
@@ -255,128 +256,67 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
       const { images, pageCount } = await renderPDFToImages(file, 20, 1.0);
       setProgressState(prev => ({ ...prev, pageCount }));
       addMessage(`Rendered ${images.length} of ${pageCount} pages`);
-      setPhaseProgress('vision', 10, true);
+      setPhaseProgress('vision', 20, true);
 
-      const batches = batchPageImages(images, 5);
+      // Send ALL page images to the pipeline — it handles batching internally
+      addMessage('Sending to multi-agent pipeline...');
       
-      let allItems: AIExtractionResponse['items'] = [];
-      let detectedLevelsFromVision: AIExtractionResponse['detectedLevels'] = [];
-      let previousContext = '';
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pageImages: images.map(img => img.dataUrl),
+          organizationName: orgProfile?.organizationName,
+          industry: orgProfile?.industry,
+          documentHints: orgProfile?.documentHints,
+          sessionId,
+        }),
+      });
 
-      if (levelHints && levelHints.length > 0) {
-        const levelNames = levelHints.map(l => l.name).join(', ');
-        previousContext = `Document hierarchy terminology detected from text analysis: ${levelNames}. Use these SAME level terms for consistency.`;
+      setPhaseProgress('vision', 60, true);
+
+      if (!response.ok) {
+        const error = await response.json();
+        if (response.status === 429) throw new Error('AI rate limit reached. Please wait a moment and try again.');
+        if (response.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
+        throw new Error(error.error || 'Vision AI pipeline failed');
       }
 
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-        const startPage = batchIndex * 5 + 1;
-        const endPage = startPage + batch.length - 1;
-        
-        const batchPct = 10 + ((batchIndex + 1) / batches.length) * 85;
-        setPhaseProgress('vision', batchPct, true);
-        addMessage(`Vision AI analyzing pages ${startPage}-${endPage}...`);
+      const result = await response.json();
 
-        if (batchIndex > 0) {
-          await new Promise(resolve => setTimeout(resolve, 3000));
-        }
-
-        let result: any = null;
-        let retries = 0;
-        const maxRetries = 3;
-
-        while (retries <= maxRetries) {
-          console.log(`[FileUpload] Calling extract-plan-vision batch ${batchIndex + 1}/${batches.length} with sessionId:`, sessionId);
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-vision`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              pageImages: batch.map(img => img.dataUrl),
-              previousContext,
-              organizationName: orgProfile?.organizationName,
-              industry: orgProfile?.industry,
-              documentHints: orgProfile?.documentHints,
-              sessionId,
-            }),
-          });
-
-          if (response.status === 429 && retries < maxRetries) {
-            retries++;
-            const waitTime = Math.pow(2, retries) * 2000;
-            addMessage(`Rate limited — retrying in ${waitTime / 1000}s...`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            continue;
-          }
-
-          if (!response.ok) {
-            const error = await response.json();
-            if (response.status === 429) {
-              throw new Error('AI rate limit reached. Please wait a moment and try again.');
-            }
-            if (response.status === 402) {
-              throw new Error('AI credits exhausted. Please add credits to continue.');
-            }
-            throw new Error(error.error || 'Vision AI extraction failed');
-          }
-
-          result = await response.json();
-          break;
-        }
-
-        if (!result?.success || !result?.data) {
-          throw new Error(result?.error || 'Vision AI returned no data');
-        }
-
-        if (result.data.items?.length > 0) {
-          allItems = mergeVisionResults(allItems, result.data.items);
-        }
-        
-        if (batchIndex === 0 && result.data.documentTerminology?.columnHierarchy?.length > 0) {
-          detectedLevelsFromVision = result.data.documentTerminology.columnHierarchy.map(
-            (name: string, idx: number) => ({ depth: idx + 1, name })
-          );
-        } else if (result.data.detectedLevels?.length > 0 && detectedLevelsFromVision.length === 0) {
-          detectedLevelsFromVision = result.data.detectedLevels;
-        }
-
-        if (result.contextSummary) {
-          previousContext = result.contextSummary;
-        }
+      if (!result.success || !result.data) {
+        throw new Error(result.error || 'Vision AI pipeline returned no data');
       }
 
       setPhaseProgress('vision', 100, true);
 
-      const aiResponse: AIExtractionResponse = {
-        items: allItems,
-        detectedLevels: detectedLevelsFromVision.length > 0 ? detectedLevelsFromVision : [
-          { depth: 1, name: 'Strategic Priority' },
-          { depth: 2, name: 'Objective' },
-          { depth: 3, name: 'Goal' },
-          { depth: 4, name: 'Strategy' },
-          { depth: 5, name: 'KPI' },
-        ],
-      };
+      const aiResponse: AIExtractionResponse = result.data;
+      const totalItems = result.totalItems || 0;
+      const sessionConfidence = result.sessionConfidence;
+      const corrections = result.corrections || [];
 
-      const levels: PlanLevel[] = aiResponse.detectedLevels.map((l, idx) => ({
-        id: String(idx + 1),
-        name: cleanLevelName(l.name),
-        depth: l.depth,
-      }));
+      console.log(`Vision pipeline complete: ${totalItems} items, confidence=${sessionConfidence}%, ${corrections.length} corrections`);
+      addMessage(`Pipeline complete: ${totalItems} items (${sessionConfidence}% confidence)`);
+
+      const levels: PlanLevel[] = aiResponse.detectedLevels?.length > 0
+        ? aiResponse.detectedLevels.map((l, idx) => ({
+            id: String(idx + 1),
+            name: cleanLevelName(l.name),
+            depth: l.depth,
+          }))
+        : DEFAULT_LEVELS;
 
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
 
-      const itemCount = items.length;
-      addMessage(`Vision AI found ${itemCount} trackable plan items`);
-      
       toast({
-        title: "Vision AI Analysis Complete",
-        description: `Extracted ${itemCount} plan items from visual document analysis`,
+        title: "AI Pipeline Complete",
+        description: `Extracted ${totalItems} plan items (${sessionConfidence}% confidence)`,
       });
 
-      return { items, levels, personMappings };
+      return { items, levels, personMappings, sessionConfidence };
 
     } catch (error) {
-      console.error('Vision AI extraction error:', error);
+      console.error('Vision pipeline error:', error);
       toast({
         title: "Vision AI Extraction Failed",
         description: getUserFriendlyError(error, 'vision'),
@@ -386,25 +326,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     } finally {
       setIsExtracting(false);
     }
-  };
-
-  const mergeVisionResults = (
-    existing: AIExtractionResponse['items'],
-    newItems: AIExtractionResponse['items']
-  ): AIExtractionResponse['items'] => {
-    if (existing.length === 0) return newItems;
-    
-    const existingNames = new Set(existing.map(item => item.name.toLowerCase()));
-    
-    const uniqueNewItems = newItems.filter(item => {
-      if (!item?.name) return false;
-      const nameLower = item.name.toLowerCase();
-      if (existingNames.has(nameLower)) return false;
-      existingNames.add(nameLower);
-      return true;
-    });
-
-    return [...existing, ...uniqueNewItems];
   };
 
   const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[]; sessionConfidence?: number } | null> => {
