@@ -64,9 +64,17 @@ const Index = () => {
   const ensureSessionId = () => {
     if (!state.sessionId) {
       const id = crypto.randomUUID();
+      console.log('[Session] Creating new session:', id);
       setSessionId(id);
+      // Insert the row NOW so edge functions can reference it via foreign key
+      supabase.from('processing_sessions').insert({ id, status: 'in_progress' })
+        .then(({ error }) => {
+          if (error) console.error('[Session] Failed to create session row:', error);
+          else console.log('[Session] Row created successfully:', id);
+        });
       return id;
     }
+    console.log('[Session] Reusing existing session:', state.sessionId);
     return state.sessionId;
   };
 
