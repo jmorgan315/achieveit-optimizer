@@ -1,30 +1,52 @@
 
 
-# Option C: Remove Path Step, Add Simple/Full Toggle to Review Step
+# Fix: Complete API Call Logging and Session Tracking
 
-## Summary
-Remove the standalone "Choose Path" wizard step entirely. Add a "Simple View / Full Editor" toggle inside `PlanOptimizerStep`. Simple view shows a summary table with stats and a direct download button. Full view is the existing tree editor. Wizard goes from 5 steps to 4.
+## Problem Analysis
 
-## Changes
+After reviewing all edge functions and frontend code, here's the actual state:
 
-### 1. Remove Path Step from Wizard (`src/pages/Index.tsx`)
-- Remove `PathSelectorStep` import and `ProcessingPath` import
-- Update `WIZARD_STEPS` to 4 steps: Organization → Upload Plan → Map People → Review & Export
-- Remove `handlePathSelect` handler and `setProcessingPath` from destructuring
-- After level confirmation, go directly to People Mapper (step 2 instead of step 3)
-- Shift all step indices down by 1 (people = 2, review = 3)
-- Update sticky action bar condition from `currentStep === 4` to `currentStep === 3`
+**Edge function logging is already implemented** in `extract-plan-items` (chunk + verification), `extract-plan-vision` (with image truncation), `suggest-metrics`, and `lookup-organization`. The network logs confirm these are producing `api_call_logs` rows.
 
-### 2. Delete `src/components/steps/PathSelectorStep.tsx`
+**What's actually broken/missing:**
 
-### 3. Clean up types and state
-- Remove `ProcessingPath` type from `src/types/plan.ts`
-- Remove `processingPath` from `PlanState` interface
-- Remove `setProcessingPath` from `src/hooks/usePlanState.ts`
+1. **`parse-pdf`** — Has zero logging. User wants a row even though it's not an AI call.
+2. **`processing_sessions` rows are never updated** — The frontend creates a `sessionId` and edge functions call `ensureSession()` which creates a bare row (no org info, no document info). But nobody ever updates the row with `org_name`, `org_industry`, `document_name`, `extraction_method`, `total_items_extracted`, aggregate tokens, or `status`. That's why admin shows "Unknown Org", "Items: —", "API Calls: 0", etc.
 
-### 4. Add Simple/Full toggle to `PlanOptimizerStep.tsx`
-- Add local state `viewMode: 'simple' | 'full'` (default: `'full'`)
-- Add a toggle near the top (next to the stats bar) with two options: "Summary" and "Full Editor"
-- **Summary view**: Compact card showing item counts per level, owner/date/metric coverage percentages, and a prominent "Download" button. No tree editing.
-- **Full Editor view**: The existing tree view with drag-and-drop, editing, etc. (current behavior)
+## Plan
+
+### 1. Add logging to `parse-pdf` edge function
+
+- Import `logApiCall`, `ensureSession` from shared logging
+- Accept `sessionId` parameter
+- Log a single row with `model: 'none'`, `edge_function: 'parse-pdf'`, `step_label: 'PDF Text Extraction'`
+- `request_payload`: `{ filename: ..., fileSize: ... }`
+- `response_payload`: `{ textLength: ..., pageCount: ... }`
+- Return `sessionId` in response
+
+### 2. Frontend: Update `processing_sessions` throughout wizard flow
+
+The core fix — add Supabase client calls in the frontend to update the session row at each stage:
+
+**In `OrgProfileStep`** (or `Index.tsx` after org confirmation):
+- After user confirms org profile, update session row: `org_name`, `org_industry`
+
+**In `FileUploadStep`**:
+- When file is uploaded, update session: `document_name`, `document_size_bytes`
+- After extraction completes (text or vision), update session: `extraction_method` ('text' or 'vision'), `total_items_extracted`, `status: 'completed'`
+- On extraction failure, update: `status: 'failed'`
+- After extraction, query `api_call_logs` for this session to aggregate `total_api_calls`, `total_input_tokens`, `total_output_tokens`, `total_duration_ms` and update the session row
+
+**In `FileUploadStep.parsePdfWithEdgeFunction()`**:
+- Pass `sessionId` to the `parse-pdf` edge function call
+
+### 3. Files to modify
+
+| File | Change |
+|------|--------|
+| `supabase/functions/parse-pdf/index.ts` | Add logging imports, accept `sessionId`, log the parse call |
+| `src/components/steps/FileUploadStep.tsx` | Update session with document info, extraction method, totals, status after extraction |
+| `src/pages/Index.tsx` | Update session with org details after org profile confirmation |
+
+No database schema changes needed — tables already have all the right columns.
 
