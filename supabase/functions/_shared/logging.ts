@@ -25,8 +25,21 @@ export interface ApiCallLogEntry {
 export async function logApiCall(entry: ApiCallLogEntry): Promise<void> {
   try {
     const client = getClient();
+    console.log(`[Logging] Inserting api_call_log: session=${entry.session_id}, fn=${entry.edge_function}, step=${entry.step_label}`);
     const { error } = await client.from("api_call_logs").insert(entry);
-    if (error) console.error("[Logging] Failed to insert api_call_log:", error.message);
+    if (error) {
+      console.error("[Logging] Failed to insert api_call_log:", {
+        error: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+        session_id: entry.session_id,
+        edge_function: entry.edge_function,
+        step_label: entry.step_label,
+      });
+    } else {
+      console.log(`[Logging] api_call_log inserted OK: session=${entry.session_id}, step=${entry.step_label}`);
+    }
   } catch (e) {
     console.error("[Logging] logApiCall exception:", e);
   }
