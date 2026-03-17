@@ -488,7 +488,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           console.log('Text extraction failed, will try vision AI', error);
           addMessage('Text extraction unavailable, switching to Vision AI...');
           setIsProcessing(false);
-          const visionResult = await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionPipeline(file);
           if (visionResult) {
             setExtractedItems(visionResult.items);
             setExtractedMappings(visionResult.personMappings);
