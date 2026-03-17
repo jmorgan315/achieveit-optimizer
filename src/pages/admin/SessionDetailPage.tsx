@@ -97,7 +97,7 @@ function renderResponseContent(payload: Json) {
           if (block.type === 'tool_use') return (
             <div key={i} className="rounded border border-border p-3 bg-muted/30">
               <p className="text-xs font-medium text-muted-foreground mb-1">Tool: {String(block.name)}</p>
-              <pre className="text-xs overflow-auto">{JSON.stringify(block.input, null, 2)}</pre>
+              <pre className="text-xs whitespace-pre overflow-x-auto">{JSON.stringify(block.input, null, 2)}</pre>
             </div>
           );
           return <pre key={i} className="text-xs">{JSON.stringify(block, null, 2)}</pre>;
