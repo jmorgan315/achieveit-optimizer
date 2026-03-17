@@ -136,6 +136,7 @@ export function PlanOptimizerStep({
         body: JSON.stringify({
           name: item.name,
           description: item.description,
+          sessionId,
           orgProfile: orgProfile ? {
             organizationName: orgProfile.organizationName,
             industry: orgProfile.industry,
