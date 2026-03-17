@@ -16,6 +16,7 @@ interface FileUploadStepProps {
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
+  sessionId?: string;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
