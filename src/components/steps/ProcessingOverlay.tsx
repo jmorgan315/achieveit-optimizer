@@ -195,7 +195,7 @@ export function ProcessingOverlay({
           <Progress value={progress} className="h-2.5" />
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>{Math.round(progress)}% complete</span>
-            <span>Step {currentPhaseIndex + 1} of {phases.length}</span>
+            <span>Step {effectivePhaseIndex + 1} of {phases.length}</span>
           </div>
         </div>
 
