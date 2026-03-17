@@ -356,6 +356,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           organizationName: orgProfile?.organizationName,
           industry: orgProfile?.industry,
           documentHints: orgProfile?.documentHints,
+          sessionId,
         }),
       });
 
