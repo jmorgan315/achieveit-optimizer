@@ -407,15 +407,16 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     return [...existing, ...uniqueNewItems];
   };
 
-  const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[] } | null> => {
+  const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[]; sessionConfidence?: number } | null> => {
     setIsExtracting(true);
-    const chunkCount = Math.ceil(text.length / 25000);
     setPhaseProgress('analysis', 0);
-    addMessage(chunkCount > 1 ? `AI analyzing document (${chunkCount} chunks)...` : 'AI analyzing document for plan items...');
+    addMessage('Step 1/3: AI extracting plan items...');
 
     try {
-      console.log('[FileUpload] Calling extract-plan-items with sessionId:', sessionId);
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-items`, {
+      console.log('[FileUpload] Calling process-plan pipeline with sessionId:', sessionId);
+      
+      // Call the orchestrator which runs all 3 agents
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -427,30 +428,48 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         }),
       });
 
-      setPhaseProgress('analysis', 80);
+      // Update progress as pipeline runs — we simulate phase transitions
+      // since the orchestrator runs synchronously
+      setPhaseProgress('analysis', 50);
+      addMessage('Agent 1 extraction in progress...');
 
       if (!response.ok) {
         const error = await response.json();
         if (response.status === 429) throw new Error('AI rate limit reached. Please wait a moment and try again.');
         if (response.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-        throw new Error(error.error || 'AI extraction failed');
+        throw new Error(error.error || 'AI pipeline failed');
       }
 
       const result = await response.json();
 
       if (!result.success || !result.data) {
-        throw new Error(result.error || 'AI extraction returned no data');
+        throw new Error(result.error || 'AI pipeline returned no data');
       }
 
+      // Update progress through remaining phases
       setPhaseProgress('analysis', 100);
+      addMessage('Step 1/3 complete: Items extracted');
+
+      setPhaseProgress('audit', 50);
+      addMessage('Step 2/3 complete: Completeness audit done');
+      setPhaseProgress('audit', 100);
+
+      setPhaseProgress('validate', 50);
+      addMessage('Step 3/3 complete: Hierarchy validated');
+      setPhaseProgress('validate', 100);
 
       const aiResponse: AIExtractionResponse = result.data;
-      
       const totalItems = result.totalItems || 0;
-      const bulletMarkers = result.bulletMarkersDetected || 0;
-      const chunksProcessed = result.chunksProcessed || 1;
-      console.log(`Extraction complete: ${totalItems} items, ${bulletMarkers} bullet markers, ${chunksProcessed} chunks`);
-      addMessage(`Found ${totalItems} total items across ${chunksProcessed} chunk(s)`);
+      const sessionConfidence = result.sessionConfidence;
+      const corrections = result.corrections || [];
+
+      console.log(`Pipeline complete: ${totalItems} items, confidence=${sessionConfidence}%, ${corrections.length} corrections`);
+      addMessage(`Pipeline complete: ${totalItems} items (${sessionConfidence}% confidence, ${corrections.length} corrections)`);
+
+      if (result.auditSummary) {
+        const as = result.auditSummary;
+        addMessage(`Audit: ${as.missingCount || 0} missing, ${as.mergedCount || 0} merged, ${as.rephrasedCount || 0} rephrased`);
+      }
       
       const levels: PlanLevel[] = aiResponse.detectedLevels?.length > 0
         ? aiResponse.detectedLevels.map((l, idx) => ({
@@ -466,14 +485,14 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
       addMessage(`${itemCount} top-level items structured`);
       
       toast({
-        title: "AI Analysis Complete",
-        description: `Extracted ${totalItems} plan items from your document${chunksProcessed > 1 ? ` (${chunksProcessed} chunks)` : ''}`,
+        title: "AI Pipeline Complete",
+        description: `Extracted ${totalItems} plan items (${sessionConfidence}% confidence)${corrections.length > 0 ? `, ${corrections.length} corrections applied` : ''}`,
       });
 
-      return { items, levels, personMappings };
+      return { items, levels, personMappings, sessionConfidence };
 
     } catch (error) {
-      console.error('AI extraction error:', error);
+      console.error('AI pipeline error:', error);
       toast({
         title: "AI Extraction Issue",
         description: getUserFriendlyError(error, 'extraction'),
