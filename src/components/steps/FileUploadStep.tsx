@@ -176,6 +176,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     formData.append('file', file);
     if (sessionId) formData.append('sessionId', sessionId);
 
+    console.log('[FileUpload] Calling parse-pdf with sessionId:', sessionId);
     // Update session with document info
     updateSessionRow({ document_name: file.name, document_size_bytes: file.size });
 
