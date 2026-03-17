@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Header } from '@/components/Header';
+import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
 import { FileUploadStep } from '@/components/steps/FileUploadStep';
 import { OrgProfileStep } from '@/components/steps/OrgProfileStep';
@@ -85,7 +86,14 @@ const Index = () => {
 
   const handleOrgProfileComplete = (profile: OrgProfile) => {
     setOrgProfile(profile);
-    ensureSessionId();
+    const sid = ensureSessionId();
+    // Update session row with org details
+    supabase.from('processing_sessions').update({
+      org_name: profile.organizationName,
+      org_industry: profile.industry,
+    }).eq('id', sid).then(({ error }) => {
+      if (error) console.error('Failed to update session with org info:', error);
+    });
     setCurrentStep(1);
   };
 
