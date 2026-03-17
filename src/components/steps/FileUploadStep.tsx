@@ -412,6 +412,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     addMessage(chunkCount > 1 ? `AI analyzing document (${chunkCount} chunks)...` : 'AI analyzing document for plan items...');
 
     try {
+      console.log('[FileUpload] Calling extract-plan-items with sessionId:', sessionId);
       const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
