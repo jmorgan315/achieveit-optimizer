@@ -221,6 +221,7 @@ const Index = () => {
               items={state.items}
               levels={state.levels}
               orgProfile={state.orgProfile}
+              sessionId={state.sessionId}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}
