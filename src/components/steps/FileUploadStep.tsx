@@ -41,16 +41,16 @@ const INITIAL_PROGRESS: ProgressState = {
 };
 
 // Phase weights for progress calculation
-const WEIGHTS_WITH_VISION = { upload: 0.10, analysis: 0.35, verification: 0.10, vision: 0.45 };
-const WEIGHTS_NO_VISION = { upload: 0.10, analysis: 0.80, verification: 0.10, vision: 0 };
+const WEIGHTS_WITH_VISION = { upload: 0.10, analysis: 0.35, verification: 0.10, vision: 0.45, audit: 0, validate: 0 };
+const WEIGHTS_PIPELINE = { upload: 0.10, analysis: 0.40, verification: 0, vision: 0, audit: 0.25, validate: 0.25 };
 
 function calcOverallProgress(
   phase: ProcessingPhase,
   phaseProgress: number,
   isVisionNeeded: boolean
 ): number {
-  const weights = isVisionNeeded ? WEIGHTS_WITH_VISION : WEIGHTS_NO_VISION;
-  const order: ProcessingPhase[] = ['upload', 'analysis', 'verification', 'vision'];
+  const weights = isVisionNeeded ? WEIGHTS_WITH_VISION : WEIGHTS_PIPELINE;
+  const order: ProcessingPhase[] = ['upload', 'analysis', 'verification', 'vision', 'audit', 'validate'];
   const idx = order.indexOf(phase);
   let base = 0;
   for (let i = 0; i < idx; i++) base += weights[order[i]];
