@@ -208,21 +208,21 @@ export default function SessionDetailPage() {
                       <TabsTrigger value="raw">Raw JSON</TabsTrigger>
                     </TabsList>
                     <TabsContent value="request">
-                      <ScrollArea className="max-h-[500px]">
+                      <div className="max-h-[560px] overflow-y-auto">
                         {renderMessages(log.request_payload)}
-                      </ScrollArea>
+                      </div>
                     </TabsContent>
                     <TabsContent value="response">
-                      <ScrollArea className="max-h-[500px]">
+                      <div className="max-h-[560px] overflow-y-auto">
                         {renderResponseContent(log.response_payload)}
-                      </ScrollArea>
+                      </div>
                     </TabsContent>
                     <TabsContent value="raw">
                       <div className="space-y-2">
                         <div className="flex justify-end"><CopyButton text={JSON.stringify({ request: log.request_payload, response: log.response_payload }, null, 2)} /></div>
-                        <ScrollArea className="max-h-[500px]">
-                          <pre className="text-xs bg-muted/30 rounded p-3 overflow-auto">{JSON.stringify({ request: log.request_payload, response: log.response_payload }, null, 2)}</pre>
-                        </ScrollArea>
+                        <div className="max-h-[560px] overflow-y-auto">
+                          <pre className="text-xs bg-muted/30 rounded p-3 whitespace-pre overflow-x-auto">{JSON.stringify({ request: log.request_payload, response: log.response_payload }, null, 2)}</pre>
+                        </div>
                       </div>
                     </TabsContent>
                   </Tabs>
