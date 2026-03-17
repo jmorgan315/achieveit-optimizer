@@ -110,11 +110,20 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
   }, []);
 
   const updateSessionRow = async (updates: Record<string, unknown>) => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.warn('[FileUpload] updateSessionRow called with no sessionId');
+      return;
+    }
     try {
-      await supabase.from('processing_sessions').update(updates).eq('id', sessionId);
+      console.log('[FileUpload] Updating session row:', sessionId, updates);
+      const { error, count } = await supabase.from('processing_sessions').update(updates).eq('id', sessionId);
+      if (error) {
+        console.error('[FileUpload] Session update error:', error);
+      } else {
+        console.log('[FileUpload] Session update OK, matched rows:', count ?? 'unknown');
+      }
     } catch (e) {
-      console.error('Failed to update session:', e);
+      console.error('[FileUpload] Failed to update session:', e);
     }
   };
 
