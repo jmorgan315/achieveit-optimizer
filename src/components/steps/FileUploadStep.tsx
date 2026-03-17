@@ -544,7 +544,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           console.log('Pipeline found 0 items, falling back to Vision AI with level hints');
           addMessage('Pipeline found no items, trying visual analysis...');
           const levelHints = textResult?.levels || undefined;
-          const visionResult = await extractWithVisionAI(file, levelHints);
+          const visionResult = await extractWithVisionPipeline(file, levelHints);
           if (visionResult) {
             setExtractedItems(visionResult.items);
             setExtractedMappings(visionResult.personMappings);
