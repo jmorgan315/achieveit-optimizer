@@ -58,7 +58,7 @@ export function OrgProfileStep({ onComplete, onSkip, sessionId }: OrgProfileStep
 
     try {
       const { data, error } = await supabase.functions.invoke('lookup-organization', {
-        body: { organizationName: orgName.trim(), industry },
+        body: { organizationName: orgName.trim(), industry, sessionId },
       });
 
       if (error) throw error;

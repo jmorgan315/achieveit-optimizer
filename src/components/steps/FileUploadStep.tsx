@@ -65,7 +65,7 @@ function estimateTime(pageCount: number, phase: ProcessingPhase, phaseProgress: 
   return Math.max(0, Math.round(totalEstimate * (1 - overallPct)));
 }
 
-export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile }: FileUploadStepProps) {
+export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessionId }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [fileContent, setFileContent] = useState('');
