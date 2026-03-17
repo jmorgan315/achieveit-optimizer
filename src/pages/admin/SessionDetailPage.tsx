@@ -113,7 +113,7 @@ function renderResponseContent(payload: Json) {
     if (msg?.content) return <p className="text-sm whitespace-pre-wrap">{String(msg.content)}</p>;
   }
 
-  return <pre className="text-xs overflow-auto">{JSON.stringify(payload, null, 2)}</pre>;
+  return <pre className="text-xs whitespace-pre overflow-x-auto">{JSON.stringify(payload, null, 2)}</pre>;
 }
 
 function CopyButton({ text }: { text: string }) {
