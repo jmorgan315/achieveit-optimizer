@@ -109,12 +109,54 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     setProgressState({ ...INITIAL_PROGRESS, pageCount });
   }, []);
 
+  const updateSessionRow = async (updates: Record<string, unknown>) => {
+    if (!sessionId) return;
+    try {
+      await supabase.from('processing_sessions').update(updates).eq('id', sessionId);
+    } catch (e) {
+      console.error('Failed to update session:', e);
+    }
+  };
+
+  const aggregateAndUpdateSession = async (itemCount: number, method: string) => {
+    if (!sessionId) return;
+    try {
+      const { data: logs } = await supabase
+        .from('api_call_logs')
+        .select('input_tokens, output_tokens, duration_ms')
+        .eq('session_id', sessionId);
+      
+      const totals = (logs || []).reduce(
+        (acc, row) => ({
+          total_api_calls: acc.total_api_calls + 1,
+          total_input_tokens: acc.total_input_tokens + (row.input_tokens || 0),
+          total_output_tokens: acc.total_output_tokens + (row.output_tokens || 0),
+          total_duration_ms: acc.total_duration_ms + (row.duration_ms || 0),
+        }),
+        { total_api_calls: 0, total_input_tokens: 0, total_output_tokens: 0, total_duration_ms: 0 }
+      );
+
+      await updateSessionRow({
+        ...totals,
+        extraction_method: method,
+        total_items_extracted: itemCount,
+        status: 'completed',
+      });
+    } catch (e) {
+      console.error('Failed to aggregate session:', e);
+    }
+  };
+
   const parsePdfWithEdgeFunction = async (file: File): Promise<{ text: string; pageCount: number }> => {
     addMessage('Uploading document to cloud...');
     setPhaseProgress('upload', 30);
     
     const formData = new FormData();
     formData.append('file', file);
+    if (sessionId) formData.append('sessionId', sessionId);
+
+    // Update session with document info
+    updateSessionRow({ document_name: file.name, document_size_bytes: file.size });
 
     const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-pdf`, {
       method: 'POST',

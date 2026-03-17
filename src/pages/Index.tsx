@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Header } from '@/components/Header';
+import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
 import { FileUploadStep } from '@/components/steps/FileUploadStep';
 import { OrgProfileStep } from '@/components/steps/OrgProfileStep';
