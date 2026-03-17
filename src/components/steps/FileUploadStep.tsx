@@ -9,6 +9,7 @@ import { AIExtractionResponse, AIDocumentTerminology, convertAIResponseToPlanIte
 import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages, isTextQualityPoor, batchPageImages, PDFPageImage } from '@/utils/pdfToImages';
 import { ProcessingOverlay, ProcessingPhase } from './ProcessingOverlay';
+import { supabase } from '@/integrations/supabase/client';
 
 import { OrgProfile } from '@/types/plan';
 
