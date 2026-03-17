@@ -110,21 +110,40 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
   }, []);
 
   const updateSessionRow = async (updates: Record<string, unknown>) => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.warn('[FileUpload] updateSessionRow called with no sessionId');
+      return;
+    }
     try {
-      await supabase.from('processing_sessions').update(updates).eq('id', sessionId);
+      console.log('[FileUpload] Updating session row:', sessionId, updates);
+      const { error, count } = await supabase.from('processing_sessions').update(updates).eq('id', sessionId);
+      if (error) {
+        console.error('[FileUpload] Session update error:', error);
+      } else {
+        console.log('[FileUpload] Session update OK, matched rows:', count ?? 'unknown');
+      }
     } catch (e) {
-      console.error('Failed to update session:', e);
+      console.error('[FileUpload] Failed to update session:', e);
     }
   };
 
   const aggregateAndUpdateSession = async (itemCount: number, method: string) => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.warn('[FileUpload] aggregateAndUpdateSession called with no sessionId');
+      return;
+    }
     try {
-      const { data: logs } = await supabase
+      console.log('[FileUpload] Aggregating session data for:', sessionId);
+      const { data: logs, error: logsError } = await supabase
         .from('api_call_logs')
         .select('input_tokens, output_tokens, duration_ms')
         .eq('session_id', sessionId);
+
+      if (logsError) {
+        console.error('[FileUpload] Failed to fetch api_call_logs for aggregation:', logsError);
+      }
+      
+      console.log('[FileUpload] Found', logs?.length ?? 0, 'api_call_log rows for session:', sessionId);
       
       const totals = (logs || []).reduce(
         (acc, row) => ({
@@ -136,6 +155,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         { total_api_calls: 0, total_input_tokens: 0, total_output_tokens: 0, total_duration_ms: 0 }
       );
 
+      console.log('[FileUpload] Aggregated totals:', totals);
+
       await updateSessionRow({
         ...totals,
         extraction_method: method,
@@ -143,7 +164,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         status: 'completed',
       });
     } catch (e) {
-      console.error('Failed to aggregate session:', e);
+      console.error('[FileUpload] Failed to aggregate session:', e);
     }
   };
 
@@ -155,6 +176,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     formData.append('file', file);
     if (sessionId) formData.append('sessionId', sessionId);
 
+    console.log('[FileUpload] Calling parse-pdf with sessionId:', sessionId);
     // Update session with document info
     updateSessionRow({ document_name: file.name, document_size_bytes: file.size });
 
@@ -264,6 +286,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         const maxRetries = 3;
 
         while (retries <= maxRetries) {
+          console.log(`[FileUpload] Calling extract-plan-vision batch ${batchIndex + 1}/${batches.length} with sessionId:`, sessionId);
           const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-vision`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -391,6 +414,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     addMessage(chunkCount > 1 ? `AI analyzing document (${chunkCount} chunks)...` : 'AI analyzing document for plan items...');
 
     try {
+      console.log('[FileUpload] Calling extract-plan-items with sessionId:', sessionId);
       const response = await fetch(`${SUPABASE_URL}/functions/v1/extract-plan-items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

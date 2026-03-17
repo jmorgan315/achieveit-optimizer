@@ -21,6 +21,7 @@ serve(async (req) => {
     }
 
     const { organizationName, industry, sessionId: incomingSessionId } = await req.json();
+    console.log('[lookup-organization] Received sessionId:', incomingSessionId);
 
     if (!organizationName || !industry) {
       return new Response(

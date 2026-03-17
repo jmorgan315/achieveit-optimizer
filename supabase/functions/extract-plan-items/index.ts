@@ -627,6 +627,8 @@ serve(async (req) => {
     const body = await req.json();
     const { documentText, organizationName, industry, documentHints, sessionId: incomingSessionId } = body;
 
+    console.log('[extract-plan-items] Received sessionId:', incomingSessionId);
+
     if (!documentText || typeof documentText !== "string") {
       return createSafeError(400, "Document text is required and must be a string.");
     }
@@ -642,6 +644,7 @@ serve(async (req) => {
     }
 
     const sessionId = await ensureSession(incomingSessionId);
+    console.log('[extract-plan-items] Resolved sessionId:', sessionId);
 
     const totalBulletMarkers = countBulletMarkers(trimmedText);
     const chunks = splitDocumentIntoChunks(trimmedText, CHUNK_SIZE);
