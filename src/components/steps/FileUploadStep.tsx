@@ -469,7 +469,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           console.log('File over 10MB, skipping text extraction, using Vision AI directly');
           addMessage('Large document detected, using Vision AI...');
           setIsProcessing(false);
-          const visionResult = await extractWithVisionAI(file);
+          const visionResult = await extractWithVisionPipeline(file);
           if (visionResult) {
             setExtractedItems(visionResult.items);
             setExtractedMappings(visionResult.personMappings);
