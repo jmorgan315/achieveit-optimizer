@@ -1,30 +1,51 @@
 
 
-# Option C: Remove Path Step, Add Simple/Full Toggle to Review Step
+# Plan: Admin Section for API Call Logs
 
-## Summary
-Remove the standalone "Choose Path" wizard step entirely. Add a "Simple View / Full Editor" toggle inside `PlanOptimizerStep`. Simple view shows a summary table with stats and a direct download button. Full view is the existing tree editor. Wizard goes from 5 steps to 4.
+## New Files
 
-## Changes
+### 1. `src/pages/admin/AdminLayout.tsx`
+Sidebar layout wrapper using SidebarProvider. Sidebar has two links: "Sessions" and "API Logs". Header with SidebarTrigger and a "← Back to App" link. Renders `<Outlet />` for nested routes.
 
-### 1. Remove Path Step from Wizard (`src/pages/Index.tsx`)
-- Remove `PathSelectorStep` import and `ProcessingPath` import
-- Update `WIZARD_STEPS` to 4 steps: Organization → Upload Plan → Map People → Review & Export
-- Remove `handlePathSelect` handler and `setProcessingPath` from destructuring
-- After level confirmation, go directly to People Mapper (step 2 instead of step 3)
-- Shift all step indices down by 1 (people = 2, review = 3)
-- Update sticky action bar condition from `currentStep === 4` to `currentStep === 3`
+### 2. `src/pages/admin/SessionsPage.tsx`
+- Fetches `processing_sessions` ordered by `created_at DESC`
+- Summary cards at top: total sessions, total tokens, total API calls
+- Filters: date range (two date inputs), status dropdown, extraction method dropdown
+- Table with columns: Date, Org Name, Document Name, Method, Items Extracted, API Calls, Total Tokens, Duration, Status (as Badge)
+- Rows link to `/admin/sessions/:id`
 
-### 2. Delete `src/components/steps/PathSelectorStep.tsx`
+### 3. `src/pages/admin/SessionDetailPage.tsx`
+- Fetches single `processing_sessions` row + all `api_call_logs` where `session_id` matches
+- **Summary card**: org name, industry, document, method, items, calls, tokens (in/out), duration, status badge
+- **Timeline**: chronological list of API calls, each as a Collapsible card showing step_label, edge_function, model, tokens, duration, status
+- Expanded view uses Tabs with 3 tabs:
+  - **Request**: Renders system prompt and user messages as formatted text blocks; truncated images show placeholder
+  - **Response**: Renders main content/text as formatted text, plus structured data
+  - **Raw JSON**: Full `request_payload` and `response_payload` in `<pre>` blocks with copy button
 
-### 3. Clean up types and state
-- Remove `ProcessingPath` type from `src/types/plan.ts`
-- Remove `processingPath` from `PlanState` interface
-- Remove `setProcessingPath` from `src/hooks/usePlanState.ts`
+### 4. `src/pages/admin/ApiLogsPage.tsx`
+- Fetches all `api_call_logs` ordered by `created_at DESC`
+- Table: Date, Session ID (linked), Edge Function, Step Label, Model, Tokens In/Out, Duration, Status
+- Filters: edge_function dropdown, status dropdown, model text filter
 
-### 4. Add Simple/Full toggle to `PlanOptimizerStep.tsx`
-- Add local state `viewMode: 'simple' | 'full'` (default: `'full'`)
-- Add a toggle near the top (next to the stats bar) with two options: "Summary" and "Full Editor"
-- **Summary view**: Compact card showing item counts per level, owner/date/metric coverage percentages, and a prominent "Download" button. No tree editing.
-- **Full Editor view**: The existing tree view with drag-and-drop, editing, etc. (current behavior)
+## Modified Files
+
+### 5. `src/App.tsx`
+Add admin routes:
+```
+<Route path="/admin" element={<AdminLayout />}>
+  <Route index element={<Navigate to="sessions" />} />
+  <Route path="sessions" element={<SessionsPage />} />
+  <Route path="sessions/:id" element={<SessionDetailPage />} />
+  <Route path="logs" element={<ApiLogsPage />} />
+</Route>
+```
+
+### 6. `src/components/Header.tsx`
+Add a small gear icon link to `/admin` in the right side nav area, using `react-router-dom`'s `Link`.
+
+## Tech Choices
+- All data fetching via `supabase` client with `.from()` queries
+- shadcn/ui: Table, Card, Badge, Tabs, Collapsible, ScrollArea, Select, Input
+- No authentication gating — but all admin pages are under `/admin` route group with a shared layout, making it easy to wrap with an auth guard later
 
