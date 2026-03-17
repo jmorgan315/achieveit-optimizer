@@ -32,7 +32,7 @@ interface OrgProfileStepProps {
   sessionId?: string;
 }
 
-export function OrgProfileStep({ onComplete, onSkip }: OrgProfileStepProps) {
+export function OrgProfileStep({ onComplete, onSkip, sessionId }: OrgProfileStepProps) {
   const [orgName, setOrgName] = useState('');
   const [industry, setIndustry] = useState('');
   const [documentHints, setDocumentHints] = useState('');
