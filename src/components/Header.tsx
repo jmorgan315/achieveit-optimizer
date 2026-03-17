@@ -1,4 +1,5 @@
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Settings } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import achieveitLogo from '@/assets/achieveit-logo.png';
 
 export function Header() {
