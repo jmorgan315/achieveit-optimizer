@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Brain, Eye, FileText, CheckCircle2, ChevronDown, Clock, Lightbulb, BarChart3, Sparkles, Info, GitBranch, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type ProcessingPhase = 'upload' | 'analysis' | 'verification' | 'vision';
+export type ProcessingPhase = 'upload' | 'analysis' | 'verification' | 'vision' | 'audit' | 'validate';
 
 interface ProcessingOverlayProps {
   phase: ProcessingPhase;
