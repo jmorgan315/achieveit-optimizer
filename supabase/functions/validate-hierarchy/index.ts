@@ -135,8 +135,8 @@ serve(async (req) => {
     const body = await req.json();
     const { sourceText, extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry } = body;
 
-    if (!sourceText || !extractedItems) {
-      return new Response(JSON.stringify({ success: false, error: "sourceText and extractedItems required" }), {
+    if (!extractedItems) {
+      return new Response(JSON.stringify({ success: false, error: "extractedItems required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -192,14 +192,17 @@ serve(async (req) => {
       levelsSection = `\nDETECTED HIERARCHY LEVELS:\n${detectedLevels.map((l: { depth: number; name: string }) => `  Depth ${l.depth}: ${l.name}`).join("\n")}\n`;
     }
 
+    let sourceSection = "";
+    if (truncatedText && truncatedText.length > 50) {
+      sourceSection = `\n=== SOURCE DOCUMENT ===\n\n${truncatedText}\n`;
+    } else {
+      sourceSection = `\n=== NOTE ===\nNo source text available (vision-only extraction). Validate hierarchy structure and level assignments based on the extracted items alone.\n`;
+    }
+
     const userMessage = `${contextPrefix}=== EXTRACTED ITEMS ===
 
 ${itemListing}
-${auditSection}${levelsSection}
-=== SOURCE DOCUMENT ===
-
-${truncatedText}
-
+${auditSection}${levelsSection}${sourceSection}
 Please validate and correct the hierarchy. Output the COMPLETE corrected items tree incorporating all audit findings. Document every correction.`;
 
     const requestBody = {

@@ -318,49 +318,59 @@ serve(async (req) => {
     // ==============================
     // AGENT 2: Completeness Audit
     // ==============================
+    console.log("[process-plan] Starting Agent 2 (completeness audit)");
     let auditFindings: AuditFindings | null = null;
 
     // Only run audit if we have source text
     const sourceForAudit = documentText || "";
     if (sourceForAudit.length > 100) {
-      const auditResult = await callEdgeFunction("audit-completeness", {
-        sourceText: sourceForAudit,
-        extractedItems: agent1Data.items,
-        sessionId,
-        organizationName,
-        industry,
-      });
+      try {
+        const auditResult = await callEdgeFunction("audit-completeness", {
+          sourceText: sourceForAudit,
+          extractedItems: agent1Data.items,
+          sessionId,
+          organizationName,
+          industry,
+        });
 
-      if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
-        auditFindings = (auditResult.data as { data: AuditFindings }).data;
-        console.log("[process-plan] Agent 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
-      } else {
-        console.warn("[process-plan] Agent 2 failed (non-fatal):", (auditResult.data as { error?: string }).error);
+        if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
+          auditFindings = (auditResult.data as { data: AuditFindings }).data;
+          console.log("[process-plan] Agent 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
+        } else {
+          console.error("[process-plan] Agent 2 failed (non-fatal):", JSON.stringify(auditResult.data));
+        }
+      } catch (err) {
+        console.error("[process-plan] Agent 2 exception:", err);
       }
     } else {
-      console.log("[process-plan] Skipping Agent 2 — no source text for audit");
+      console.log("[process-plan] Skipping Agent 2 — vision-only extraction, no source text available");
     }
 
     // ==============================
     // AGENT 3: Hierarchy Validation
     // ==============================
+    console.log("[process-plan] Starting Agent 3 (hierarchy validation)");
     let validationResult: ValidationResult | null = null;
 
-    const validateResult = await callEdgeFunction("validate-hierarchy", {
-      sourceText: sourceForAudit,
-      extractedItems: agent1Data.items,
-      auditFindings,
-      detectedLevels: agent1Data.detectedLevels,
-      sessionId,
-      organizationName,
-      industry,
-    });
+    try {
+      const validateResult = await callEdgeFunction("validate-hierarchy", {
+        sourceText: sourceForAudit,
+        extractedItems: agent1Data.items,
+        auditFindings,
+        detectedLevels: agent1Data.detectedLevels,
+        sessionId,
+        organizationName,
+        industry,
+      });
 
-    if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
-      validationResult = (validateResult.data as { data: ValidationResult }).data;
-      console.log("[process-plan] Agent 3 complete:", validationResult.corrections?.length || 0, "corrections");
-    } else {
-      console.warn("[process-plan] Agent 3 failed (non-fatal):", (validateResult.data as { error?: string }).error);
+      if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
+        validationResult = (validateResult.data as { data: ValidationResult }).data;
+        console.log("[process-plan] Agent 3 complete:", validationResult.corrections?.length || 0, "corrections");
+      } else {
+        console.error("[process-plan] Agent 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
+      }
+    } catch (err) {
+      console.error("[process-plan] Agent 3 exception:", err);
     }
 
     // ==============================
