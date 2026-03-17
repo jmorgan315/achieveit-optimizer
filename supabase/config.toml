@@ -14,3 +14,12 @@ verify_jwt = false
 
 [functions.lookup-organization]
 verify_jwt = false
+
+[functions.process-plan]
+verify_jwt = false
+
+[functions.audit-completeness]
+verify_jwt = false
+
+[functions.validate-hierarchy]
+verify_jwt = false
