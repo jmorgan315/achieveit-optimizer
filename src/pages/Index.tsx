@@ -46,6 +46,7 @@ const Index = () => {
     setRawText,
     setItems,
     setOrgProfile,
+    setSessionId,
     processText,
     updatePersonMapping,
     applyPersonMappingsToItems,
@@ -57,6 +58,16 @@ const Index = () => {
     deleteItem,
     resetState,
   } = usePlanState();
+
+  // Generate sessionId when entering the upload step
+  const ensureSessionId = () => {
+    if (!state.sessionId) {
+      const id = crypto.randomUUID();
+      setSessionId(id);
+      return id;
+    }
+    return state.sessionId;
+  };
 
   const handleBack = () => {
     if (currentStep > 0) setCurrentStep(currentStep - 1);
