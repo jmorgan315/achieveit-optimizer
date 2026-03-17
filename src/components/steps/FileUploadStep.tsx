@@ -461,6 +461,16 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     }
   };
 
+  // Helper: count all items recursively
+  const countAllItems = (list: PlanItem[]): number =>
+    list.reduce((sum, item) => sum + 1 + countAllItems(item.children || []), 0);
+
+  // Helper: finalize extraction result and update session
+  const finalizeExtraction = (items: PlanItem[], method: 'text' | 'vision') => {
+    const total = countAllItems(items);
+    aggregateAndUpdateSession(total, method);
+  };
+
   const handleFileUpload = async (file: File) => {
     setIsProcessing(true);
     setUploadedFile(file);
@@ -471,6 +481,9 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     resetProgress();
     setPhaseProgress('upload', 0);
     addMessage('Starting file analysis...');
+
+    // Update session with document info for non-PDF paths too
+    updateSessionRow({ document_name: file.name, document_size_bytes: file.size });
 
     try {
       const fileName = file.name.toLowerCase();
@@ -498,6 +511,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
             setExtractedMappings(visionResult.personMappings);
             setDetectedLevels(visionResult.levels);
             setFileContent('__VISION_EXTRACTED__');
+            finalizeExtraction(visionResult.items, 'vision');
           }
           return;
         }
@@ -516,6 +530,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
             setExtractedMappings(visionResult.personMappings);
             setDetectedLevels(visionResult.levels);
             setFileContent('__VISION_EXTRACTED__');
+            finalizeExtraction(visionResult.items, 'vision');
           }
           return;
         }
@@ -530,6 +545,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
             setExtractedMappings(visionResult.personMappings);
             setDetectedLevels(visionResult.levels);
             setFileContent('__VISION_EXTRACTED__');
+            finalizeExtraction(visionResult.items, 'vision');
           }
           return;
         }
@@ -546,6 +562,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
             setExtractedMappings(visionResult.personMappings);
             setDetectedLevels(visionResult.levels);
             setFileContent('__VISION_EXTRACTED__');
+            finalizeExtraction(visionResult.items, 'vision');
           }
           return;
         }
@@ -569,6 +586,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
             setExtractedMappings(visionResult.personMappings);
             setDetectedLevels(visionResult.levels);
             setFileContent('__VISION_EXTRACTED__');
+            finalizeExtraction(visionResult.items, 'vision');
           }
           return;
         }
@@ -590,23 +608,24 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
               setExtractedMappings(visionResult.personMappings);
               setDetectedLevels(visionResult.levels);
               setFileContent('__VISION_EXTRACTED__');
+              finalizeExtraction(visionResult.items, 'vision');
               return;
             } else {
               console.log(`Vision verification also failed: ${visionVerification.reason}. Using best result.`);
-              const countAll = (list: PlanItem[]): number =>
-                list.reduce((sum, item) => sum + 1 + countAll(item.children || []), 0);
-              const textTotal = countAll(textResult.items);
-              const visionTotal = countAll(visionResult.items);
+              const textTotal = countAllItems(textResult.items);
+              const visionTotal = countAllItems(visionResult.items);
               
               if (visionTotal > textTotal) {
                 setExtractedItems(visionResult.items);
                 setExtractedMappings(visionResult.personMappings);
                 setDetectedLevels(visionResult.levels);
                 setFileContent('__VISION_EXTRACTED__');
+                finalizeExtraction(visionResult.items, 'vision');
               } else {
                 setExtractedItems(textResult.items);
                 setExtractedMappings(textResult.personMappings);
                 setDetectedLevels(textResult.levels);
+                finalizeExtraction(textResult.items, 'text');
               }
               toast({
                 title: "Extraction may be incomplete",
@@ -619,6 +638,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           setExtractedItems(textResult.items);
           setExtractedMappings(textResult.personMappings);
           setDetectedLevels(textResult.levels);
+          finalizeExtraction(textResult.items, 'text');
           toast({
             title: "Extraction may be incomplete",
             description: verification.reason + ". Please review carefully.",
@@ -631,6 +651,7 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         setExtractedItems(textResult.items);
         setExtractedMappings(textResult.personMappings);
         setDetectedLevels(textResult.levels);
+        finalizeExtraction(textResult.items, 'text');
         return;
         
       } else if (isWord || isExcel) {
@@ -669,11 +690,13 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         setExtractedItems(textResult.items);
         setExtractedMappings(textResult.personMappings);
         setDetectedLevels(textResult.levels);
+        finalizeExtraction(textResult.items, 'text');
       }
       
     } catch (error) {
       console.error('File processing error:', error);
       setFileContent(SAMPLE_RAW_TEXT);
+      updateSessionRow({ status: 'failed' });
       toast({
         title: "Processing failed",
         description: getUserFriendlyError(error, 'upload'),
