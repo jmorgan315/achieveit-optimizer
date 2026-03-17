@@ -35,6 +35,13 @@ export function Header() {
             Support
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
+          <Link
+            to="/admin"
+            className="text-muted-foreground hover:text-foreground transition-colors"
+            title="Admin"
+          >
+            <Settings className="h-4 w-4" />
+          </Link>
           <a
             href="https://my.achieveit.com"
             target="_blank"
