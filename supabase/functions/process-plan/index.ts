@@ -386,12 +386,12 @@ serve(async (req) => {
 
       if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
         validationResult = (validateResult.data as { data: ValidationResult }).data;
-        console.log("[process-plan] Agent 3 complete:", validationResult.corrections?.length || 0, "corrections");
+        console.log("[process-plan] Step 3 complete:", validationResult.corrections?.length || 0, "corrections");
       } else {
-        console.error("[process-plan] Agent 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
+        console.error("[process-plan] Step 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
       }
     } catch (err) {
-      console.error("[process-plan] Agent 3 exception:", err);
+      console.error("[process-plan] Step 3 exception:", err);
     }
 
     // ==============================

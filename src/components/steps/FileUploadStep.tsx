@@ -386,14 +386,14 @@ export function FileUploadStep({
       }
 
       setPhaseProgress('analysis', 100);
-      addMessage('Step 1/3 complete: Items extracted');
+      addMessage('Extraction complete');
 
       setPhaseProgress('audit', 50);
-      addMessage('Step 2/3 complete: Completeness audit done');
+      addMessage('Completeness audit done');
       setPhaseProgress('audit', 100);
 
       setPhaseProgress('validate', 50);
-      addMessage('Step 3/3 complete: Hierarchy validated');
+      addMessage('Structure validated');
       setPhaseProgress('validate', 100);
 
       const aiResponse: AIExtractionResponse = result.data;
