@@ -427,6 +427,10 @@ export function PlanOptimizerStep({
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
+      {/* Session Summary + Confidence Banner */}
+      <SessionSummaryCard sessionId={sessionId} items={items} />
+      <ConfidenceBanner items={items} />
+
       {/* View Mode Toggle + Stats Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -440,12 +444,22 @@ export function PlanOptimizerStep({
             {viewMode === 'full' ? 'Full Editor' : 'Summary'}
           </Label>
         </div>
-        {viewMode === 'summary' && (
-          <Button onClick={onExport} size="sm">
+        <div className="flex items-center gap-2">
+          {needsReviewCount > 0 && (
+            <Button
+              variant={activeFilter === 'needs-review' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleFilterClick('needs-review')}
+            >
+              <Eye className="h-4 w-4 mr-1" />
+              {needsReviewCount} Need Review
+            </Button>
+          )}
+          <Button onClick={() => setShowExportDialog(true)} size="sm">
             <Download className="h-4 w-4 mr-2" />
-            Download Import File
+            Export
           </Button>
-        )}
+        </div>
       </div>
 
       {/* Stats Bar */}
