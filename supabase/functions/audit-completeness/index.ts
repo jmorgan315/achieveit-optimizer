@@ -140,7 +140,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, extractedItems, sessionId: incomingSessionId, organizationName, industry } = body;
+    const { sourceText, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
 
     if (!sourceText || !extractedItems) {
       return new Response(JSON.stringify({ success: false, error: "sourceText and extractedItems are required" }), {
