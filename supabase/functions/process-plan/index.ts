@@ -337,7 +337,7 @@ serve(async (req) => {
     // ==============================
     // AGENT 2: Completeness Audit
     // ==============================
-    console.log("[process-plan] Starting Agent 2 (completeness audit)");
+    console.log("[process-plan] Starting Step 2 (completeness audit)");
     let auditFindings: AuditFindings | null = null;
 
     // Only run audit if we have source text
