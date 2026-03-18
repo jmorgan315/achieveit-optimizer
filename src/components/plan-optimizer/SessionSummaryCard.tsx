@@ -38,9 +38,9 @@ export function SessionSummaryCard({ sessionId, items }: SessionSummaryCardProps
 
   // Derive agent stats from corrections
   const agent1Count = items.length;
-  const agent2Added = items.filter(i => i.corrections?.some(c => /added by|missing from|auditor|agent\s*2/i.test(c))).length;
-  const agent2Rephrased = items.filter(i => i.corrections?.some(c => /rephras/i.test(c))).length;
-  const agent3Corrected = items.filter(i => i.corrections?.some(c => /hierarchy|validator|agent\s*3|parent changed|level changed/i.test(c))).length;
+  const auditAdded = items.filter(i => i.corrections?.some(c => /added by|missing from|auditor|audit|agent\s*2/i.test(c))).length;
+  const auditRephrased = items.filter(i => i.corrections?.some(c => /rephras/i.test(c))).length;
+  const validationCorrected = items.filter(i => i.corrections?.some(c => /hierarchy|validator|validation|agent\s*3|parent changed|level changed/i.test(c))).length;
 
   const avgConfidence = items.length > 0
     ? Math.round(items.reduce((acc, i) => acc + (i.confidence ?? 100), 0) / items.length)
