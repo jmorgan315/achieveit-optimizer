@@ -355,15 +355,15 @@ serve(async (req) => {
 
         if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
           auditFindings = (auditResult.data as { data: AuditFindings }).data;
-          console.log("[process-plan] Agent 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
+          console.log("[process-plan] Step 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
         } else {
-          console.error("[process-plan] Agent 2 failed (non-fatal):", JSON.stringify(auditResult.data));
+          console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
         }
       } catch (err) {
-        console.error("[process-plan] Agent 2 exception:", err);
+        console.error("[process-plan] Step 2 exception:", err);
       }
     } else {
-      console.log("[process-plan] Skipping Agent 2 — vision-only extraction, no source text available");
+      console.log("[process-plan] Skipping Step 2 — vision-only extraction, no source text available");
     }
 
     // ==============================
