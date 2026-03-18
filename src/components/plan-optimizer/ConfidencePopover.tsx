@@ -14,11 +14,18 @@ interface ConfidencePopoverProps {
   children: React.ReactNode;
 }
 
+export function isUserOverride(correction: string): boolean {
+  return correction.startsWith('[user-override]');
+}
+
 export function hasDiscrepancy(item: PlanItem): boolean {
   if (!item.corrections || item.corrections.length === 0) return false;
+  // Ignore user-override corrections
+  const agentCorrections = item.corrections.filter(c => !isUserOverride(c));
+  if (agentCorrections.length === 0) return false;
   if ((item.confidence ?? 100) <= 20) return true;
-  const hasAgent2 = item.corrections.some(c => /agent\s*2|completeness|auditor/i.test(c));
-  const hasAgent3 = item.corrections.some(c => /agent\s*3|hierarchy|validator/i.test(c));
+  const hasAgent2 = agentCorrections.some(c => /agent\s*2|completeness|auditor/i.test(c));
+  const hasAgent3 = agentCorrections.some(c => /agent\s*3|hierarchy|validator/i.test(c));
   return hasAgent2 && hasAgent3;
 }
 
