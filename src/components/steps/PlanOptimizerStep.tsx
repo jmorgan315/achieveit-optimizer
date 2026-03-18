@@ -38,12 +38,16 @@ import {
 import { PlanItem, PlanLevel, OrgProfile } from '@/types/plan';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
+import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
+import { ConfidenceBanner } from '@/components/plan-optimizer/ConfidenceBanner';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, LayoutList, TreePine } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, LayoutList, TreePine, Eye } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/hooks/use-toast';
 import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
+import { exportToExcel } from '@/utils/exportToExcel';
 
 type DropInfo = { itemId: string; position: DropPosition };
 
