@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { logApiCall, ensureSession, extractTokenUsage } from "../_shared/logging.ts";
+import { logApiCall, ensureSession, extractTokenUsage, truncateImagePayload } from "../_shared/logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -7,8 +7,9 @@ const corsHeaders = {
 };
 
 const MAX_SOURCE_LENGTH = 180000;
+const MAX_VISION_IMAGES = 10; // Send at most 10 pages for audit (lighter than extraction)
 
-const AUDIT_SYSTEM_PROMPT = `You are a completeness auditor for strategic plan extraction. Your ONLY job is to compare extracted plan items against the source document and identify anything that was MISSED, INCORRECTLY MERGED, or REPHRASED.
+const TEXT_AUDIT_SYSTEM_PROMPT = `You are a completeness auditor for strategic plan extraction. Your ONLY job is to compare extracted plan items against the source document and identify anything that was MISSED, INCORRECTLY MERGED, or REPHRASED.
 
 You are NOT re-extracting the document. You are AUDITING an existing extraction for accuracy and completeness.
 
@@ -36,6 +37,8 @@ You are NOT re-extracting the document. You are AUDITING an existing extraction 
 - Demographic data, population statistics
 - Image captions, chart titles
 - Previous year achievements (unless they set baselines)
+- Core values, guiding principles, or philosophical statements
+- Section category labels that merely introduce sub-goals
 
 === REPHRASING DETECTION ===
 
@@ -46,6 +49,43 @@ Compare the 'name' field of each extracted item against the source text. If the 
 If you see 3 distinct bullets in the source but only 1 item in the extraction that seems to cover all 3, that's a MERGED item. Flag it with the extracted item and the original individual items.
 
 Be thorough but precise. Only flag genuine issues — do not flag items that are correctly extracted with minor formatting differences.`;
+
+const VISION_AUDIT_SYSTEM_PROMPT = `You are a completeness auditor for strategic plan extraction. You are reviewing page images from a strategic plan document alongside the extracted plan items. Your job is to:
+
+1. Look at each page image carefully
+2. Identify any plan items visible in the images that are MISSING from the extracted items list
+3. Identify any items in the extracted list that do NOT appear in the page images (extra items that shouldn't be there)
+4. Identify any items where the extracted name doesn't match what's written in the document
+5. Flag items that are NOT actually plan items — things like guiding principles, vision statements, or measurement tables that were incorrectly extracted as plan items
+
+Focus especially on numbered lists, bullet points, and items under headers like 'Goals', 'Priorities', 'Objectives', 'Strategies', 'Initiatives', etc.
+
+=== WHAT COUNTS AS A "PLAN ITEM" ===
+
+- Strategic priorities, pillars, themes
+- Objectives, goals, focus areas
+- Strategies, initiatives, actions, action items
+- KPIs, metrics, measures, targets
+- Any numbered or bulleted item under a heading that represents trackable work
+
+=== WHAT IS NOT A PLAN ITEM (DO NOT FLAG AS MISSING) ===
+
+- Table of contents entries, page numbers, headers, footers
+- Mission/vision statements, organizational values
+- Background narrative, introductory paragraphs
+- Demographic data, population statistics
+- Image captions, chart titles, decorative pages
+- Core values, guiding principles, or philosophical statements
+- Section category labels that merely introduce sub-goals
+
+=== EXTRA ITEMS DETECTION ===
+
+Check if the extracted list contains items that should NOT be there:
+- Items that look like section headers or category labels rather than actionable plan items
+- Items from measurement indicator tables or statistical summaries
+- Items that are vision/mission statements disguised as goals
+
+Be thorough but precise. Only flag genuine issues.`;
 
 const auditToolSchema = {
   type: "object",
@@ -62,6 +102,19 @@ const auditToolSchema = {
           suggestedLevel: { type: "string", description: "The hierarchy level this item should be at (e.g., 'Goal', 'Strategy', 'KPI')" },
         },
         required: ["sourceText", "approximateLocation", "suggestedLevel"],
+      },
+    },
+    extraItems: {
+      type: "array",
+      description: "Items in the extraction that should NOT be there (not actual plan items)",
+      items: {
+        type: "object",
+        properties: {
+          extractedItemId: { type: "string", description: "ID of the item that shouldn't be there" },
+          extractedItemName: { type: "string", description: "Name of the extra item" },
+          reason: { type: "string", description: "Why this isn't a plan item (e.g., 'This is a vision statement', 'This is a section category label')" },
+        },
+        required: ["extractedItemName", "reason"],
       },
     },
     mergedItems: {
@@ -89,7 +142,7 @@ const auditToolSchema = {
         type: "object",
         properties: {
           extractedItemId: { type: "string", description: "ID of the extracted item" },
-          extractedName: { type: "string", description: "What Agent 1 wrote as the name" },
+          extractedName: { type: "string", description: "What was extracted as the name" },
           originalText: { type: "string", description: "What the document actually says" },
         },
         required: ["extractedName", "originalText"],
@@ -102,6 +155,7 @@ const auditToolSchema = {
         totalSourceItems: { type: "number", description: "Approximate total identifiable plan items in the source document" },
         totalExtractedItems: { type: "number", description: "Total items in the extraction" },
         missingCount: { type: "number" },
+        extraCount: { type: "number" },
         mergedCount: { type: "number" },
         rephrasedCount: { type: "number" },
       },
@@ -126,6 +180,54 @@ function flattenItems(items: unknown[], prefix = ""): string[] {
   return lines;
 }
 
+/** Build context prefix from org info */
+function buildContextPrefix(organizationName?: string, industry?: string, planLevels?: { depth: number; name: string }[]): string {
+  if (!organizationName && !industry && !planLevels) return "";
+  const parts: string[] = [];
+  if (organizationName) parts.push(`Organization: ${organizationName}`);
+  if (industry) parts.push(`Industry: ${industry}`);
+  if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+    const levelsList = planLevels.map((l) => `Level ${l.depth}: ${l.name}`).join(', ');
+    parts.push(`User-defined hierarchy: ${levelsList}`);
+  }
+  return `ORGANIZATION CONTEXT:\n${parts.join("\n")}\n\n`;
+}
+
+/** Build Anthropic message content with images */
+function buildVisionContent(
+  pageImages: string[],
+  itemListing: string,
+  contextPrefix: string,
+  extractedItemCount: number,
+): Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> {
+  const content: Array<{ type: string; text?: string; source?: { type: string; media_type: string; data: string } }> = [];
+
+  content.push({
+    type: "text",
+    text: `${contextPrefix}=== EXTRACTED ITEMS (${extractedItemCount} top-level) ===
+
+${itemListing}
+
+Please audit the extraction above against the document page images below. Identify any missing items, extra items that shouldn't be there, merged items, or rephrased items.`,
+  });
+
+  for (const img of pageImages) {
+    const match = img.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    if (match) {
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: match[1],
+          data: match[2],
+        },
+      });
+    }
+  }
+
+  return content;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -140,40 +242,61 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
+    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
 
-    if (!sourceText || !extractedItems) {
-      return new Response(JSON.stringify({ success: false, error: "sourceText and extractedItems are required" }), {
+    const isVisionMode = !!(pageImages && Array.isArray(pageImages) && pageImages.length > 0);
+    const hasText = !!(sourceText && sourceText.length > 100);
+
+    if (!hasText && !isVisionMode) {
+      return new Response(JSON.stringify({ success: false, error: "sourceText or pageImages are required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!extractedItems) {
+      return new Response(JSON.stringify({ success: false, error: "extractedItems is required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const sessionId = await ensureSession(incomingSessionId);
-    console.log("[audit-completeness] sessionId:", sessionId);
-
-    let truncatedText = sourceText;
-    let truncationNote = "";
-    if (sourceText.length > MAX_SOURCE_LENGTH) {
-      truncatedText = sourceText.slice(0, MAX_SOURCE_LENGTH);
-      truncationNote = "\n\n[NOTE: Document was truncated for analysis. Some items near the end may not be auditable.]";
-      console.log(`[audit-completeness] Source text truncated from ${sourceText.length} to ${MAX_SOURCE_LENGTH} chars`);
-    }
+    console.log(`[audit-completeness] sessionId: ${sessionId}, mode: ${isVisionMode ? 'vision' : 'text'}, images: ${isVisionMode ? pageImages.length : 0}`);
 
     const itemListing = flattenItems(extractedItems).join("\n");
+    const contextPrefix = buildContextPrefix(organizationName, industry, planLevels);
 
-    let contextPrefix = "";
-    if (organizationName || industry || planLevels) {
-      const parts: string[] = [];
-      if (organizationName) parts.push(`Organization: ${organizationName}`);
-      if (industry) parts.push(`Industry: ${industry}`);
-      if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
-        const levelsList = planLevels.map((l: { depth: number; name: string }) => `Level ${l.depth}: ${l.name}`).join(', ');
-        parts.push(`User-defined hierarchy: ${levelsList}`);
+    let requestBody: Record<string, unknown>;
+
+    if (isVisionMode) {
+      // Vision-based audit: send page images
+      const imagesToSend = pageImages.slice(0, MAX_VISION_IMAGES);
+      console.log(`[audit-completeness] Vision audit with ${imagesToSend.length} images (of ${pageImages.length} total)`);
+
+      const anthropicContent = buildVisionContent(imagesToSend, itemListing, contextPrefix, extractedItems.length);
+
+      requestBody = {
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 16384,
+        system: VISION_AUDIT_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: anthropicContent }],
+        tools: [{
+          name: "report_audit_findings",
+          description: "Report completeness audit findings comparing extraction against source document images",
+          input_schema: auditToolSchema,
+        }],
+        tool_choice: { type: "tool", name: "report_audit_findings" },
+      };
+    } else {
+      // Text-based audit: current behavior
+      let truncatedText = sourceText;
+      let truncationNote = "";
+      if (sourceText.length > MAX_SOURCE_LENGTH) {
+        truncatedText = sourceText.slice(0, MAX_SOURCE_LENGTH);
+        truncationNote = "\n\n[NOTE: Document was truncated for analysis. Some items near the end may not be auditable.]";
+        console.log(`[audit-completeness] Source text truncated from ${sourceText.length} to ${MAX_SOURCE_LENGTH} chars`);
       }
-      contextPrefix = `ORGANIZATION CONTEXT:\n${parts.join("\n")}\n\n`;
-    }
 
-    const userMessage = `${contextPrefix}=== EXTRACTED ITEMS (${extractedItems.length} top-level) ===
+      const userMessage = `${contextPrefix}=== EXTRACTED ITEMS (${extractedItems.length} top-level) ===
 
 ${itemListing}
 
@@ -183,18 +306,19 @@ ${truncatedText}${truncationNote}
 
 Please audit the extraction above against the source document. Identify any missing items, merged items, or rephrased items.`;
 
-    const requestBody = {
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 16384,
-      system: AUDIT_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-      tools: [{
-        name: "report_audit_findings",
-        description: "Report completeness audit findings comparing extraction against source document",
-        input_schema: auditToolSchema,
-      }],
-      tool_choice: { type: "tool", name: "report_audit_findings" },
-    };
+      requestBody = {
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 16384,
+        system: TEXT_AUDIT_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+        tools: [{
+          name: "report_audit_findings",
+          description: "Report completeness audit findings comparing extraction against source document",
+          input_schema: auditToolSchema,
+        }],
+        tool_choice: { type: "tool", name: "report_audit_findings" },
+      };
+    }
 
     const startTime = Date.now();
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -232,12 +356,15 @@ Please audit the extraction above against the source document. Identify any miss
 
     const toolUse = aiResponse.content?.find((b: { type: string }) => b.type === "tool_use");
 
+    // Truncate images in logged payload
+    const logPayload = isVisionMode ? truncateImagePayload(requestBody) : { sourceTextLength: sourceText?.length, extractedItemCount: extractedItems.length };
+
     logApiCall({
       session_id: sessionId,
       edge_function: "audit-completeness",
       step_label: "Step 2: Completeness Audit",
       model: "claude-sonnet-4-20250514",
-      request_payload: { sourceTextLength: sourceText.length, extractedItemCount: extractedItems.length },
+      request_payload: logPayload,
       response_payload: aiResponse,
       input_tokens: tokens.input_tokens,
       output_tokens: tokens.output_tokens,

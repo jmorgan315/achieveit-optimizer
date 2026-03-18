@@ -171,6 +171,40 @@ function batchImages(images: string[], batchSize: number): string[][] {
   return batches;
 }
 
+// Select a representative subset of images for the audit step (max 10)
+// Strategy: take first 2 pages (likely overview/TOC), last page, and evenly space the rest
+function selectAuditImages(images: string[]): string[] {
+  if (images.length <= 10) return images;
+  const selected: string[] = [];
+  const indices = new Set<number>();
+
+  // Always include first 2 pages (overview, TOC)
+  indices.add(0);
+  if (images.length > 1) indices.add(1);
+
+  // Always include last page
+  indices.add(images.length - 1);
+
+  // Fill remaining slots evenly from the middle
+  const remaining = 10 - indices.size;
+  const middleStart = 2;
+  const middleEnd = images.length - 2;
+  if (middleEnd > middleStart && remaining > 0) {
+    const step = (middleEnd - middleStart) / (remaining + 1);
+    for (let i = 0; i < remaining; i++) {
+      indices.add(Math.round(middleStart + step * (i + 1)));
+    }
+  }
+
+  // Sort and collect
+  const sortedIndices = [...indices].sort((a, b) => a - b);
+  for (const idx of sortedIndices) {
+    if (idx >= 0 && idx < images.length) selected.push(images[idx]);
+  }
+
+  return selected;
+}
+
 // Merge vision batch results, deduplicating by name
 function mergeVisionBatchResults(
   existing: unknown[],
@@ -336,23 +370,37 @@ serve(async (req) => {
     console.log(`[process-plan] Step 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
 
     // ==============================
-    // AGENT 2: Completeness Audit
+    // STEP 2: Completeness Audit
     // ==============================
     console.log("[process-plan] Starting Step 2 (completeness audit)");
     let auditFindings: AuditFindings | null = null;
 
-    // Only run audit if we have source text
     const sourceForAudit = documentText || "";
-    if (sourceForAudit.length > 100) {
-      try {
-        const auditResult = await callEdgeFunction("audit-completeness", {
-          sourceText: sourceForAudit,
-          extractedItems: agent1Data.items,
-          sessionId,
-          organizationName,
-          industry,
-          planLevels,
-        });
+    const hasSourceText = sourceForAudit.length > 100;
+
+    try {
+      // Build audit payload — use text if available, otherwise send page images
+      const auditPayload: Record<string, unknown> = {
+        extractedItems: agent1Data.items,
+        sessionId,
+        organizationName,
+        industry,
+        planLevels,
+      };
+
+      if (hasSourceText) {
+        auditPayload.sourceText = sourceForAudit;
+        console.log("[process-plan] Step 2: text-based audit");
+      } else if (useVision && pageImages) {
+        // For vision path, send a subset of images (max 10 for efficiency)
+        const images = pageImages as string[];
+        const auditImages = images.length <= 10 ? images : selectAuditImages(images);
+        auditPayload.pageImages = auditImages;
+        console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
+      }
+
+      if (hasSourceText || (useVision && pageImages)) {
+        const auditResult = await callEdgeFunction("audit-completeness", auditPayload);
 
         if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
           auditFindings = (auditResult.data as { data: AuditFindings }).data;
@@ -360,11 +408,11 @@ serve(async (req) => {
         } else {
           console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
         }
-      } catch (err) {
-        console.error("[process-plan] Step 2 exception:", err);
+      } else {
+        console.log("[process-plan] Step 2 skipped — no source text or images available");
       }
-    } else {
-      console.log("[process-plan] Skipping Step 2 — vision-only extraction, no source text available");
+    } catch (err) {
+      console.error("[process-plan] Step 2 exception:", err);
     }
 
     // ==============================
