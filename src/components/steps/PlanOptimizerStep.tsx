@@ -652,7 +652,8 @@ export function PlanOptimizerStep({
                     nestLevelName={nestLevelName}
                     reorderLevelName={reorderLevelName}
                     sessionId={sessionId}
-                    dimmed={activeFilter === 'needs-review' && (item.confidence ?? 100) >= 80}
+                    showConfidence={showConfidence}
+                    dimmed={showConfidence && activeFilter === 'needs-review' && (item.confidence ?? 100) >= 80}
                   />
                   );
                 })}
