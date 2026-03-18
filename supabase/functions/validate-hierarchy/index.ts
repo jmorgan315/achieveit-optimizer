@@ -215,6 +215,12 @@ CRITICAL: Never create levels beyond what the user defined. If the user said ${p
           parts.push(`  - Extracted: "${r.extractedName}" → Original: "${r.originalText}"`);
         }
       }
+      if (af.duplicateItems?.length > 0) {
+        parts.push(`\nDUPLICATE ITEMS (${af.duplicateItems.length}):`);
+        for (const d of af.duplicateItems) {
+          parts.push(`  - "${d.item1Name}" (${d.item1Level || '?'}) ↔ "${d.item2Name}" (${d.item2Level || '?'}) — ${d.recommendation}`);
+        }
+      }
       if (parts.length > 0) {
         auditSection = `\n=== COMPLETENESS AUDIT FINDINGS ===\n${parts.join("\n")}\n`;
       }
