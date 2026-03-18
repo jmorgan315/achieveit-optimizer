@@ -36,6 +36,10 @@ If a parent and its child have the same or very similar names (differing only in
 - Remove the duplicate child
 - Log this as a correction with type "merged_duplicate"
 
+=== CAPITALIZATION ===
+
+When you encounter the same item name in different capitalizations (e.g., 'BUILD A UNIVERSAL PATH TO EARLY LEARNING' vs 'Build a Universal Path to Early Learning'), always prefer the Title Case or sentence case version. ALL CAPS text in documents is typically a design/formatting choice, not the canonical name. Never output item names in ALL CAPS unless every version in the source document is ALL CAPS.
+
 === HANDLING AUDIT FINDINGS ===
 
 Missing items: Insert them at the correct position in the hierarchy. Use the suggestedLevel and approximateLocation from the audit to determine placement.
