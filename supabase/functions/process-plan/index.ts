@@ -242,7 +242,7 @@ serve(async (req) => {
       let detectedLevels: { depth: number; name: string }[] = [];
       let previousContext = "";
 
-      console.log(`[process-plan] Agent 1 vision: ${images.length} images in ${batches.length} batches`);
+      console.log(`[process-plan] Step 1 vision: ${images.length} images in ${batches.length} batches`);
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
         const batch = batches[batchIdx];
