@@ -636,6 +636,8 @@ export function PlanOptimizerStep({
                     targetItemName={item.name}
                     nestLevelName={nestLevelName}
                     reorderLevelName={reorderLevelName}
+                    sessionId={sessionId}
+                    dimmed={activeFilter === 'needs-review' && (item.confidence ?? 100) >= 80}
                   />
                   );
                 })}
