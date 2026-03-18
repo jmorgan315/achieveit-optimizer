@@ -238,8 +238,11 @@ export function FileUploadStep({
     return { passed: true, reason: 'OK' };
   };
 
-  /** If no item has a confidence score, apply fallback defaults so the UI renders */
-  const applyFallbackConfidence = (items: PlanItem[]) => {
+  /** If no item has a confidence score AND pipeline didn't run, apply fallback defaults */
+  const applyFallbackConfidence = (items: PlanItem[], pipelineComplete?: boolean) => {
+    // If the multi-agent pipeline ran, trust the scores it set (even if some are low)
+    if (pipelineComplete) return;
+
     const walk = (list: PlanItem[]) => {
       for (const item of list) {
         if (item.confidence == null) {
