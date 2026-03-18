@@ -133,7 +133,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry } = body;
+    const { sourceText, extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
 
     if (!extractedItems) {
       return new Response(JSON.stringify({ success: false, error: "extractedItems required" }), {
