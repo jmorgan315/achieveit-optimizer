@@ -3,12 +3,12 @@ import { Header } from '@/components/Header';
 import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
 import { FileUploadStep } from '@/components/steps/FileUploadStep';
-import { OrgProfileStep } from '@/components/steps/OrgProfileStep';
+import { OrgProfileStep, LookupResult } from '@/components/steps/OrgProfileStep';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
 import { usePlanState } from '@/hooks/usePlanState';
-import { PlanItem, PersonMapping, PlanLevel, OrgProfile } from '@/types/plan';
+import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS } from '@/types/plan';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -32,14 +32,38 @@ const WIZARD_STEPS = [
   { id: 'optimize', title: 'Review & Export' },
 ];
 
+const DEFAULT_LEVEL_NAMES = [
+  'Strategic Priority', 'Objective', 'Goal', 'Strategy', 'KPI', 'Action Item', 'Sub-Action',
+];
+
 const Index = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
-  
+  const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
+
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
     personMappings: PersonMapping[];
   } | null>(null);
+
+  // === Lifted OrgProfileStep state ===
+  const [orgName, setOrgName] = useState('');
+  const [industry, setIndustry] = useState('');
+  const [documentHints, setDocumentHints] = useState('');
+  const [knowsLevels, setKnowsLevels] = useState(false);
+  const [levelCount, setLevelCount] = useState(3);
+  const [levelNames, setLevelNames] = useState<string[]>(DEFAULT_LEVEL_NAMES.slice(0, 3));
+  const [startPage, setStartPage] = useState('');
+  const [endPage, setEndPage] = useState('');
+  const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
+
+  // === Lifted FileUploadStep state ===
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [fileContent, setFileContent] = useState('');
+  const [extractedItems, setExtractedItems] = useState<PlanItem[] | null>(null);
+  const [extractedMappings, setExtractedMappings] = useState<PersonMapping[] | null>(null);
+  const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
+  const [useVisionAI, setUseVisionAI] = useState(false);
 
   const {
     state,
@@ -60,13 +84,11 @@ const Index = () => {
     resetState,
   } = usePlanState();
 
-  // Generate sessionId when entering the upload step
   const ensureSessionId = () => {
     if (!state.sessionId) {
       const id = crypto.randomUUID();
       console.log('[Session] Creating new session:', id);
       setSessionId(id);
-      // Insert the row NOW so edge functions can reference it via foreign key
       supabase.from('processing_sessions').insert({ id, status: 'in_progress' })
         .then(({ error }) => {
           if (error) console.error('[Session] Failed to create session row:', error);
@@ -74,42 +96,66 @@ const Index = () => {
         });
       return id;
     }
-    console.log('[Session] Reusing existing session:', state.sessionId);
     return state.sessionId;
   };
 
+  const goToStep = (step: number) => {
+    setCurrentStep(step);
+  };
+
   const handleBack = () => {
-    if (currentStep > 0) setCurrentStep(currentStep - 1);
+    if (currentStep > 0) goToStep(currentStep - 1);
   };
 
   const handleStartOver = () => {
     resetState();
     setPendingAIData(null);
+    // Reset lifted OrgProfileStep state
+    setOrgName('');
+    setIndustry('');
+    setDocumentHints('');
+    setKnowsLevels(false);
+    setLevelCount(3);
+    setLevelNames(DEFAULT_LEVEL_NAMES.slice(0, 3));
+    setStartPage('');
+    setEndPage('');
+    setLookupResult(null);
+    // Reset lifted FileUploadStep state
+    setUploadedFile(null);
+    setFileContent('');
+    setExtractedItems(null);
+    setExtractedMappings(null);
+    setDetectedLevels(null);
+    setUseVisionAI(false);
+    setHighestCompletedStep(-1);
     setCurrentStep(0);
   };
 
   const handleStepClick = (stepIndex: number) => {
-    if (stepIndex < currentStep) setCurrentStep(stepIndex);
+    if (stepIndex <= highestCompletedStep) goToStep(stepIndex);
+  };
+
+  const advanceToStep = (step: number) => {
+    setHighestCompletedStep(prev => Math.max(prev, step - 1));
+    goToStep(step);
   };
 
   const handleOrgProfileComplete = (profile: OrgProfile) => {
     setOrgProfile(profile);
     const sid = ensureSessionId();
-    // Update session row with org details
     supabase.from('processing_sessions').update({
       org_name: profile.organizationName,
       org_industry: profile.industry,
     }).eq('id', sid).then(({ data, error, count }) => {
       if (error) console.error('[Session] Failed to update session with org info:', error);
-      else console.log('[Session] Org info updated for session:', sid, '| matched rows:', count ?? 'unknown');
     });
-    setCurrentStep(1);
+    advanceToStep(1);
   };
 
   const handleOrgProfileSkip = () => {
     setOrgProfile(undefined);
     ensureSessionId();
-    setCurrentStep(1);
+    advanceToStep(1);
   };
 
   const handleTextSubmit = (text: string) => {
@@ -135,13 +181,12 @@ const Index = () => {
       processText();
     }
     
-    // Go to people mapper step
-    setCurrentStep(2);
+    advanceToStep(2);
   };
 
   const handlePeopleMappingComplete = () => {
     applyPersonMappingsToItems();
-    setCurrentStep(3);
+    advanceToStep(3);
   };
 
   const handleExport = () => {
@@ -156,12 +201,37 @@ const Index = () => {
     updateLevelsAndRecalculate(levels);
   };
 
+  const startOverButton = (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10">
+          <RotateCcw className="h-4 w-4 mr-2" />
+          Start Over
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Start over?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will discard all your current work including uploaded plans, mappings, and edits. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleStartOver} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            Yes, start over
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
 
       <main className="container mx-auto px-4 py-8">
-        <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} onStepClick={handleStepClick} />
+        <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} completedStep={highestCompletedStep} onStepClick={handleStepClick} />
 
         {/* Sticky Action Bar */}
         {currentStep > 0 && (
@@ -173,35 +243,12 @@ const Index = () => {
 
             <div className="flex items-center gap-3">
               {currentStep === 3 && (
-                <>
-                  <Button onClick={handleExport} size="sm">
-                    <Download className="h-4 w-4 mr-2" />
-                    Download AchieveIt Import File
-                  </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10">
-                        <RotateCcw className="h-4 w-4 mr-2" />
-                        Start Over
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Start over?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This will discard all your current work including uploaded plans, mappings, and edits. This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleStartOver} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                          Yes, start over
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </>
+                <Button onClick={handleExport} size="sm">
+                  <Download className="h-4 w-4 mr-2" />
+                  Download AchieveIt Import File
+                </Button>
               )}
+              {startOverButton}
             </div>
           </div>
         )}
@@ -212,15 +259,30 @@ const Index = () => {
               onComplete={handleOrgProfileComplete}
               onSkip={handleOrgProfileSkip}
               sessionId={state.sessionId}
+              orgName={orgName} setOrgName={setOrgName}
+              industry={industry} setIndustry={setIndustry}
+              documentHints={documentHints} setDocumentHints={setDocumentHints}
+              knowsLevels={knowsLevels} setKnowsLevels={setKnowsLevels}
+              levelCount={levelCount} setLevelCount={setLevelCount}
+              levelNames={levelNames} setLevelNames={setLevelNames}
+              startPage={startPage} setStartPage={setStartPage}
+              endPage={endPage} setEndPage={setEndPage}
+              lookupResult={lookupResult} setLookupResult={setLookupResult}
             />
           )}
 
           {currentStep === 1 && (
-            <FileUploadStep 
-              onTextSubmit={handleTextSubmit} 
+            <FileUploadStep
+              onTextSubmit={handleTextSubmit}
               onAIExtraction={handleAIExtraction}
               orgProfile={state.orgProfile}
               sessionId={state.sessionId || ensureSessionId()}
+              uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
+              fileContent={fileContent} setFileContent={setFileContent}
+              extractedItems={extractedItems} setExtractedItems={setExtractedItems}
+              extractedMappings={extractedMappings} setExtractedMappings={setExtractedMappings}
+              detectedLevels={detectedLevels} setDetectedLevels={setDetectedLevels}
+              useVisionAI={useVisionAI} setUseVisionAI={setUseVisionAI}
             />
           )}
 
