@@ -840,6 +840,51 @@ export function PlanOptimizerStep({
         onChangeLevel={onChangeLevel}
         onDelete={onDeleteItem ? handleDelete : undefined}
       />
+
+      {/* Export Dialog */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Export Plan</DialogTitle>
+            <DialogDescription>
+              Choose your export format.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30">
+              <Checkbox
+                id="include-confidence"
+                checked={includeConfidence}
+                onCheckedChange={(checked) => setIncludeConfidence(checked === true)}
+              />
+              <div>
+                <Label htmlFor="include-confidence" className="font-medium cursor-pointer">
+                  Include AI confidence data
+                </Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Adds "Confidence Score" and "Corrections" columns. This will NOT match AchieveIt's standard import format.
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {includeConfidence
+                ? '📊 Extended Export (with AI confidence data)'
+                : '✅ AchieveIt Import Format (standard 18 columns)'}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExportDialog(false)}>Cancel</Button>
+            <Button onClick={() => {
+              exportToExcel(items, levels, includeConfidence);
+              setShowExportDialog(false);
+              toast({ title: 'Export complete', description: includeConfidence ? 'Extended CSV downloaded' : 'AchieveIt import file downloaded' });
+            }}>
+              <Download className="h-4 w-4 mr-2" />
+              Download CSV
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
