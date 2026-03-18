@@ -697,6 +697,8 @@ export function convertAIResponseToPlanItems(
       parentId,
       children: [],
       issues,
+      confidence: aiItem.confidence,
+      corrections: aiItem.corrections,
     };
 
     items.push(item);
