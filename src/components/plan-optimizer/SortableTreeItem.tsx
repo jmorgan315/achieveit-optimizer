@@ -186,6 +186,23 @@ export function SortableTreeItem({
           {item.levelName}
         </Badge>
 
+        {/* Confidence dot */}
+        {showConfidenceDot && (
+          <ConfidencePopover item={item} sessionId={sessionId}>
+            <button className="shrink-0 cursor-pointer">
+              <div className={`h-2.5 w-2.5 rounded-full ${confColor.dot}`} />
+            </button>
+          </ConfidencePopover>
+        )}
+
+        {/* Discrepancy badge */}
+        {discrepancy && (
+          <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border-orange-200 dark:border-orange-800 text-[10px] px-1.5 py-0">
+            <AlertTriangle className="h-3 w-3 mr-0.5" />
+            Discrepancy
+          </Badge>
+        )}
+
         <span className="font-medium flex-1 truncate">{item.name}</span>
 
         {/* Metric indicator — icon only */}
