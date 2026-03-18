@@ -18,6 +18,13 @@ interface FileUploadStepProps {
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
   sessionId?: string;
+  // Lifted state
+  uploadedFile: File | null; setUploadedFile: (v: File | null) => void;
+  fileContent: string; setFileContent: (v: string) => void;
+  extractedItems: PlanItem[] | null; setExtractedItems: (v: PlanItem[] | null) => void;
+  extractedMappings: PersonMapping[] | null; setExtractedMappings: (v: PersonMapping[] | null) => void;
+  detectedLevels: PlanLevel[] | null; setDetectedLevels: (v: PlanLevel[] | null) => void;
+  useVisionAI: boolean; setUseVisionAI: (v: boolean) => void;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -66,20 +73,22 @@ function estimateTime(pageCount: number, phase: ProcessingPhase, phaseProgress: 
   return Math.max(0, Math.round(totalEstimate * (1 - overallPct)));
 }
 
-export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessionId }: FileUploadStepProps) {
+export function FileUploadStep({
+  onTextSubmit, onAIExtraction, orgProfile, sessionId,
+  uploadedFile, setUploadedFile,
+  fileContent, setFileContent,
+  extractedItems, setExtractedItems,
+  extractedMappings, setExtractedMappings,
+  detectedLevels, setDetectedLevels,
+  useVisionAI, setUseVisionAI,
+}: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
-  const [fileContent, setFileContent] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
-  const [extractedItems, setExtractedItems] = useState<PlanItem[] | null>(null);
-  const [extractedMappings, setExtractedMappings] = useState<PersonMapping[] | null>(null);
-  const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
-  const [useVisionAI, setUseVisionAI] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Structured progress state
+  // Structured progress state (transient — stays local)
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
 
   const addMessage = useCallback((msg: string) => {
@@ -143,8 +152,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         console.error('[FileUpload] Failed to fetch api_call_logs for aggregation:', logsError);
       }
       
-      console.log('[FileUpload] Found', logs?.length ?? 0, 'api_call_log rows for session:', sessionId);
-      
       const totals = (logs || []).reduce(
         (acc, row) => ({
           total_api_calls: acc.total_api_calls + 1,
@@ -154,8 +161,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         }),
         { total_api_calls: 0, total_input_tokens: 0, total_output_tokens: 0, total_duration_ms: 0 }
       );
-
-      console.log('[FileUpload] Aggregated totals:', totals);
 
       await updateSessionRow({
         ...totals,
@@ -176,8 +181,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     formData.append('file', file);
     if (sessionId) formData.append('sessionId', sessionId);
 
-    console.log('[FileUpload] Calling parse-pdf with sessionId:', sessionId);
-    // Update session with document info
     updateSessionRow({ document_name: file.name, document_size_bytes: file.size });
 
     const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-pdf`, {
@@ -202,7 +205,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     return { text: result.text, pageCount: result.pageCount };
   };
 
-  // Verification: checks extraction quality
   const verifyExtractionResult = (
     items: PlanItem[],
     levels: PlanLevel[],
@@ -212,37 +214,30 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     if (!items || items.length === 0) {
       return { passed: false, reason: 'No items extracted' };
     }
-
     const hasNesting = items.some(item => item.children && item.children.length > 0);
     if (!hasNesting && items.length > 2) {
       return { passed: false, reason: 'All items are flat with no hierarchy — likely incomplete extraction' };
     }
-
     const minTopLevel = Math.max(1, Math.floor(pageCount / 2));
     if (items.length < minTopLevel && pageCount > 3) {
       return { passed: false, reason: `Only ${items.length} top-level items for ${pageCount} pages — likely missed content` };
     }
-
     const countAll = (list: PlanItem[]): number => 
       list.reduce((sum, item) => sum + 1 + countAll(item.children || []), 0);
     const totalItems = countAll(items);
-
     const minTotal = Math.max(3, pageCount * 2);
     if (totalItems < minTotal && pageCount > 2) {
       return { passed: false, reason: `Only ${totalItems} total items for ${pageCount} pages — likely incomplete` };
     }
-
     if (sourceTextLength && pageCount > 0) {
       const charsPerPage = sourceTextLength / pageCount;
       if (charsPerPage > 500 && totalItems < pageCount) {
         return { passed: false, reason: `Dense text (${Math.round(charsPerPage)} chars/page) but only ${totalItems} items — extraction likely incomplete` };
       }
     }
-
     return { passed: true, reason: 'OK' };
   };
 
-  // Render PDF to images and run through the pipeline with pageImages
   const extractWithVisionPipeline = async (
     file: File,
     _levelHints?: PlanLevel[]
@@ -259,7 +254,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
       addMessage(`Rendered ${images.length} of ${pageCount} pages${pageRange ? ` (pages ${pageRange.startPage}-${pageRange.endPage})` : ''}`);
       setPhaseProgress('vision', 20, true);
 
-      // Send ALL page images to the pipeline — it handles batching internally
       addMessage('Sending to multi-agent pipeline...');
       
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
@@ -337,9 +331,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     addMessage('Step 1/3: AI extracting plan items...');
 
     try {
-      console.log('[FileUpload] Calling process-plan pipeline with sessionId:', sessionId);
-      
-      // Call the orchestrator which runs all 3 agents
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -354,8 +345,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         }),
       });
 
-      // Update progress as pipeline runs — we simulate phase transitions
-      // since the orchestrator runs synchronously
       setPhaseProgress('analysis', 50);
       addMessage('Agent 1 extraction in progress...');
 
@@ -372,7 +361,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         throw new Error(result.error || 'AI pipeline returned no data');
       }
 
-      // Update progress through remaining phases
       setPhaseProgress('analysis', 100);
       addMessage('Step 1/3 complete: Items extracted');
 
@@ -430,11 +418,9 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     }
   };
 
-  // Helper: count all items recursively
   const countAllItems = (list: PlanItem[]): number =>
     list.reduce((sum, item) => sum + 1 + countAllItems(item.children || []), 0);
 
-  // Helper: finalize extraction result and update session
   const finalizeExtraction = (items: PlanItem[], method: 'text' | 'vision') => {
     const total = countAllItems(items);
     aggregateAndUpdateSession(total, method);
@@ -451,7 +437,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     setPhaseProgress('upload', 0);
     addMessage('Starting file analysis...');
 
-    // Update session with document info for non-PDF paths too
     updateSessionRow({ document_name: file.name, document_size_bytes: file.size });
 
     try {
@@ -542,7 +527,6 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
         setFileContent(extractedText);
         setIsProcessing(false);
 
-        // AI pipeline (3-agent extraction via process-plan)
         const textResult = await extractPlanItemsWithAI(extractedText);
 
         if (!textResult || textResult.items.length === 0) {

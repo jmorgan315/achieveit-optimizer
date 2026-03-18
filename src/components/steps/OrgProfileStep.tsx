@@ -37,50 +37,56 @@ const DEFAULT_LEVEL_NAMES = [
   'Sub-Action',
 ];
 
+export interface LookupResult {
+  name: string;
+  website: string;
+  summary: string;
+}
+
 interface OrgProfileStepProps {
   onComplete: (profile: OrgProfile) => void;
   onSkip: () => void;
   sessionId?: string;
+  // Lifted state
+  orgName: string; setOrgName: (v: string) => void;
+  industry: string; setIndustry: (v: string) => void;
+  documentHints: string; setDocumentHints: (v: string) => void;
+  knowsLevels: boolean; setKnowsLevels: (v: boolean) => void;
+  levelCount: number; setLevelCount: (v: number) => void;
+  levelNames: string[]; setLevelNames: (v: string[]) => void;
+  startPage: string; setStartPage: (v: string) => void;
+  endPage: string; setEndPage: (v: string) => void;
+  lookupResult: LookupResult | null; setLookupResult: (v: LookupResult | null) => void;
 }
 
-export function OrgProfileStep({ onComplete, onSkip, sessionId }: OrgProfileStepProps) {
-  const [orgName, setOrgName] = useState('');
-  const [industry, setIndustry] = useState('');
-  const [documentHints, setDocumentHints] = useState('');
+export function OrgProfileStep({
+  onComplete, onSkip, sessionId,
+  orgName, setOrgName,
+  industry, setIndustry,
+  documentHints, setDocumentHints,
+  knowsLevels, setKnowsLevels,
+  levelCount, setLevelCount,
+  levelNames, setLevelNames,
+  startPage, setStartPage,
+  endPage, setEndPage,
+  lookupResult, setLookupResult,
+}: OrgProfileStepProps) {
   const [isLooking, setIsLooking] = useState(false);
-  const [lookupResult, setLookupResult] = useState<{
-    name: string;
-    website: string;
-    summary: string;
-  } | null>(null);
-
-  // Plan levels state
-  const [knowsLevels, setKnowsLevels] = useState(false);
-  const [levelCount, setLevelCount] = useState(3);
-  const [levelNames, setLevelNames] = useState<string[]>(DEFAULT_LEVEL_NAMES.slice(0, 3));
-
-  // Page range state
-  const [startPage, setStartPage] = useState('');
-  const [endPage, setEndPage] = useState('');
 
   const handleLevelCountChange = (delta: number) => {
     const newCount = Math.max(1, Math.min(7, levelCount + delta));
     setLevelCount(newCount);
-    setLevelNames(prev => {
-      const updated = [...prev];
-      while (updated.length < newCount) {
-        updated.push(DEFAULT_LEVEL_NAMES[updated.length] || `Level ${updated.length + 1}`);
-      }
-      return updated.slice(0, newCount);
-    });
+    const updated = [...levelNames];
+    while (updated.length < newCount) {
+      updated.push(DEFAULT_LEVEL_NAMES[updated.length] || `Level ${updated.length + 1}`);
+    }
+    setLevelNames(updated.slice(0, newCount));
   };
 
   const updateLevelName = (index: number, name: string) => {
-    setLevelNames(prev => {
-      const updated = [...prev];
-      updated[index] = name;
-      return updated;
-    });
+    const updated = [...levelNames];
+    updated[index] = name;
+    setLevelNames(updated);
   };
 
   const buildPlanLevels = (): Array<{ depth: number; name: string }> | undefined => {
