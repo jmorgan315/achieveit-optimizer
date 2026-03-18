@@ -48,6 +48,17 @@ Compare the 'name' field of each extracted item against the source text. If the 
 
 If you see 3 distinct bullets in the source but only 1 item in the extraction that seems to cover all 3, that's a MERGED item. Flag it with the extracted item and the original individual items.
 
+=== DUPLICATE DETECTION ===
+
+Check whether any extracted items are duplicates of each other — items that represent the same goal/priority but were extracted twice because they appeared in multiple places in the document (e.g., table of contents AND detail page, OR section title page AND detail page).
+
+Indicators of duplicates:
+- Two items with very similar names at adjacent levels (parent and child with nearly identical text)
+- Items where one is a shorter/abbreviated version of the other
+- Items where the only difference is capitalization or minor wording
+
+Report duplicates in the duplicateItems field.
+
 Be thorough but precise. Only flag genuine issues — do not flag items that are correctly extracted with minor formatting differences.`;
 
 const VISION_AUDIT_SYSTEM_PROMPT = `You are a completeness auditor for strategic plan extraction. You are reviewing page images from a strategic plan document alongside the extracted plan items. Your job is to:
