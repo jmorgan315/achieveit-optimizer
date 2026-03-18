@@ -261,6 +261,7 @@ serve(async (req) => {
           planLevels,
           pageRange,
           sessionId,
+          batchLabel: `Step 1: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
         });
 
         if (result.ok && (result.data as { success: boolean }).success) {
