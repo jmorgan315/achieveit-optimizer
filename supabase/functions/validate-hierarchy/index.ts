@@ -83,7 +83,7 @@ const validateToolSchema = {
             description: "Type of correction",
           },
           description: { type: "string", description: "What was changed and why" },
-          agent: { type: "string", description: "Which agent's finding triggered this (Agent 2 audit or Agent 3 validation)" },
+          agent: { type: "string", description: "Which step triggered this (Completeness Audit or Structure Validation)" },
         },
         required: ["itemId", "type", "description", "agent"],
       },
