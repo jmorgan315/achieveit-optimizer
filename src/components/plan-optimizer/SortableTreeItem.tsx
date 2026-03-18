@@ -106,6 +106,11 @@ export function SortableTreeItem({
 
   const hasIssues = item.issues.length > 0;
   const hasMetric = !!item.metricDescription;
+  const confidence = item.confidence ?? 100;
+  const confColor = getConfidenceColor(confidence);
+  const showConfidenceDot = item.confidence !== undefined;
+  const discrepancy = hasDiscrepancy(item);
+  const needsReview = confidence < 80;
 
   const formatDateRange = () => {
     if (!item.startDate && !item.dueDate) return null;
