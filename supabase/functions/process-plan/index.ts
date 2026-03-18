@@ -95,6 +95,10 @@ function isUserOverrideCorrection(correction: { type: string; description?: stri
   return false;
 }
 
+function isCapitalizationOnlyChange(a: string, b: string): boolean {
+  return a.toLowerCase().trim() === b.toLowerCase().trim() && a.trim() !== b.trim();
+}
+
 // Calculate confidence scores for each item using NAME-based matching
 function calculateConfidence(
   correctedItems: unknown[],
@@ -123,19 +127,32 @@ function calculateConfidence(
       const name = (i.name || "").toLowerCase().trim();
       const itemCorrections = correctionsByItem.get(id) || [];
 
-      // Build tagged correction strings
+      // Build tagged correction strings, detecting capitalization-only changes
       const correctionDescs: string[] = [];
-      for (const c of itemCorrections) {
-        const isOverride = isUserOverrideCorrection(c);
-        const prefix = isOverride ? "[user-override]" : "[agent-correction]";
-        const agent = (c as { agent?: string }).agent || "Agent 3";
-        const desc = c.description || c.type;
-        correctionDescs.push(`${prefix} ${agent}: ${desc}`);
+      const capOnlyIds = new Set<number>();
+      for (let ci = 0; ci < itemCorrections.length; ci++) {
+        const c = itemCorrections[ci];
+        const cAny = c as { agent?: string; originalName?: string; correctedName?: string };
+        // Check if this is a capitalization-only rename/rephrase
+        const isCapOnly = (c.type === 'renamed' || /rephras/i.test(c.description || ''))
+          && cAny.originalName && cAny.correctedName
+          && isCapitalizationOnlyChange(cAny.originalName, cAny.correctedName);
+
+        if (isCapOnly) {
+          capOnlyIds.add(ci);
+          correctionDescs.push(`[user-override] Name capitalization normalized`);
+        } else {
+          const isOverride = isUserOverrideCorrection(c);
+          const prefix = isOverride ? "[user-override]" : "[agent-correction]";
+          const agent = cAny.agent || "Agent 3";
+          const desc = c.description || c.type;
+          correctionDescs.push(`${prefix} ${agent}: ${desc}`);
+        }
       }
       i.corrections = correctionDescs;
 
-      // Separate user-override from real agent corrections
-      const agentCorrections = itemCorrections.filter(c => !isUserOverrideCorrection(c));
+      // Separate user-override and cap-only from real agent corrections
+      const agentCorrections = itemCorrections.filter((c, ci) => !isUserOverrideCorrection(c) && !capOnlyIds.has(ci));
 
       // Default: 100. Only reduce based on actual issues.
       if (id.startsWith("new-")) {
