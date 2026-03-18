@@ -54,6 +54,7 @@ interface SortableTreeItemProps {
   reorderLevelName?: string;
   sessionId?: string;
   dimmed?: boolean;
+  showConfidence?: boolean;
 }
 
 export function SortableTreeItem({
@@ -72,6 +73,7 @@ export function SortableTreeItem({
   reorderLevelName,
   sessionId,
   dimmed,
+  showConfidence = true,
 }: SortableTreeItemProps) {
   const {
     attributes,
@@ -108,9 +110,9 @@ export function SortableTreeItem({
   const hasMetric = !!item.metricDescription;
   const confidence = item.confidence ?? 100;
   const confColor = getConfidenceColor(confidence);
-  const showConfidenceDot = item.confidence !== undefined;
-  const discrepancy = hasDiscrepancy(item);
-  const needsReview = confidence < 80;
+  const showConfidenceDot = showConfidence && item.confidence !== undefined;
+  const discrepancy = showConfidence && hasDiscrepancy(item);
+  const needsReview = showConfidence && confidence < 80;
 
   const formatDateRange = () => {
     if (!item.startDate && !item.dueDate) return null;

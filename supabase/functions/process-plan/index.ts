@@ -90,13 +90,28 @@ interface ValidationResult {
   detectedLevels?: { depth: number; name: string }[];
 }
 
+// Check if a correction is just a user-level override (renaming to match user-defined plan levels)
+function isUserOverrideCorrection(correction: { type: string; description?: string }): boolean {
+  const desc = (correction.description || "").toLowerCase();
+  const type = correction.type.toLowerCase();
+  // Level name changes to match user-defined structure
+  if (type === "relevel" || type === "level_changed") {
+    if (/match|user[- ]defined|plan structure|to match|mapped to/.test(desc)) return true;
+  }
+  // Renamed only to match user terminology
+  if (type === "renamed" && /match|user[- ]defined|plan structure|to match|mapped to/.test(desc)) return true;
+  // Reordering to match user-defined hierarchy (not structural)
+  if ((type === "reordered" || type === "moved") && /match|user[- ]defined|plan structure|to match/.test(desc)) return true;
+  return false;
+}
+
 // Calculate confidence scores for each item
 function calculateConfidence(
   correctedItems: unknown[],
   agent1Ids: Set<string>,
   agent1Names: Map<string, string>,
   auditFindings: AuditFindings | null,
-  corrections: { itemId: string; type: string }[]
+  corrections: { itemId: string; type: string; description?: string }[]
 ): void {
   const rephrasedIds = new Set(
     (auditFindings?.rephrasedItems || [])
@@ -104,40 +119,48 @@ function calculateConfidence(
       .filter(Boolean)
   );
 
-  const correctionMap = new Map<string, string[]>();
+  // Group corrections by item
+  const correctionsByItem = new Map<string, typeof corrections>();
   for (const c of corrections) {
-    if (!correctionMap.has(c.itemId)) correctionMap.set(c.itemId, []);
-    correctionMap.get(c.itemId)!.push(c.type);
+    if (!correctionsByItem.has(c.itemId)) correctionsByItem.set(c.itemId, []);
+    correctionsByItem.get(c.itemId)!.push(c);
   }
 
   function processItems(items: unknown[]): void {
     for (const item of items) {
       const i = item as { id?: string; confidence?: number; corrections?: string[]; children?: unknown[] };
       const id = i.id || "";
-      const itemCorrections = correctionMap.get(id) || [];
+      const itemCorrections = correctionsByItem.get(id) || [];
 
-      // Build corrections strings
+      // Build tagged correction strings
       const correctionDescs: string[] = [];
-      for (const c of corrections.filter(x => x.itemId === id)) {
-        correctionDescs.push(`${(c as { agent?: string }).agent || "Agent 3"}: ${(c as { description?: string }).description || c.type}`);
+      for (const c of itemCorrections) {
+        const isOverride = isUserOverrideCorrection(c);
+        const prefix = isOverride ? "[user-override]" : "[agent-correction]";
+        const agent = (c as { agent?: string }).agent || "Agent 3";
+        const desc = c.description || c.type;
+        correctionDescs.push(`${prefix} ${agent}: ${desc}`);
       }
       i.corrections = correctionDescs;
 
-      // Calculate confidence
+      // Separate user-override from real agent corrections
+      const agentCorrections = itemCorrections.filter(c => !isUserOverrideCorrection(c));
+
+      // Calculate confidence based on real agent corrections only
       if (id.startsWith("new-")) {
-        // Item was missing from Agent 1, added by Agent 3
+        // Item was missing from Agent 1, added by pipeline
         i.confidence = 40;
       } else if (!agent1Ids.has(id)) {
-        // Unknown origin — Agent 3's best guess
+        // Unknown origin
         i.confidence = 20;
       } else if (rephrasedIds.has(id)) {
-        // Was rephrased, corrected by Agent 3
+        // Was rephrased, corrected back
         i.confidence = 60;
-      } else if (itemCorrections.length > 0) {
-        // Existed but had minor corrections
+      } else if (agentCorrections.length > 0) {
+        // Has real structural corrections
         i.confidence = 80;
       } else {
-        // All 3 agents agree
+        // All agents agree (user-override corrections don't count)
         i.confidence = 100;
       }
 
