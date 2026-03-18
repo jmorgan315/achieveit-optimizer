@@ -354,6 +354,8 @@ export function PlanOptimizerStep({
       matchingItems = items.filter((i) => !!i.metricDescription);
     } else if (activeFilter === 'missing-metric') {
       matchingItems = items.filter((i) => !i.metricDescription);
+    } else if (activeFilter === 'needs-review') {
+      matchingItems = items.filter((i) => (i.confidence ?? 100) < 80);
     } else {
       matchingItems = items.filter((i) => i.issues.some((is) => is.type === activeFilter));
     }
