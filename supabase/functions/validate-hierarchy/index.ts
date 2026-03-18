@@ -175,6 +175,24 @@ serve(async (req) => {
       contextPrefix = `ORGANIZATION CONTEXT:\n${parts.join("\n")}\n\n`;
     }
 
+    // Build a prominent level enforcement section for the user message
+    let levelEnforcementSection = "";
+    if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+      const levelNames = planLevels.map((l: { depth: number; name: string }) => l.name).join(", ");
+      levelEnforcementSection = `\n=== USER-DEFINED PLAN LEVELS (MANDATORY) ===
+
+The user has defined exactly ${planLevels.length} hierarchy levels: ${levelNames}.
+Your output MUST have exactly ${planLevels.length} levels — no more, no less.
+
+If the extracted items have MORE levels than ${planLevels.length}, you MUST collapse the hierarchy:
+- Look for duplicate items at adjacent levels (parent-child pairs with the same or very similar names)
+- When found, MERGE them: keep one copy, remove the duplicate, reassign the duplicate's children to the kept item
+- If items were extracted at a depth beyond level ${planLevels.length}, re-assign them to the deepest user-defined level (${planLevels[planLevels.length - 1].name})
+
+CRITICAL: Never create levels beyond what the user defined. If the user said ${planLevels.length} levels (${levelNames}), every item must be one of those levels. There should be no items beyond depth ${planLevels.length} in the output.
+`;
+    }
+
     let auditSection = "";
     if (auditFindings) {
       const af = auditFindings;
