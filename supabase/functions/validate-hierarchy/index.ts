@@ -153,10 +153,14 @@ serve(async (req) => {
     const itemListing = flattenItems(extractedItems).join("\n");
 
     let contextPrefix = "";
-    if (organizationName || industry) {
+    if (organizationName || industry || planLevels) {
       const parts: string[] = [];
       if (organizationName) parts.push(`Organization: ${organizationName}`);
       if (industry) parts.push(`Industry: ${industry}`);
+      if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+        const levelsList = planLevels.map((l: { depth: number; name: string }) => `Level ${l.depth}: ${l.name}`).join(', ');
+        parts.push(`User-defined hierarchy (authoritative): ${levelsList}. Validate items against these levels.`);
+      }
       contextPrefix = `ORGANIZATION CONTEXT:\n${parts.join("\n")}\n\n`;
     }
 

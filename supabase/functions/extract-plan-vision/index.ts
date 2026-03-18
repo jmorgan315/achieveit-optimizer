@@ -448,11 +448,21 @@ serve(async (req) => {
     }
 
     let orgContextText = '';
-    if (organizationName || industry || documentHints) {
+    if (organizationName || industry || documentHints || planLevels || pageRange) {
       const parts: string[] = [];
       if (organizationName) parts.push(`Organization: ${organizationName}`);
       if (industry) parts.push(`Industry: ${industry}`);
       if (documentHints) parts.push(`User-provided document hints: ${documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
+      if (pageRange) {
+        parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${pageRange.startPage} through ${pageRange.endPage} of the original document. Focus your extraction ONLY on content from those pages.`);
+      }
+      if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+        const levelsList = planLevels.map((l: { depth: number; name: string }, idx: number) => {
+          const suffix = idx === 0 ? ' (highest)' : idx === planLevels.length - 1 ? ' (lowest)' : '';
+          return `Level ${l.depth}${suffix}: ${l.name}`;
+        }).join('\n');
+        parts.push(`\nPLAN HIERARCHY SCHEMA (provided by user — treat as authoritative):\nUse these EXACT level names and this EXACT ordering. Do NOT invent additional levels or rename these levels.\n${levelsList}\n\nEvery extracted item MUST be assigned to one of these levels.`);
+      }
       orgContextText = `\n\nORGANIZATION CONTEXT:\n${parts.join('\n')}`;
     }
 
