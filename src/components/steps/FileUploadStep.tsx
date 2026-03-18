@@ -348,6 +348,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           organizationName: orgProfile?.organizationName,
           industry: orgProfile?.industry,
           documentHints: orgProfile?.documentHints,
+          planLevels: orgProfile?.planLevels,
+          pageRange: orgProfile?.pageRange,
           sessionId,
         }),
       });

@@ -109,8 +109,15 @@ export function LevelVerificationModal({
             Define Your Plan Hierarchy
           </DialogTitle>
           <DialogDescription>
-            Customize the levels of your strategic plan. These define how items are organized and exported to AchieveIt.
+            {userDefinedLevels && userDefinedLevels.length > 0
+              ? 'Using your predefined plan levels. You can still adjust them here.'
+              : 'Customize the levels of your strategic plan. These define how items are organized and exported to AchieveIt.'}
           </DialogDescription>
+          {showMismatchWarning && detectedLevelNames.length > 0 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+              Note: The AI detected different level names ({detectedLevelNames.join(', ')}). Your predefined levels have been applied.
+            </p>
+          )}
         </DialogHeader>
 
         <div className="py-4 space-y-3">

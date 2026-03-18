@@ -258,6 +258,7 @@ const Index = () => {
         onOpenChange={setShowLevelModal}
         levels={state.levels}
         items={state.items}
+        userDefinedLevels={state.orgProfile?.planLevels}
         onConfirm={handleLevelConfirm}
       />
     </div>
