@@ -96,6 +96,17 @@ Check if the extracted list contains items that should NOT be there:
 - Items from measurement indicator tables or statistical summaries
 - Items that are vision/mission statements disguised as goals
 
+=== DUPLICATE DETECTION ===
+
+Check whether any extracted items are duplicates of each other — items that represent the same goal/priority but were extracted twice because they appeared in multiple places in the document.
+
+Indicators of duplicates:
+- Two items with very similar names at adjacent levels (parent and child with nearly identical text)
+- Items where one is a shorter/abbreviated version of the other
+- Items where the only difference is capitalization or minor wording
+
+Report duplicates in the duplicateItems field.
+
 Be thorough but precise. Only flag genuine issues.`;
 
 const auditToolSchema = {
