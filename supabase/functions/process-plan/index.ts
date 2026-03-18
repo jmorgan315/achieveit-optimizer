@@ -171,6 +171,40 @@ function batchImages(images: string[], batchSize: number): string[][] {
   return batches;
 }
 
+// Select a representative subset of images for the audit step (max 10)
+// Strategy: take first 2 pages (likely overview/TOC), last page, and evenly space the rest
+function selectAuditImages(images: string[]): string[] {
+  if (images.length <= 10) return images;
+  const selected: string[] = [];
+  const indices = new Set<number>();
+
+  // Always include first 2 pages (overview, TOC)
+  indices.add(0);
+  if (images.length > 1) indices.add(1);
+
+  // Always include last page
+  indices.add(images.length - 1);
+
+  // Fill remaining slots evenly from the middle
+  const remaining = 10 - indices.size;
+  const middleStart = 2;
+  const middleEnd = images.length - 2;
+  if (middleEnd > middleStart && remaining > 0) {
+    const step = (middleEnd - middleStart) / (remaining + 1);
+    for (let i = 0; i < remaining; i++) {
+      indices.add(Math.round(middleStart + step * (i + 1)));
+    }
+  }
+
+  // Sort and collect
+  const sortedIndices = [...indices].sort((a, b) => a - b);
+  for (const idx of sortedIndices) {
+    if (idx >= 0 && idx < images.length) selected.push(images[idx]);
+  }
+
+  return selected;
+}
+
 // Merge vision batch results, deduplicating by name
 function mergeVisionBatchResults(
   existing: unknown[],
