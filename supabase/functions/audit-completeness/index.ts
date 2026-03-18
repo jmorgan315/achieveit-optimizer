@@ -215,7 +215,7 @@ Please audit the extraction above against the source document. Identify any miss
       logApiCall({
         session_id: sessionId,
         edge_function: "audit-completeness",
-        step_label: "Agent 2: Completeness Audit",
+        step_label: "Step 2: Completeness Audit",
         model: "claude-sonnet-4-20250514",
         duration_ms: durationMs,
         status: "error",
