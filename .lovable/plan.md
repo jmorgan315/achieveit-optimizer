@@ -1,30 +1,50 @@
 
 
-# Option C: Remove Path Step, Add Simple/Full Toggle to Review Step
+# Add File Size Pre-check & Graceful Fallback for parse-pdf
 
-## Summary
-Remove the standalone "Choose Path" wizard step entirely. Add a "Simple View / Full Editor" toggle inside `PlanOptimizerStep`. Simple view shows a summary table with stats and a direct download button. Full view is the existing tree editor. Wizard goes from 5 steps to 4.
+## Problem
+The "always try text first" logic sends >10MB files to parse-pdf, which returns 413. User sees a failed extraction instead of a seamless fallback to vision.
 
-## Changes
+## Changes — single file: `src/components/steps/FileUploadStep.tsx`
 
-### 1. Remove Path Step from Wizard (`src/pages/Index.tsx`)
-- Remove `PathSelectorStep` import and `ProcessingPath` import
-- Update `WIZARD_STEPS` to 4 steps: Organization → Upload Plan → Map People → Review & Export
-- Remove `handlePathSelect` handler and `setProcessingPath` from destructuring
-- After level confirmation, go directly to People Mapper (step 2 instead of step 3)
-- Shift all step indices down by 1 (people = 2, review = 3)
-- Update sticky action bar condition from `currentStep === 4` to `currentStep === 3`
+### 1. Add size pre-check before parse-pdf call (around line 398)
 
-### 2. Delete `src/components/steps/PathSelectorStep.tsx`
+Before the `parsePdfWithEdgeFunction` call, check file size:
 
-### 3. Clean up types and state
-- Remove `ProcessingPath` type from `src/types/plan.ts`
-- Remove `processingPath` from `PlanState` interface
-- Remove `setProcessingPath` from `src/hooks/usePlanState.ts`
+```typescript
+const MAX_TEXT_EXTRACTION_SIZE = 8 * 1024 * 1024; // 8MB
 
-### 4. Add Simple/Full toggle to `PlanOptimizerStep.tsx`
-- Add local state `viewMode: 'simple' | 'full'` (default: `'full'`)
-- Add a toggle near the top (next to the stats bar) with two options: "Summary" and "Full Editor"
-- **Summary view**: Compact card showing item counts per level, owner/date/metric coverage percentages, and a prominent "Download" button. No tree editing.
-- **Full Editor view**: The existing tree view with drag-and-drop, editing, etc. (current behavior)
+if (file.size > MAX_TEXT_EXTRACTION_SIZE) {
+  console.log(`Document exceeds 8MB (${(file.size / 1024 / 1024).toFixed(1)}MB) — using visual analysis`);
+  addMessage('Document uploaded successfully');
+  // Skip directly to vision path
+} else {
+  // Try text extraction first (existing logic)
+}
+```
+
+If file > 8MB, skip the entire text extraction block and fall through to the vision path at line 440.
+
+### 2. Improve error fallback in the existing catch block (line 403)
+
+Currently the catch just logs and continues — but it falls through to the vision path correctly. Enhance the message:
+
+```typescript
+catch (error) {
+  console.log(`Text extraction failed (${error?.message || error}), falling back to visual analysis`);
+  addMessage('Switching to visual analysis...');
+}
+```
+
+This handles 413, 500, timeouts, and any other parse-pdf errors gracefully — no toast error, no runtime error shown to user, just a seamless fallback to vision.
+
+### Summary of flow after fix
+
+```text
+PDF uploaded
+├─ file > 8MB? → skip text, go straight to vision
+└─ file ≤ 8MB? → try parse-pdf
+   ├─ parse-pdf succeeds → evaluate text quality → text or vision
+   └─ parse-pdf fails (any error) → log, fallback to vision
+```
 
