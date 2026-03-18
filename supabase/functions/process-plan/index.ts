@@ -69,6 +69,8 @@ interface AuditFindings {
   missingItems?: { sourceText: string }[];
   mergedItems?: { extractedItemName: string }[];
   rephrasedItems?: { extractedItemId?: string; extractedName: string }[];
+  duplicateItems?: { item1Name: string; item1Level?: string; item2Name: string; item2Level?: string; recommendation: string }[];
+  extraItems?: { extractedItemName: string; reason: string }[];
   auditSummary?: Record<string, number>;
 }
 
