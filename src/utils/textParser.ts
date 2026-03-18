@@ -275,6 +275,8 @@ export interface AIExtractedItem {
   startDate?: string;
   dueDate?: string;
   children?: AIExtractedItem[] | string[]; // Can be objects or strings (malformed AI response)
+  confidence?: number;
+  corrections?: string[];
 }
 
 export interface AIDocumentTerminology {
