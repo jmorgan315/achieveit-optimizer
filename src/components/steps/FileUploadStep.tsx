@@ -370,7 +370,7 @@ export function FileUploadStep({
       });
 
       setPhaseProgress('analysis', 50);
-      addMessage('Agent 1 extraction in progress...');
+      addMessage('Extraction in progress...');
 
       if (!response.ok) {
         const error = await response.json();
