@@ -1,13 +1,10 @@
 import { PlanItem, PlanLevel } from '@/types/plan';
 
 /**
- * Exports plan items to a CSV file formatted exactly like the AchieveIt import template.
- * Column order matches: Order, Level, Name, Description, Status, Start Date, Due Date,
- * Assigned To, Members, Administrators, Update Frequency, Metric Description, Metric Unit,
- * Metric Rollup, Metric Baseline, Metric Target, Current Value, Tags
+ * Exports plan items to a CSV file formatted for AchieveIt import.
+ * Optionally includes confidence score and corrections columns (extended format).
  */
-export function exportToExcel(items: PlanItem[], levels: PlanLevel[]): void {
-  // AchieveIt template headers - exact match
+export function exportToExcel(items: PlanItem[], levels: PlanLevel[], includeConfidence: boolean = false): void {
   const headers = [
     'Order',
     'Level',
@@ -29,7 +26,10 @@ export function exportToExcel(items: PlanItem[], levels: PlanLevel[]): void {
     'Tags',
   ];
 
-  // Helper to format dates as M/D/YY (matching AchieveIt format)
+  if (includeConfidence) {
+    headers.push('Confidence Score', 'Corrections');
+  }
+
   const formatDate = (dateStr: string): string => {
     if (!dateStr) return '';
     try {
@@ -44,54 +44,62 @@ export function exportToExcel(items: PlanItem[], levels: PlanLevel[]): void {
     }
   };
 
-  // Helper to escape CSV values
   const escapeCSV = (value: string): string => {
     if (value === null || value === undefined) return '';
     const stringValue = String(value);
-    // If value contains comma, quote, or newline, wrap in quotes
     if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
       return `"${stringValue.replace(/"/g, '""')}"`;
     }
     return stringValue;
   };
 
-  // Convert items to rows matching AchieveIt template structure
   const rows = items.map((item) => {
-    return [
-      item.order || '',                           // Order
-      item.levelName || '',                       // Level
-      item.name || '',                            // Name
-      item.description || '',                     // Description
-      item.status || '',                          // Status
-      formatDate(item.startDate),                 // Start Date
-      formatDate(item.dueDate),                   // Due Date
-      item.assignedTo || '',                      // Assigned To
-      item.members?.join(', ') || '',             // Members
-      item.administrators?.join(', ') || '',      // Administrators
-      item.updateFrequency || '',                 // Update Frequency
-      item.metricDescription || '',               // Metric Description
-      item.metricUnit || '',                      // Metric Unit
-      item.metricRollup || '',                    // Metric Rollup
-      item.metricBaseline || '',                  // Metric Baseline
-      item.metricTarget || '',                    // Metric Target
-      item.currentValue || '',                    // Current Value
-      item.tags?.join(',') || '',                 // Tags (comma-separated, no spaces per template)
-    ].map(escapeCSV);
+    const row = [
+      item.order || '',
+      item.levelName || '',
+      item.name || '',
+      item.description || '',
+      item.status || '',
+      formatDate(item.startDate),
+      formatDate(item.dueDate),
+      item.assignedTo || '',
+      item.members?.join(', ') || '',
+      item.administrators?.join(', ') || '',
+      item.updateFrequency || '',
+      item.metricDescription || '',
+      item.metricUnit || '',
+      item.metricRollup || '',
+      item.metricBaseline || '',
+      item.metricTarget || '',
+      item.currentValue || '',
+      item.tags?.join(',') || '',
+    ];
+
+    if (includeConfidence) {
+      row.push(
+        String(item.confidence ?? 100),
+        (item.corrections ?? []).join('; '),
+      );
+    }
+
+    return row.map(escapeCSV);
   });
 
-  // Build CSV content
   const csvContent = [
     headers.map(escapeCSV).join(','),
     ...rows.map((row) => row.join(',')),
   ].join('\n');
 
-  // Create and download file
+  const filename = includeConfidence
+    ? 'achieveit-plan-extended-export.csv'
+    : 'achieveit-plan-import.csv';
+
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
   
   link.setAttribute('href', url);
-  link.setAttribute('download', 'achieveit-plan-import.csv');
+  link.setAttribute('download', filename);
   link.style.visibility = 'hidden';
   document.body.appendChild(link);
   link.click();
