@@ -1,30 +1,41 @@
 
 
-# Option C: Remove Path Step, Add Simple/Full Toggle to Review Step
+# Fix Confidence Scoring — Root Cause & Solution
 
-## Summary
-Remove the standalone "Choose Path" wizard step entirely. Add a "Simple View / Full Editor" toggle inside `PlanOptimizerStep`. Simple view shows a summary table with stats and a direct download button. Full view is the existing tree editor. Wizard goes from 5 steps to 4.
+## Root Cause
 
-## Changes
+Agent 1 (both vision and text extraction) does NOT generate `id` fields on items — the schema doesn't include an `id` property. Agent 3 (validate-hierarchy) generates its own IDs when it returns `correctedItems`.
 
-### 1. Remove Path Step from Wizard (`src/pages/Index.tsx`)
-- Remove `PathSelectorStep` import and `ProcessingPath` import
-- Update `WIZARD_STEPS` to 4 steps: Organization → Upload Plan → Map People → Review & Export
-- Remove `handlePathSelect` handler and `setProcessingPath` from destructuring
-- After level confirmation, go directly to People Mapper (step 2 instead of step 3)
-- Shift all step indices down by 1 (people = 2, review = 3)
-- Update sticky action bar condition from `currentStep === 4` to `currentStep === 3`
+In `calculateConfidence`, `collectItemIds(agent1Data.items)` returns an **empty set** because Agent 1 items have no IDs. Then for every item in Agent 3's output, `!agent1Ids.has(id)` is `true` → confidence = 20 ("unknown origin"). This affects ALL items.
 
-### 2. Delete `src/components/steps/PathSelectorStep.tsx`
+The fallback logic in `FileUploadStep.tsx` is a secondary issue — it sets confidence to 50 when no item has confidence. But since the backend IS setting confidence (to 20), the fallback doesn't trigger. The real bug is entirely in `process-plan/index.ts`.
 
-### 3. Clean up types and state
-- Remove `ProcessingPath` type from `src/types/plan.ts`
-- Remove `processingPath` from `PlanState` interface
-- Remove `setProcessingPath` from `src/hooks/usePlanState.ts`
+## Solution
 
-### 4. Add Simple/Full toggle to `PlanOptimizerStep.tsx`
-- Add local state `viewMode: 'simple' | 'full'` (default: `'full'`)
-- Add a toggle near the top (next to the stats bar) with two options: "Summary" and "Full Editor"
-- **Summary view**: Compact card showing item counts per level, owner/date/metric coverage percentages, and a prominent "Download" button. No tree editing.
-- **Full Editor view**: The existing tree view with drag-and-drop, editing, etc. (current behavior)
+Replace the ID-based matching in `calculateConfidence` with **name-based matching** using `collectItemNames` (which already exists but maps id→name). Instead, collect Agent 1 item names into a Set, then match Agent 3 items by name.
+
+### Changes to `supabase/functions/process-plan/index.ts`
+
+1. **Replace `collectItemIds` with `collectItemNameSet`** — gather all item names (lowercased) from Agent 1's output into a `Set<string>`.
+
+2. **Update `calculateConfidence`** to accept `agent1Names: Set<string>` instead of `agent1Ids: Set<string>`:
+   - Match items by name (lowercased) instead of by ID
+   - `id.startsWith("new-")` check stays (for items Agent 3 explicitly added)
+   - `!agent1Names.has(name)` replaces `!agent1Ids.has(id)` — "unknown origin" = 20
+   - Rest of logic unchanged: rephrased=60, agent corrections=80, no corrections=100
+
+3. **Add debug logging** — log each item's name, correction count, and calculated confidence.
+
+4. **Update the caller** (~line 340-350) to pass the name set instead of the ID set.
+
+### Changes to `src/components/steps/FileUploadStep.tsx`
+
+5. **Tighten fallback logic** — only apply fallback if `pipelineComplete` is falsy in the response (indicating process-plan didn't run). Currently it checks if ANY item has confidence; change it to check the response metadata instead.
+
+### Files
+
+| File | Change |
+|------|--------|
+| `supabase/functions/process-plan/index.ts` | Switch from ID-based to name-based matching in `calculateConfidence`; add debug logs |
+| `src/components/steps/FileUploadStep.tsx` | Tighten fallback to only apply when pipeline genuinely didn't run |
 
