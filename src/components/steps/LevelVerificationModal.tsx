@@ -114,7 +114,7 @@ export function LevelVerificationModal({
               : 'Customize the levels of your strategic plan. These define how items are organized and exported to AchieveIt.'}
           </DialogDescription>
           {showMismatchWarning && detectedLevelNames.length > 0 && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 p-2 rounded bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
+            <p className="text-xs text-warning-foreground mt-2 p-2 rounded bg-accent/50 border border-border">
               Note: The AI detected different level names ({detectedLevelNames.join(', ')}). Your predefined levels have been applied.
             </p>
           )}

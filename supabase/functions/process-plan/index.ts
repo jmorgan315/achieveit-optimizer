@@ -368,6 +368,7 @@ serve(async (req) => {
         sessionId,
         organizationName,
         industry,
+        planLevels,
       });
 
       if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
