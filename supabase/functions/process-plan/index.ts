@@ -333,7 +333,7 @@ serve(async (req) => {
 
     const agent1ItemCount = countAllItems(agent1Data.items);
     const agent1NameSet = collectItemNameSet(agent1Data.items);
-    console.log(`[process-plan] Agent 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
+    console.log(`[process-plan] Step 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
 
     // ==============================
     // AGENT 2: Completeness Audit
