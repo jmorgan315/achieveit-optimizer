@@ -464,6 +464,13 @@ serve(async (req) => {
       finalLevels = agent1Data.detectedLevels;
     }
 
+    // Post-Agent-3 safety net: enforce user-defined level count
+    if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+      const maxDepth = planLevels.length;
+      enforceMaxDepth(finalItems, maxDepth, planLevels as { depth: number; name: string }[]);
+      console.log(`[process-plan] Post-validation: enforced max depth ${maxDepth}`);
+    }
+
     // Calculate confidence scores using name-based matching
     calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
 

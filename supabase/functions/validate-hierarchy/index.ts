@@ -241,7 +241,7 @@ CRITICAL: Never create levels beyond what the user defined. If the user said ${p
     const userMessage = `${contextPrefix}=== EXTRACTED ITEMS ===
 
 ${itemListing}
-${auditSection}${levelsSection}${sourceSection}
+${auditSection}${levelsSection}${levelEnforcementSection}${sourceSection}
 Please validate and correct the hierarchy. Output the COMPLETE corrected items tree incorporating all audit findings. Document every correction.`;
 
     const requestBody = {

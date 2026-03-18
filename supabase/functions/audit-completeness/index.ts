@@ -148,6 +148,21 @@ const auditToolSchema = {
         required: ["extractedName", "originalText"],
       },
     },
+    duplicateItems: {
+      type: "array",
+      description: "Items that appear to be duplicates of each other (same item extracted twice at different levels)",
+      items: {
+        type: "object",
+        properties: {
+          item1Name: { type: "string", description: "Name of the first item" },
+          item1Level: { type: "string", description: "Level of the first item" },
+          item2Name: { type: "string", description: "Name of the second (duplicate) item" },
+          item2Level: { type: "string", description: "Level of the second item" },
+          recommendation: { type: "string", description: "How to resolve (e.g., merge — keep item1, remove item2, reassign children)" },
+        },
+        required: ["item1Name", "item2Name", "recommendation"],
+      },
+    },
     auditSummary: {
       type: "object",
       description: "Summary statistics of the audit",
@@ -158,6 +173,7 @@ const auditToolSchema = {
         extraCount: { type: "number" },
         mergedCount: { type: "number" },
         rephrasedCount: { type: "number" },
+        duplicateCount: { type: "number" },
       },
       required: ["totalSourceItems", "totalExtractedItems", "missingCount", "mergedCount", "rephrasedCount"],
     },
