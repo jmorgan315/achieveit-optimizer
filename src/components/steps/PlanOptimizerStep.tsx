@@ -104,6 +104,9 @@ export function PlanOptimizerStep({
   const [viewMode, setViewMode] = useState<'summary' | 'full'>('full');
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [includeConfidence, setIncludeConfidence] = useState(false);
+  const [showConfidence, setShowConfidence] = useState(() => {
+    return localStorage.getItem('achieveit-show-confidence') === 'true';
+  });
   
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
