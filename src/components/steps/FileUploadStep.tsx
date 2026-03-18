@@ -253,9 +253,10 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
     addMessage('Rendering PDF pages for visual analysis...');
 
     try {
-      const { images, pageCount } = await renderPDFToImages(file, 20, 1.0);
+      const pageRange = orgProfile?.pageRange;
+      const { images, pageCount } = await renderPDFToImages(file, 20, 1.0, pageRange);
       setProgressState(prev => ({ ...prev, pageCount }));
-      addMessage(`Rendered ${images.length} of ${pageCount} pages`);
+      addMessage(`Rendered ${images.length} of ${pageCount} pages${pageRange ? ` (pages ${pageRange.startPage}-${pageRange.endPage})` : ''}`);
       setPhaseProgress('vision', 20, true);
 
       // Send ALL page images to the pipeline — it handles batching internally
@@ -269,6 +270,8 @@ export function FileUploadStep({ onTextSubmit, onAIExtraction, orgProfile, sessi
           organizationName: orgProfile?.organizationName,
           industry: orgProfile?.industry,
           documentHints: orgProfile?.documentHints,
+          planLevels: orgProfile?.planLevels,
+          pageRange: orgProfile?.pageRange,
           sessionId,
         }),
       });
