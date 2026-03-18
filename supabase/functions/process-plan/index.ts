@@ -51,17 +51,17 @@ function countAllItems(items: unknown[]): number {
   return count;
 }
 
-// Collect all item IDs from nested tree
-function collectItemIds(items: unknown[]): Set<string> {
-  const ids = new Set<string>();
+// Collect all item names (lowercased) from nested tree into a Set
+function collectItemNameSet(items: unknown[]): Set<string> {
+  const names = new Set<string>();
   for (const item of items) {
-    const i = item as { id?: string; children?: unknown[] };
-    if (i.id) ids.add(i.id);
+    const i = item as { name?: string; children?: unknown[] };
+    if (i.name) names.add(i.name.toLowerCase().trim());
     if (i.children?.length) {
-      for (const id of collectItemIds(i.children)) ids.add(id);
+      for (const n of collectItemNameSet(i.children)) names.add(n);
     }
   }
-  return ids;
+  return names;
 }
 
 // Collect item names for matching
