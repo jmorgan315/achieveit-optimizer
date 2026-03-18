@@ -425,8 +425,8 @@ serve(async (req) => {
       finalLevels = agent1Data.detectedLevels;
     }
 
-    // Calculate confidence scores
-    calculateConfidence(finalItems, agent1Ids, agent1Names, auditFindings, corrections);
+    // Calculate confidence scores using name-based matching
+    calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
 
     // Calculate session confidence
     const allConfidences: number[] = [];

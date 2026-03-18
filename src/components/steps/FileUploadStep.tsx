@@ -418,7 +418,7 @@ export function FileUploadStep({
         : DEFAULT_LEVELS;
 
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
-      applyFallbackConfidence(items);
+      applyFallbackConfidence(items, result.pipelineComplete);
 
       const itemCount = items.length;
       addMessage(`${itemCount} top-level items structured`);
