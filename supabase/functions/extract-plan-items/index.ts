@@ -404,7 +404,7 @@ async function processChunk(
   totalChunks: number,
   previousContext: { detectedLevels: { depth: number; name: string }[]; extractedItemNames: string[] } | null,
   apiKey: string,
-  orgContext?: { organizationName?: string; industry?: string; documentHints?: string },
+  orgContext?: { organizationName?: string; industry?: string; documentHints?: string; planLevels?: Array<{ depth: number; name: string }>; pageRange?: { startPage: number; endPage: number } },
   sessionId?: string
 ): Promise<ExtractedChunkResult> {
   const bulletCount = countBulletMarkers(chunkText);
@@ -416,6 +416,16 @@ async function processChunk(
     if (orgContext.organizationName) parts.push(`Organization: ${orgContext.organizationName}`);
     if (orgContext.industry) parts.push(`Industry: ${orgContext.industry}`);
     if (orgContext.documentHints) parts.push(`User-provided document hints: ${orgContext.documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
+    if (orgContext.pageRange) {
+      parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${orgContext.pageRange.startPage} through ${orgContext.pageRange.endPage} of the original document. Focus your extraction ONLY on content from those pages. Ignore introductory material, appendices, and context that falls outside this range.`);
+    }
+    if (orgContext.planLevels && orgContext.planLevels.length > 0) {
+      const levelsList = orgContext.planLevels.map((l, idx) => {
+        const suffix = idx === 0 ? ' (highest)' : idx === orgContext.planLevels!.length - 1 ? ' (lowest)' : '';
+        return `Level ${l.depth}${suffix}: ${l.name}`;
+      }).join('\n');
+      parts.push(`\nPLAN HIERARCHY SCHEMA (provided by user — treat as authoritative):\nThe user has defined the following hierarchy levels for their plan. Use these EXACT level names and this EXACT ordering. Do NOT invent additional levels or rename these levels.\n${levelsList}\n\nEvery extracted item MUST be assigned to one of these levels. If you encounter items that don't clearly fit, assign them to the closest appropriate level.`);
+    }
     if (parts.length > 0) orgContextPrefix = `ORGANIZATION CONTEXT:\n${parts.join('\n')}\n\n`;
   }
 
