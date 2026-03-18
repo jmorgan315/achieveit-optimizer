@@ -244,6 +244,8 @@ serve(async (req) => {
           organizationName,
           industry,
           documentHints,
+          planLevels,
+          pageRange,
           sessionId,
         });
 
