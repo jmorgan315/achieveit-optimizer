@@ -187,7 +187,7 @@ serve(async (req) => {
         }
       }
       if (parts.length > 0) {
-        auditSection = `\n=== AGENT 2 AUDIT FINDINGS ===\n${parts.join("\n")}\n`;
+        auditSection = `\n=== COMPLETENESS AUDIT FINDINGS ===\n${parts.join("\n")}\n`;
       }
     }
 
