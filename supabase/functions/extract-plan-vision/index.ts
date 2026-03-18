@@ -232,6 +232,9 @@ Return items in PROPERLY NESTED JSON format.
 - Vision statements or aspirational narratives
 - Statistical indicators or measurement summary tables (unless explicitly tied as sub-items to a goal)
 - Section introductions or contextual background text
+- Category labels that just repeat the name of a section without adding actionable content (e.g., a section titled "Housing" that merely introduces sub-goals — do NOT extract the section label itself as a separate item if it's already captured as a parent)
+
+When deciding whether something is a plan item, ask: "Would an organization track progress on this as a distinct work item?" If not, don't extract it.
 
 If an item does not have a clear parent-child relationship within the plan hierarchy, it is likely not a plan item.
 
