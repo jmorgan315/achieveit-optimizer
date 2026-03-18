@@ -145,10 +145,10 @@ export function SortableTreeItem({
         style={style}
         data-id={item.id}
         className={`flex items-center gap-2 py-3 px-4 border-b transition-colors ${
-          hasIssues ? 'bg-destructive/5' : ''
+          needsReview ? 'bg-amber-50 dark:bg-amber-950/20' : hasIssues ? 'bg-destructive/5' : ''
         } ${isDragging ? 'bg-muted shadow-lg z-50' : 'hover:bg-muted/50'} ${
           showInsideHighlight ? 'bg-primary/10 border-l-4 border-l-primary border-b' : ''
-        }`}
+        } ${dimmed ? 'opacity-40' : ''}`}
       >
         {showInsideHighlight && (
           <span className="absolute right-4 top-1 text-[10px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full z-10">
