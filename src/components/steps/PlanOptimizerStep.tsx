@@ -403,6 +403,8 @@ export function PlanOptimizerStep({
   const flatList = buildFlatList(null, 0);
   const activeItem = activeId ? items.find((i) => i.id === activeId) : null;
 
+  const needsReviewCount = items.filter(i => (i.confidence ?? 100) < 80).length;
+
   const issueStats = {
     missingOwner: items.filter((i) => i.issues.some((is) => is.type === 'missing-owner')).length,
     missingDates: items.filter((i) => i.issues.some((is) => is.type === 'missing-dates')).length,
