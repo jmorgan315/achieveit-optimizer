@@ -337,6 +337,7 @@ serve(async (req) => {
           sessionId,
           organizationName,
           industry,
+          planLevels,
         });
 
         if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
