@@ -32,7 +32,9 @@ import {
   Settings2,
   Trash2,
   Target,
+  AlertTriangle,
 } from 'lucide-react';
+import { ConfidencePopover, getConfidenceColor, hasDiscrepancy } from './ConfidencePopover';
 
 export type DropPosition = 'before' | 'after' | 'inside' | null;
 
@@ -50,6 +52,8 @@ interface SortableTreeItemProps {
   targetItemName?: string;
   nestLevelName?: string;
   reorderLevelName?: string;
+  sessionId?: string;
+  dimmed?: boolean;
 }
 
 export function SortableTreeItem({
