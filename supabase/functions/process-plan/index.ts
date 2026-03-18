@@ -336,23 +336,37 @@ serve(async (req) => {
     console.log(`[process-plan] Step 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
 
     // ==============================
-    // AGENT 2: Completeness Audit
+    // STEP 2: Completeness Audit
     // ==============================
     console.log("[process-plan] Starting Step 2 (completeness audit)");
     let auditFindings: AuditFindings | null = null;
 
-    // Only run audit if we have source text
     const sourceForAudit = documentText || "";
-    if (sourceForAudit.length > 100) {
-      try {
-        const auditResult = await callEdgeFunction("audit-completeness", {
-          sourceText: sourceForAudit,
-          extractedItems: agent1Data.items,
-          sessionId,
-          organizationName,
-          industry,
-          planLevels,
-        });
+    const hasSourceText = sourceForAudit.length > 100;
+
+    try {
+      // Build audit payload — use text if available, otherwise send page images
+      const auditPayload: Record<string, unknown> = {
+        extractedItems: agent1Data.items,
+        sessionId,
+        organizationName,
+        industry,
+        planLevels,
+      };
+
+      if (hasSourceText) {
+        auditPayload.sourceText = sourceForAudit;
+        console.log("[process-plan] Step 2: text-based audit");
+      } else if (useVision && pageImages) {
+        // For vision path, send a subset of images (max 10 for efficiency)
+        const images = pageImages as string[];
+        const auditImages = images.length <= 10 ? images : selectAuditImages(images);
+        auditPayload.pageImages = auditImages;
+        console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
+      }
+
+      if (hasSourceText || (useVision && pageImages)) {
+        const auditResult = await callEdgeFunction("audit-completeness", auditPayload);
 
         if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
           auditFindings = (auditResult.data as { data: AuditFindings }).data;
@@ -360,11 +374,11 @@ serve(async (req) => {
         } else {
           console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
         }
-      } catch (err) {
-        console.error("[process-plan] Step 2 exception:", err);
+      } else {
+        console.log("[process-plan] Step 2 skipped — no source text or images available");
       }
-    } else {
-      console.log("[process-plan] Skipping Step 2 — vision-only extraction, no source text available");
+    } catch (err) {
+      console.error("[process-plan] Step 2 exception:", err);
     }
 
     // ==============================
