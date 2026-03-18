@@ -352,7 +352,7 @@ export function FileUploadStep({
   const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[]; sessionConfidence?: number } | null> => {
     setIsExtracting(true);
     setPhaseProgress('analysis', 0);
-    addMessage('Step 1/3: AI extracting plan items...');
+    addMessage('Extracting plan items...');
 
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
