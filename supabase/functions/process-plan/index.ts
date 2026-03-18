@@ -369,7 +369,7 @@ serve(async (req) => {
     // ==============================
     // AGENT 3: Hierarchy Validation
     // ==============================
-    console.log("[process-plan] Starting Agent 3 (hierarchy validation)");
+    console.log("[process-plan] Starting Step 3 (structure validation)");
     let validationResult: ValidationResult | null = null;
 
     try {
