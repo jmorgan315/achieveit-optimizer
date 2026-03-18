@@ -16,6 +16,7 @@ const VALIDATION_SYSTEM_PROMPT = `You are a hierarchy and structure validator fo
 4. Incorporating missing items (from the audit) into the correct positions in the hierarchy
 5. Splitting merged items back into their original distinct items
 6. Replacing rephrased item names with the EXACT original text from the document
+7. MERGING DUPLICATE ITEMS — items that appear twice at adjacent levels with the same or very similar names
 
 === CRITICAL RULES ===
 
@@ -27,6 +28,14 @@ const VALIDATION_SYSTEM_PROMPT = `You are a hierarchy and structure validator fo
 - The hierarchy must be properly nested with children arrays
 - Level assignments should use the detected level names consistently
 
+=== DUPLICATE MERGING ===
+
+If a parent and its child have the same or very similar names (differing only in capitalization, abbreviation, or minor wording), they are DUPLICATES from the same item being extracted twice. MERGE them:
+- Keep the parent item (with its level assignment)
+- Move the duplicate child's children up to become direct children of the kept parent
+- Remove the duplicate child
+- Log this as a correction with type "merged_duplicate"
+
 === HANDLING AUDIT FINDINGS ===
 
 Missing items: Insert them at the correct position in the hierarchy. Use the suggestedLevel and approximateLocation from the audit to determine placement.
@@ -34,6 +43,8 @@ Missing items: Insert them at the correct position in the hierarchy. Use the sug
 Merged items: Split them back into the original distinct items. The merged item's children should be distributed appropriately among the split items.
 
 Rephrased items: Replace the name with the originalText from the audit. Keep everything else about the item the same.
+
+Duplicate items (from audit): Merge them as described in DUPLICATE MERGING above.
 
 === OUTPUT FORMAT ===
 
@@ -164,6 +175,24 @@ serve(async (req) => {
       contextPrefix = `ORGANIZATION CONTEXT:\n${parts.join("\n")}\n\n`;
     }
 
+    // Build a prominent level enforcement section for the user message
+    let levelEnforcementSection = "";
+    if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+      const levelNames = planLevels.map((l: { depth: number; name: string }) => l.name).join(", ");
+      levelEnforcementSection = `\n=== USER-DEFINED PLAN LEVELS (MANDATORY) ===
+
+The user has defined exactly ${planLevels.length} hierarchy levels: ${levelNames}.
+Your output MUST have exactly ${planLevels.length} levels — no more, no less.
+
+If the extracted items have MORE levels than ${planLevels.length}, you MUST collapse the hierarchy:
+- Look for duplicate items at adjacent levels (parent-child pairs with the same or very similar names)
+- When found, MERGE them: keep one copy, remove the duplicate, reassign the duplicate's children to the kept item
+- If items were extracted at a depth beyond level ${planLevels.length}, re-assign them to the deepest user-defined level (${planLevels[planLevels.length - 1].name})
+
+CRITICAL: Never create levels beyond what the user defined. If the user said ${planLevels.length} levels (${levelNames}), every item must be one of those levels. There should be no items beyond depth ${planLevels.length} in the output.
+`;
+    }
+
     let auditSection = "";
     if (auditFindings) {
       const af = auditFindings;
@@ -186,6 +215,12 @@ serve(async (req) => {
           parts.push(`  - Extracted: "${r.extractedName}" → Original: "${r.originalText}"`);
         }
       }
+      if (af.duplicateItems?.length > 0) {
+        parts.push(`\nDUPLICATE ITEMS (${af.duplicateItems.length}):`);
+        for (const d of af.duplicateItems) {
+          parts.push(`  - "${d.item1Name}" (${d.item1Level || '?'}) ↔ "${d.item2Name}" (${d.item2Level || '?'}) — ${d.recommendation}`);
+        }
+      }
       if (parts.length > 0) {
         auditSection = `\n=== COMPLETENESS AUDIT FINDINGS ===\n${parts.join("\n")}\n`;
       }
@@ -206,7 +241,7 @@ serve(async (req) => {
     const userMessage = `${contextPrefix}=== EXTRACTED ITEMS ===
 
 ${itemListing}
-${auditSection}${levelsSection}${sourceSection}
+${auditSection}${levelsSection}${levelEnforcementSection}${sourceSection}
 Please validate and correct the hierarchy. Output the COMPLETE corrected items tree incorporating all audit findings. Document every correction.`;
 
     const requestBody = {

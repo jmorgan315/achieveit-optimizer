@@ -48,6 +48,17 @@ Compare the 'name' field of each extracted item against the source text. If the 
 
 If you see 3 distinct bullets in the source but only 1 item in the extraction that seems to cover all 3, that's a MERGED item. Flag it with the extracted item and the original individual items.
 
+=== DUPLICATE DETECTION ===
+
+Check whether any extracted items are duplicates of each other — items that represent the same goal/priority but were extracted twice because they appeared in multiple places in the document (e.g., table of contents AND detail page, OR section title page AND detail page).
+
+Indicators of duplicates:
+- Two items with very similar names at adjacent levels (parent and child with nearly identical text)
+- Items where one is a shorter/abbreviated version of the other
+- Items where the only difference is capitalization or minor wording
+
+Report duplicates in the duplicateItems field.
+
 Be thorough but precise. Only flag genuine issues — do not flag items that are correctly extracted with minor formatting differences.`;
 
 const VISION_AUDIT_SYSTEM_PROMPT = `You are a completeness auditor for strategic plan extraction. You are reviewing page images from a strategic plan document alongside the extracted plan items. Your job is to:
@@ -84,6 +95,17 @@ Check if the extracted list contains items that should NOT be there:
 - Items that look like section headers or category labels rather than actionable plan items
 - Items from measurement indicator tables or statistical summaries
 - Items that are vision/mission statements disguised as goals
+
+=== DUPLICATE DETECTION ===
+
+Check whether any extracted items are duplicates of each other — items that represent the same goal/priority but were extracted twice because they appeared in multiple places in the document.
+
+Indicators of duplicates:
+- Two items with very similar names at adjacent levels (parent and child with nearly identical text)
+- Items where one is a shorter/abbreviated version of the other
+- Items where the only difference is capitalization or minor wording
+
+Report duplicates in the duplicateItems field.
 
 Be thorough but precise. Only flag genuine issues.`;
 
@@ -148,6 +170,21 @@ const auditToolSchema = {
         required: ["extractedName", "originalText"],
       },
     },
+    duplicateItems: {
+      type: "array",
+      description: "Items that appear to be duplicates of each other (same item extracted twice at different levels)",
+      items: {
+        type: "object",
+        properties: {
+          item1Name: { type: "string", description: "Name of the first item" },
+          item1Level: { type: "string", description: "Level of the first item" },
+          item2Name: { type: "string", description: "Name of the second (duplicate) item" },
+          item2Level: { type: "string", description: "Level of the second item" },
+          recommendation: { type: "string", description: "How to resolve (e.g., merge — keep item1, remove item2, reassign children)" },
+        },
+        required: ["item1Name", "item2Name", "recommendation"],
+      },
+    },
     auditSummary: {
       type: "object",
       description: "Summary statistics of the audit",
@@ -158,6 +195,7 @@ const auditToolSchema = {
         extraCount: { type: "number" },
         mergedCount: { type: "number" },
         rephrasedCount: { type: "number" },
+        duplicateCount: { type: "number" },
       },
       required: ["totalSourceItems", "totalExtractedItems", "missingCount", "mergedCount", "rephrasedCount"],
     },

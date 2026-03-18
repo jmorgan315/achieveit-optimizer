@@ -69,6 +69,8 @@ interface AuditFindings {
   missingItems?: { sourceText: string }[];
   mergedItems?: { extractedItemName: string }[];
   rephrasedItems?: { extractedItemId?: string; extractedName: string }[];
+  duplicateItems?: { item1Name: string; item1Level?: string; item2Name: string; item2Level?: string; recommendation: string }[];
+  extraItems?: { extractedItemName: string; reason: string }[];
   auditSummary?: Record<string, number>;
 }
 
@@ -160,6 +162,48 @@ function calculateConfidence(
   }
 
   processItems(correctedItems);
+}
+
+// Normalize a name for fuzzy comparison
+function normalizeName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+}
+
+// Programmatic safety net: enforce max depth and merge adjacent duplicates
+function enforceMaxDepth(
+  items: unknown[],
+  maxDepth: number,
+  planLevels: { depth: number; name: string }[],
+  currentDepth = 1
+): void {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i] as { levelType?: string; levelName?: string; children?: unknown[]; name?: string };
+    const children = item.children || [];
+
+    // Merge adjacent parent-child duplicates (same name at adjacent levels)
+    for (let c = children.length - 1; c >= 0; c--) {
+      const child = children[c] as { name?: string; children?: unknown[] };
+      if (item.name && child.name && normalizeName(item.name) === normalizeName(child.name)) {
+        console.log(`[enforceMaxDepth] Merging duplicate child "${child.name}" into parent "${item.name}"`);
+        // Move grandchildren up to parent
+        const grandchildren = (child.children || []) as unknown[];
+        children.splice(c, 1, ...grandchildren);
+      }
+    }
+
+    // Enforce depth limit
+    if (currentDepth > maxDepth) {
+      const deepestLevel = planLevels[maxDepth - 1];
+      if (deepestLevel) {
+        item.levelType = deepestLevel.name;
+        item.levelName = deepestLevel.name;
+      }
+    }
+
+    if (children.length > 0) {
+      enforceMaxDepth(children, maxDepth, planLevels, currentDepth + 1);
+    }
+  }
 }
 
 // Batch page images into groups of N
@@ -460,6 +504,13 @@ serve(async (req) => {
       // Fallback to Agent 1 output
       finalItems = agent1Data.items;
       finalLevels = agent1Data.detectedLevels;
+    }
+
+    // Post-Agent-3 safety net: enforce user-defined level count
+    if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+      const maxDepth = planLevels.length;
+      enforceMaxDepth(finalItems, maxDepth, planLevels as { depth: number; name: string }[]);
+      console.log(`[process-plan] Post-validation: enforced max depth ${maxDepth}`);
     }
 
     // Calculate confidence scores using name-based matching

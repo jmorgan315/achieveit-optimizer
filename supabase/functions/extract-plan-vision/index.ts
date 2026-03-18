@@ -238,6 +238,18 @@ When deciding whether something is a plan item, ask: "Would an organization trac
 
 If an item does not have a clear parent-child relationship within the plan hierarchy, it is likely not a plan item.
 
+=== DUPLICATE DETECTION (CRITICAL) ===
+
+Strategic plan documents often repeat the same items in multiple places — table of contents, section title pages, overview summaries, and detail pages. Extract each unique plan item ONLY ONCE. If you see the same goal/priority in multiple places (even with different wording or capitalization), extract it once using the most complete/detailed version.
+
+Watch for:
+- Table of contents entries that match section headers
+- Section title pages (large text, just the goal name) matching the goal on the following detail page
+- 'At a Glance' or summary pages listing items found in detail sections later
+- A parent item and its first child having nearly identical names (this means the same item was extracted twice at two different levels)
+
+Prefer the detail page version over abbreviated TOC/title page versions. Never create a parent-child pair where both items have the same or very similar names.
+
 === VALIDATION CHECKLIST ===
 
 Before returning, verify:
