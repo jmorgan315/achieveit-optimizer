@@ -70,6 +70,8 @@ export function SortableTreeItem({
   targetItemName,
   nestLevelName,
   reorderLevelName,
+  sessionId,
+  dimmed,
 }: SortableTreeItemProps) {
   const {
     attributes,
