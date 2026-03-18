@@ -293,6 +293,8 @@ serve(async (req) => {
         organizationName,
         industry,
         documentHints,
+        planLevels,
+        pageRange,
         sessionId,
       });
       if (result.ok && (result.data as { success: boolean }).success) {
