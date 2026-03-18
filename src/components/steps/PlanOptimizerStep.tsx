@@ -100,8 +100,10 @@ export function PlanOptimizerStep({
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
-  const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | 'needs-review' | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'full'>('full');
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [includeConfidence, setIncludeConfidence] = useState(false);
   
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
