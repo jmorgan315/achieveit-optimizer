@@ -51,31 +51,19 @@ function countAllItems(items: unknown[]): number {
   return count;
 }
 
-// Collect all item IDs from nested tree
-function collectItemIds(items: unknown[]): Set<string> {
-  const ids = new Set<string>();
+// Collect all item names (lowercased) from nested tree into a Set
+function collectItemNameSet(items: unknown[]): Set<string> {
+  const names = new Set<string>();
   for (const item of items) {
-    const i = item as { id?: string; children?: unknown[] };
-    if (i.id) ids.add(i.id);
+    const i = item as { name?: string; children?: unknown[] };
+    if (i.name) names.add(i.name.toLowerCase().trim());
     if (i.children?.length) {
-      for (const id of collectItemIds(i.children)) ids.add(id);
+      for (const n of collectItemNameSet(i.children)) names.add(n);
     }
   }
-  return ids;
+  return names;
 }
 
-// Collect item names for matching
-function collectItemNames(items: unknown[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const item of items) {
-    const i = item as { id?: string; name?: string; children?: unknown[] };
-    if (i.id && i.name) map.set(i.id, i.name);
-    if (i.children?.length) {
-      for (const [k, v] of collectItemNames(i.children)) map.set(k, v);
-    }
-  }
-  return map;
-}
 
 interface AuditFindings {
   missingItems?: { sourceText: string }[];
@@ -105,21 +93,21 @@ function isUserOverrideCorrection(correction: { type: string; description?: stri
   return false;
 }
 
-// Calculate confidence scores for each item
+// Calculate confidence scores for each item using NAME-based matching
 function calculateConfidence(
   correctedItems: unknown[],
-  agent1Ids: Set<string>,
-  agent1Names: Map<string, string>,
+  agent1NameSet: Set<string>,
   auditFindings: AuditFindings | null,
   corrections: { itemId: string; type: string; description?: string }[]
 ): void {
-  const rephrasedIds = new Set(
+  // Collect rephrased item names from audit findings
+  const rephrasedNames = new Set(
     (auditFindings?.rephrasedItems || [])
-      .map(r => r.extractedItemId)
+      .map(r => r.extractedName?.toLowerCase().trim())
       .filter(Boolean)
   );
 
-  // Group corrections by item
+  // Group corrections by item ID
   const correctionsByItem = new Map<string, typeof corrections>();
   for (const c of corrections) {
     if (!correctionsByItem.has(c.itemId)) correctionsByItem.set(c.itemId, []);
@@ -128,8 +116,9 @@ function calculateConfidence(
 
   function processItems(items: unknown[]): void {
     for (const item of items) {
-      const i = item as { id?: string; confidence?: number; corrections?: string[]; children?: unknown[] };
+      const i = item as { id?: string; name?: string; confidence?: number; corrections?: string[]; children?: unknown[] };
       const id = i.id || "";
+      const name = (i.name || "").toLowerCase().trim();
       const itemCorrections = correctionsByItem.get(id) || [];
 
       // Build tagged correction strings
@@ -146,23 +135,25 @@ function calculateConfidence(
       // Separate user-override from real agent corrections
       const agentCorrections = itemCorrections.filter(c => !isUserOverrideCorrection(c));
 
-      // Calculate confidence based on real agent corrections only
+      // Default: 100. Only reduce based on actual issues.
       if (id.startsWith("new-")) {
         // Item was missing from Agent 1, added by pipeline
         i.confidence = 40;
-      } else if (!agent1Ids.has(id)) {
-        // Unknown origin
+      } else if (name && !agent1NameSet.has(name)) {
+        // Name not found in Agent 1 output — truly unknown origin
         i.confidence = 20;
-      } else if (rephrasedIds.has(id)) {
+      } else if (rephrasedNames.has(name)) {
         // Was rephrased, corrected back
         i.confidence = 60;
       } else if (agentCorrections.length > 0) {
-        // Has real structural corrections
+        // Has real structural corrections (not user-override)
         i.confidence = 80;
       } else {
-        // All agents agree (user-override corrections don't count)
+        // No issues — all agents agree or only user-override corrections
         i.confidence = 100;
       }
+
+      console.log(`[confidence] "${i.name}" | corrections=${itemCorrections.length} (agent=${agentCorrections.length}) | confidence=${i.confidence}`);
 
       if (i.children?.length) processItems(i.children);
     }
@@ -340,9 +331,8 @@ serve(async (req) => {
     }
 
     const agent1ItemCount = countAllItems(agent1Data.items);
-    const agent1Ids = collectItemIds(agent1Data.items);
-    const agent1Names = collectItemNames(agent1Data.items);
-    console.log(`[process-plan] Agent 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels`);
+    const agent1NameSet = collectItemNameSet(agent1Data.items);
+    console.log(`[process-plan] Agent 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
 
     // ==============================
     // AGENT 2: Completeness Audit
@@ -423,8 +413,8 @@ serve(async (req) => {
       finalLevels = agent1Data.detectedLevels;
     }
 
-    // Calculate confidence scores
-    calculateConfidence(finalItems, agent1Ids, agent1Names, auditFindings, corrections);
+    // Calculate confidence scores using name-based matching
+    calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
 
     // Calculate session confidence
     const allConfidences: number[] = [];
