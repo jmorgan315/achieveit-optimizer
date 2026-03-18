@@ -238,6 +238,26 @@ export function FileUploadStep({
     return { passed: true, reason: 'OK' };
   };
 
+  /** If no item has a confidence score, apply fallback defaults so the UI renders */
+  const applyFallbackConfidence = (items: PlanItem[]) => {
+    const walk = (list: PlanItem[]) => {
+      for (const item of list) {
+        if (item.confidence == null) {
+          item.confidence = 50;
+          item.corrections = [
+            ...(item.corrections || []),
+            'Single-pass extraction only — completeness audit and hierarchy validation did not run.',
+          ];
+        }
+        if (item.children?.length) walk(item.children);
+      }
+    };
+    const hasAny = items.some(function check(i): boolean {
+      return i.confidence != null || (i.children?.some(check) ?? false);
+    });
+    if (!hasAny) walk(items);
+  };
+
   const extractWithVisionPipeline = async (
     file: File,
     _levelHints?: PlanLevel[]
@@ -304,6 +324,7 @@ export function FileUploadStep({
         : DEFAULT_LEVELS;
 
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
+      applyFallbackConfidence(items);
 
       toast({
         title: "AI Pipeline Complete",
@@ -394,6 +415,7 @@ export function FileUploadStep({
         : DEFAULT_LEVELS;
 
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
+      applyFallbackConfidence(items);
 
       const itemCount = items.length;
       addMessage(`${itemCount} top-level items structured`);
