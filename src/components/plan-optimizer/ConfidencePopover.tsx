@@ -24,9 +24,9 @@ export function hasDiscrepancy(item: PlanItem): boolean {
   const agentCorrections = item.corrections.filter(c => !isUserOverride(c));
   if (agentCorrections.length === 0) return false;
   if ((item.confidence ?? 100) <= 20) return true;
-  const hasAgent2 = agentCorrections.some(c => /agent\s*2|completeness|auditor/i.test(c));
-  const hasAgent3 = agentCorrections.some(c => /agent\s*3|hierarchy|validator/i.test(c));
-  return hasAgent2 && hasAgent3;
+  const hasAudit = agentCorrections.some(c => /agent\s*2|completeness|audit/i.test(c));
+  const hasValidation = agentCorrections.some(c => /agent\s*3|hierarchy|validation|validator/i.test(c));
+  return hasAudit && hasValidation;
 }
 
 export function getConfidenceColor(confidence: number): { dot: string; bg: string; text: string; label: string } {
