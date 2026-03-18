@@ -38,12 +38,16 @@ import {
 import { PlanItem, PlanLevel, OrgProfile } from '@/types/plan';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
+import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
+import { ConfidenceBanner } from '@/components/plan-optimizer/ConfidenceBanner';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, LayoutList, TreePine } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, LayoutList, TreePine, Eye } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/hooks/use-toast';
 import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
+import { exportToExcel } from '@/utils/exportToExcel';
 
 type DropInfo = { itemId: string; position: DropPosition };
 
@@ -96,8 +100,10 @@ export function PlanOptimizerStep({
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
-  const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | null>(null);
+  const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | 'needs-review' | null>(null);
   const [viewMode, setViewMode] = useState<'summary' | 'full'>('full');
+  const [showExportDialog, setShowExportDialog] = useState(false);
+  const [includeConfidence, setIncludeConfidence] = useState(false);
   
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
@@ -348,6 +354,8 @@ export function PlanOptimizerStep({
       matchingItems = items.filter((i) => !!i.metricDescription);
     } else if (activeFilter === 'missing-metric') {
       matchingItems = items.filter((i) => !i.metricDescription);
+    } else if (activeFilter === 'needs-review') {
+      matchingItems = items.filter((i) => (i.confidence ?? 100) < 80);
     } else {
       matchingItems = items.filter((i) => i.issues.some((is) => is.type === activeFilter));
     }
@@ -395,6 +403,8 @@ export function PlanOptimizerStep({
   const flatList = buildFlatList(null, 0);
   const activeItem = activeId ? items.find((i) => i.id === activeId) : null;
 
+  const needsReviewCount = items.filter(i => (i.confidence ?? 100) < 80).length;
+
   const issueStats = {
     missingOwner: items.filter((i) => i.issues.some((is) => is.type === 'missing-owner')).length,
     missingDates: items.filter((i) => i.issues.some((is) => is.type === 'missing-dates')).length,
@@ -417,6 +427,10 @@ export function PlanOptimizerStep({
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
+      {/* Session Summary + Confidence Banner */}
+      <SessionSummaryCard sessionId={sessionId} items={items} />
+      <ConfidenceBanner items={items} />
+
       {/* View Mode Toggle + Stats Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -430,12 +444,22 @@ export function PlanOptimizerStep({
             {viewMode === 'full' ? 'Full Editor' : 'Summary'}
           </Label>
         </div>
-        {viewMode === 'summary' && (
-          <Button onClick={onExport} size="sm">
+        <div className="flex items-center gap-2">
+          {needsReviewCount > 0 && (
+            <Button
+              variant={activeFilter === 'needs-review' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleFilterClick('needs-review')}
+            >
+              <Eye className="h-4 w-4 mr-1" />
+              {needsReviewCount} Need Review
+            </Button>
+          )}
+          <Button onClick={() => setShowExportDialog(true)} size="sm">
             <Download className="h-4 w-4 mr-2" />
-            Download Import File
+            Export
           </Button>
-        )}
+        </div>
       </div>
 
       {/* Stats Bar */}
@@ -612,6 +636,8 @@ export function PlanOptimizerStep({
                     targetItemName={item.name}
                     nestLevelName={nestLevelName}
                     reorderLevelName={reorderLevelName}
+                    sessionId={sessionId}
+                    dimmed={activeFilter === 'needs-review' && (item.confidence ?? 100) >= 80}
                   />
                   );
                 })}
@@ -814,6 +840,51 @@ export function PlanOptimizerStep({
         onChangeLevel={onChangeLevel}
         onDelete={onDeleteItem ? handleDelete : undefined}
       />
+
+      {/* Export Dialog */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Export Plan</DialogTitle>
+            <DialogDescription>
+              Choose your export format.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30">
+              <Checkbox
+                id="include-confidence"
+                checked={includeConfidence}
+                onCheckedChange={(checked) => setIncludeConfidence(checked === true)}
+              />
+              <div>
+                <Label htmlFor="include-confidence" className="font-medium cursor-pointer">
+                  Include AI confidence data
+                </Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Adds "Confidence Score" and "Corrections" columns. This will NOT match AchieveIt's standard import format.
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {includeConfidence
+                ? '📊 Extended Export (with AI confidence data)'
+                : '✅ AchieveIt Import Format (standard 18 columns)'}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowExportDialog(false)}>Cancel</Button>
+            <Button onClick={() => {
+              exportToExcel(items, levels, includeConfidence);
+              setShowExportDialog(false);
+              toast({ title: 'Export complete', description: includeConfidence ? 'Extended CSV downloaded' : 'AchieveIt import file downloaded' });
+            }}>
+              <Download className="h-4 w-4 mr-2" />
+              Download CSV
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
