@@ -64,18 +64,6 @@ function collectItemNameSet(items: unknown[]): Set<string> {
   return names;
 }
 
-// Collect item names for matching
-function collectItemNames(items: unknown[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const item of items) {
-    const i = item as { id?: string; name?: string; children?: unknown[] };
-    if (i.id && i.name) map.set(i.id, i.name);
-    if (i.children?.length) {
-      for (const [k, v] of collectItemNames(i.children)) map.set(k, v);
-    }
-  }
-  return map;
-}
 
 interface AuditFindings {
   missingItems?: { sourceText: string }[];
