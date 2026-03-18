@@ -143,11 +143,14 @@ const Index = () => {
   const handleOrgProfileComplete = (profile: OrgProfile) => {
     setOrgProfile(profile);
     const sid = ensureSessionId();
-    supabase.from('processing_sessions').update({
+    // Use upsert to handle race condition — the INSERT from ensureSessionId may not have completed yet
+    supabase.from('processing_sessions').upsert({
+      id: sid,
       org_name: profile.organizationName,
       org_industry: profile.industry,
-    }).eq('id', sid).then(({ data, error, count }) => {
+    }, { onConflict: 'id' }).then(({ error }) => {
       if (error) console.error('[Session] Failed to update session with org info:', error);
+      else console.log('[Session] Org info saved:', profile.organizationName);
     });
     advanceToStep(1);
   };

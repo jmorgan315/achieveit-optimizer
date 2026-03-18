@@ -242,7 +242,7 @@ serve(async (req) => {
       let detectedLevels: { depth: number; name: string }[] = [];
       let previousContext = "";
 
-      console.log(`[process-plan] Agent 1 vision: ${images.length} images in ${batches.length} batches`);
+      console.log(`[process-plan] Step 1 vision: ${images.length} images in ${batches.length} batches`);
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
         const batch = batches[batchIdx];
@@ -261,6 +261,7 @@ serve(async (req) => {
           planLevels,
           pageRange,
           sessionId,
+          batchLabel: `Step 1: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
         });
 
         if (result.ok && (result.data as { success: boolean }).success) {
@@ -332,12 +333,12 @@ serve(async (req) => {
 
     const agent1ItemCount = countAllItems(agent1Data.items);
     const agent1NameSet = collectItemNameSet(agent1Data.items);
-    console.log(`[process-plan] Agent 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
+    console.log(`[process-plan] Step 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
 
     // ==============================
     // AGENT 2: Completeness Audit
     // ==============================
-    console.log("[process-plan] Starting Agent 2 (completeness audit)");
+    console.log("[process-plan] Starting Step 2 (completeness audit)");
     let auditFindings: AuditFindings | null = null;
 
     // Only run audit if we have source text
@@ -355,21 +356,21 @@ serve(async (req) => {
 
         if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
           auditFindings = (auditResult.data as { data: AuditFindings }).data;
-          console.log("[process-plan] Agent 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
+          console.log("[process-plan] Step 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
         } else {
-          console.error("[process-plan] Agent 2 failed (non-fatal):", JSON.stringify(auditResult.data));
+          console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
         }
       } catch (err) {
-        console.error("[process-plan] Agent 2 exception:", err);
+        console.error("[process-plan] Step 2 exception:", err);
       }
     } else {
-      console.log("[process-plan] Skipping Agent 2 — vision-only extraction, no source text available");
+      console.log("[process-plan] Skipping Step 2 — vision-only extraction, no source text available");
     }
 
     // ==============================
     // AGENT 3: Hierarchy Validation
     // ==============================
-    console.log("[process-plan] Starting Agent 3 (hierarchy validation)");
+    console.log("[process-plan] Starting Step 3 (structure validation)");
     let validationResult: ValidationResult | null = null;
 
     try {
@@ -386,12 +387,12 @@ serve(async (req) => {
 
       if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
         validationResult = (validateResult.data as { data: ValidationResult }).data;
-        console.log("[process-plan] Agent 3 complete:", validationResult.corrections?.length || 0, "corrections");
+        console.log("[process-plan] Step 3 complete:", validationResult.corrections?.length || 0, "corrections");
       } else {
-        console.error("[process-plan] Agent 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
+        console.error("[process-plan] Step 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
       }
     } catch (err) {
-      console.error("[process-plan] Agent 3 exception:", err);
+      console.error("[process-plan] Step 3 exception:", err);
     }
 
     // ==============================

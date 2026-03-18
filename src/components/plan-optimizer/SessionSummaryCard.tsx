@@ -38,9 +38,9 @@ export function SessionSummaryCard({ sessionId, items }: SessionSummaryCardProps
 
   // Derive agent stats from corrections
   const agent1Count = items.length;
-  const agent2Added = items.filter(i => i.corrections?.some(c => /added by|missing from|auditor|agent\s*2/i.test(c))).length;
-  const agent2Rephrased = items.filter(i => i.corrections?.some(c => /rephras/i.test(c))).length;
-  const agent3Corrected = items.filter(i => i.corrections?.some(c => /hierarchy|validator|agent\s*3|parent changed|level changed/i.test(c))).length;
+  const auditAdded = items.filter(i => i.corrections?.some(c => /added by|missing from|auditor|audit|agent\s*2/i.test(c))).length;
+  const auditRephrased = items.filter(i => i.corrections?.some(c => /rephras/i.test(c))).length;
+  const validationCorrected = items.filter(i => i.corrections?.some(c => /hierarchy|validator|validation|agent\s*3|parent changed|level changed/i.test(c))).length;
 
   const avgConfidence = items.length > 0
     ? Math.round(items.reduce((acc, i) => acc + (i.confidence ?? 100), 0) / items.length)
@@ -104,12 +104,12 @@ export function SessionSummaryCard({ sessionId, items }: SessionSummaryCardProps
                 <p className="font-medium">{agent1Count}</p>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Agent 2 Added</p>
-                <p className="font-medium">{agent2Added} missing, {agent2Rephrased} rephrased</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Audit Results</p>
+                <p className="font-medium">{auditAdded} missing, {auditRephrased} rephrased</p>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Agent 3 Corrected</p>
-                <p className="font-medium">{agent3Corrected} items</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Validation Fixes</p>
+                <p className="font-medium">{validationCorrected} items</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Overall Confidence</p>

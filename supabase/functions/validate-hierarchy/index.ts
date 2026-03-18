@@ -83,7 +83,7 @@ const validateToolSchema = {
             description: "Type of correction",
           },
           description: { type: "string", description: "What was changed and why" },
-          agent: { type: "string", description: "Which agent's finding triggered this (Agent 2 audit or Agent 3 validation)" },
+          agent: { type: "string", description: "Which step triggered this (Completeness Audit or Structure Validation)" },
         },
         required: ["itemId", "type", "description", "agent"],
       },
@@ -187,7 +187,7 @@ serve(async (req) => {
         }
       }
       if (parts.length > 0) {
-        auditSection = `\n=== AGENT 2 AUDIT FINDINGS ===\n${parts.join("\n")}\n`;
+        auditSection = `\n=== COMPLETENESS AUDIT FINDINGS ===\n${parts.join("\n")}\n`;
       }
     }
 
@@ -241,7 +241,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
       logApiCall({
         session_id: sessionId,
         edge_function: "validate-hierarchy",
-        step_label: "Agent 3: Hierarchy Validation",
+        step_label: "Step 3: Structure Validation",
         model: "claude-sonnet-4-20250514",
         duration_ms: durationMs,
         status: "error",
@@ -261,7 +261,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     logApiCall({
       session_id: sessionId,
       edge_function: "validate-hierarchy",
-      step_label: "Agent 3: Hierarchy Validation",
+      step_label: "Step 3: Structure Validation",
       model: "claude-sonnet-4-20250514",
       request_payload: { sourceTextLength: sourceText.length, extractedItemCount: extractedItems.length, hasAuditFindings: !!auditFindings },
       response_payload: aiResponse,

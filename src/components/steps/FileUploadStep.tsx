@@ -352,7 +352,7 @@ export function FileUploadStep({
   const extractPlanItemsWithAI = async (text: string): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[]; sessionConfidence?: number } | null> => {
     setIsExtracting(true);
     setPhaseProgress('analysis', 0);
-    addMessage('Step 1/3: AI extracting plan items...');
+    addMessage('Extracting plan items...');
 
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
@@ -370,7 +370,7 @@ export function FileUploadStep({
       });
 
       setPhaseProgress('analysis', 50);
-      addMessage('Agent 1 extraction in progress...');
+      addMessage('Extraction in progress...');
 
       if (!response.ok) {
         const error = await response.json();
@@ -386,14 +386,14 @@ export function FileUploadStep({
       }
 
       setPhaseProgress('analysis', 100);
-      addMessage('Step 1/3 complete: Items extracted');
+      addMessage('Extraction complete');
 
       setPhaseProgress('audit', 50);
-      addMessage('Step 2/3 complete: Completeness audit done');
+      addMessage('Completeness audit done');
       setPhaseProgress('audit', 100);
 
       setPhaseProgress('validate', 50);
-      addMessage('Step 3/3 complete: Hierarchy validated');
+      addMessage('Structure validated');
       setPhaseProgress('validate', 100);
 
       const aiResponse: AIExtractionResponse = result.data;

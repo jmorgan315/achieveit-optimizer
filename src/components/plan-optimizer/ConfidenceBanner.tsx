@@ -50,8 +50,8 @@ export function ConfidenceBanner({ items }: ConfidenceBannerProps) {
           {avgConfidence}% — {style.label}
         </Badge>
         <span className="text-sm text-muted-foreground">
-          {highCount} of {items.length} items extracted with high confidence.
-          {needsReview > 0 && ` ${needsReview} item${needsReview > 1 ? 's' : ''} need review.`}
+          {highCount} of {items.length} items verified with high confidence.
+          {needsReview > 0 && ` ${needsReview} item${needsReview > 1 ? 's' : ''} may need review.`}
         </span>
       </div>
     </div>

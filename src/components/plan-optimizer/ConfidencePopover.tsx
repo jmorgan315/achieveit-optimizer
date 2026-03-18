@@ -24,9 +24,9 @@ export function hasDiscrepancy(item: PlanItem): boolean {
   const agentCorrections = item.corrections.filter(c => !isUserOverride(c));
   if (agentCorrections.length === 0) return false;
   if ((item.confidence ?? 100) <= 20) return true;
-  const hasAgent2 = agentCorrections.some(c => /agent\s*2|completeness|auditor/i.test(c));
-  const hasAgent3 = agentCorrections.some(c => /agent\s*3|hierarchy|validator/i.test(c));
-  return hasAgent2 && hasAgent3;
+  const hasAudit = agentCorrections.some(c => /agent\s*2|completeness|audit/i.test(c));
+  const hasValidation = agentCorrections.some(c => /agent\s*3|hierarchy|validation|validator/i.test(c));
+  return hasAudit && hasValidation;
 }
 
 export function getConfidenceColor(confidence: number): { dot: string; bg: string; text: string; label: string } {
@@ -73,7 +73,7 @@ export function ConfidencePopover({ item, sessionId, children }: ConfidencePopov
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Corrections</p>
               {corrections.map((c, i) => {
                 const override = isUserOverride(c);
-                const displayText = c.replace(/^\[(user-override|agent-correction)\]\s*/, '');
+                const displayText = c.replace(/^\[(user-override|agent-correction)\]\s*/, '').replace(/Agent\s*3\s*validation:/i, 'Validation:').replace(/Agent\s*2\s*audit:/i, 'Audit:').replace(/Agent\s*3/gi, 'Structure Validation').replace(/Agent\s*2/gi, 'Completeness Audit').replace(/Agent\s*1/gi, 'Initial Extraction');
                 return (
                   <div key={i} className={`flex items-start gap-2 text-xs ${override ? 'text-muted-foreground' : 'text-foreground'}`}>
                     <ArrowRight className={`h-3 w-3 mt-0.5 shrink-0 ${override ? 'text-muted-foreground/50' : 'text-muted-foreground'}`} />

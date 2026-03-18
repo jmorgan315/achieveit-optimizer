@@ -232,6 +232,9 @@ Return items in PROPERLY NESTED JSON format.
 - Vision statements or aspirational narratives
 - Statistical indicators or measurement summary tables (unless explicitly tied as sub-items to a goal)
 - Section introductions or contextual background text
+- Category labels that just repeat the name of a section without adding actionable content (e.g., a section titled "Housing" that merely introduces sub-goals — do NOT extract the section label itself as a separate item if it's already captured as a parent)
+
+When deciding whether something is a plan item, ask: "Would an organization track progress on this as a distinct work item?" If not, don't extract it.
 
 If an item does not have a clear parent-child relationship within the plan hierarchy, it is likely not a plan item.
 
@@ -412,7 +415,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { pageImages, previousContext, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId } = body;
+    const { pageImages, previousContext, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId, batchLabel } = body;
     console.log('[extract-plan-vision] Received sessionId:', incomingSessionId);
 
     if (!pageImages || !Array.isArray(pageImages) || pageImages.length === 0) {
@@ -547,7 +550,7 @@ Extract all strategic plan items with their proper hierarchy.`
       logApiCall({
         session_id: sessionId,
         edge_function: "extract-plan-vision",
-        step_label: `Vision Batch (${pageImages.length} pages)`,
+        step_label: batchLabel || `Step 1: Document Scan (${pageImages.length} pages)`,
         model: "claude-sonnet-4-20250514",
         request_payload: truncateImagePayload(anthropicPayload),
         response_payload: aiResponse,
