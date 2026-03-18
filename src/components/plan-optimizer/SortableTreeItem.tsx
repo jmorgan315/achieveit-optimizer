@@ -54,6 +54,7 @@ interface SortableTreeItemProps {
   reorderLevelName?: string;
   sessionId?: string;
   dimmed?: boolean;
+  showConfidence?: boolean;
 }
 
 export function SortableTreeItem({
