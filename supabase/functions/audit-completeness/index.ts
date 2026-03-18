@@ -140,7 +140,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, extractedItems, sessionId: incomingSessionId, organizationName, industry } = body;
+    const { sourceText, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
 
     if (!sourceText || !extractedItems) {
       return new Response(JSON.stringify({ success: false, error: "sourceText and extractedItems are required" }), {
@@ -162,10 +162,14 @@ serve(async (req) => {
     const itemListing = flattenItems(extractedItems).join("\n");
 
     let contextPrefix = "";
-    if (organizationName || industry) {
+    if (organizationName || industry || planLevels) {
       const parts: string[] = [];
       if (organizationName) parts.push(`Organization: ${organizationName}`);
       if (industry) parts.push(`Industry: ${industry}`);
+      if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+        const levelsList = planLevels.map((l: { depth: number; name: string }) => `Level ${l.depth}: ${l.name}`).join(', ');
+        parts.push(`User-defined hierarchy: ${levelsList}`);
+      }
       contextPrefix = `ORGANIZATION CONTEXT:\n${parts.join("\n")}\n\n`;
     }
 

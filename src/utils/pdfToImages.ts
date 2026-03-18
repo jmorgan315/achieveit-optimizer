@@ -24,16 +24,22 @@ export interface PDFRenderResult {
 export async function renderPDFToImages(
   file: File,
   maxPages: number = 20,
-  scale: number = 1.0
+  scale: number = 1.0,
+  pageRange?: { startPage: number; endPage: number }
 ): Promise<PDFRenderResult> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   
   const pageCount = pdf.numPages;
-  const pagesToRender = Math.min(pageCount, maxPages);
   const images: PDFPageImage[] = [];
 
-  for (let pageNum = 1; pageNum <= pagesToRender; pageNum++) {
+  const rangeStart = pageRange?.startPage ? Math.max(1, pageRange.startPage) : 1;
+  const rangeEnd = pageRange?.endPage ? Math.min(pageCount, pageRange.endPage) : pageCount;
+  const effectiveEnd = Math.min(rangeEnd, rangeStart + maxPages - 1);
+
+  console.log(`[renderPDFToImages] Rendering pages ${rangeStart}-${effectiveEnd} of ${pageCount}${pageRange ? ` (user range: ${pageRange.startPage}-${pageRange.endPage})` : ''}`);
+
+  for (let pageNum = rangeStart; pageNum <= effectiveEnd; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const viewport = page.getViewport({ scale });
 

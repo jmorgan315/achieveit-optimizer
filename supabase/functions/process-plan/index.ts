@@ -197,6 +197,8 @@ serve(async (req) => {
       documentHints,
       sessionId: incomingSessionId,
       pageImages,
+      planLevels,
+      pageRange,
     } = body;
 
     if (!documentText && !pageImages) {
@@ -242,6 +244,8 @@ serve(async (req) => {
           organizationName,
           industry,
           documentHints,
+          planLevels,
+          pageRange,
           sessionId,
         });
 
@@ -289,6 +293,8 @@ serve(async (req) => {
         organizationName,
         industry,
         documentHints,
+        planLevels,
+        pageRange,
         sessionId,
       });
       if (result.ok && (result.data as { success: boolean }).success) {
@@ -331,6 +337,7 @@ serve(async (req) => {
           sessionId,
           organizationName,
           industry,
+          planLevels,
         });
 
         if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
@@ -361,6 +368,7 @@ serve(async (req) => {
         sessionId,
         organizationName,
         industry,
+        planLevels,
       });
 
       if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
