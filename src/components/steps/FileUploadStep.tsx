@@ -396,13 +396,20 @@ export function FileUploadStep({
       let extractedText = '';
 
       if (isPdf) {
-        // Always attempt text extraction first
+        const MAX_TEXT_EXTRACTION_SIZE = 8 * 1024 * 1024; // 8MB
         let textResult: { text: string; pageCount: number } | null = null;
-        try {
-          textResult = await parsePdfWithEdgeFunction(file);
-        } catch (error) {
-          console.log('Text extraction failed, will try vision path', error);
+
+        if (file.size > MAX_TEXT_EXTRACTION_SIZE) {
+          console.log(`Document exceeds 8MB (${(file.size / 1024 / 1024).toFixed(1)}MB) — using visual analysis`);
           addMessage('Document uploaded successfully');
+        } else {
+          // Try text extraction first for smaller files
+          try {
+            textResult = await parsePdfWithEdgeFunction(file);
+          } catch (error: any) {
+            console.log(`Text extraction failed (${error?.message || error}), falling back to visual analysis`);
+            addMessage('Switching to visual analysis...');
+          }
         }
 
         if (textResult) {
