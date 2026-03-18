@@ -327,7 +327,7 @@ export function FileUploadStep({
         : DEFAULT_LEVELS;
 
       const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
-      applyFallbackConfidence(items);
+      applyFallbackConfidence(items, result.pipelineComplete);
 
       toast({
         title: "AI Pipeline Complete",
