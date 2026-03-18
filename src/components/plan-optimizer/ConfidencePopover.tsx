@@ -71,12 +71,16 @@ export function ConfidencePopover({ item, sessionId, children }: ConfidencePopov
           {corrections.length > 0 ? (
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Corrections</p>
-              {corrections.map((c, i) => (
-                <div key={i} className="flex items-start gap-2 text-xs text-foreground">
-                  <ArrowRight className="h-3 w-3 mt-0.5 shrink-0 text-muted-foreground" />
-                  <span>{c}</span>
-                </div>
-              ))}
+              {corrections.map((c, i) => {
+                const override = isUserOverride(c);
+                const displayText = c.replace(/^\[(user-override|agent-correction)\]\s*/, '');
+                return (
+                  <div key={i} className={`flex items-start gap-2 text-xs ${override ? 'text-muted-foreground' : 'text-foreground'}`}>
+                    <ArrowRight className={`h-3 w-3 mt-0.5 shrink-0 ${override ? 'text-muted-foreground/50' : 'text-muted-foreground'}`} />
+                    <span>{override ? `Level updated to match your plan structure` : displayText}</span>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">No corrections — extracted cleanly.</p>
