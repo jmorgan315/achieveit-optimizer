@@ -95,6 +95,10 @@ function isUserOverrideCorrection(correction: { type: string; description?: stri
   return false;
 }
 
+function isCapitalizationOnlyChange(a: string, b: string): boolean {
+  return a.toLowerCase().trim() === b.toLowerCase().trim() && a.trim() !== b.trim();
+}
+
 // Calculate confidence scores for each item using NAME-based matching
 function calculateConfidence(
   correctedItems: unknown[],
