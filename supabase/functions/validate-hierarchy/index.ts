@@ -261,7 +261,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     logApiCall({
       session_id: sessionId,
       edge_function: "validate-hierarchy",
-      step_label: "Agent 3: Hierarchy Validation",
+      step_label: "Step 3: Structure Validation",
       model: "claude-sonnet-4-20250514",
       request_payload: { sourceTextLength: sourceText.length, extractedItemCount: extractedItems.length, hasAuditFindings: !!auditFindings },
       response_payload: aiResponse,

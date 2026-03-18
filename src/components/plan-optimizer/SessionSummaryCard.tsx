@@ -104,12 +104,12 @@ export function SessionSummaryCard({ sessionId, items }: SessionSummaryCardProps
                 <p className="font-medium">{agent1Count}</p>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Agent 2 Added</p>
-                <p className="font-medium">{agent2Added} missing, {agent2Rephrased} rephrased</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Audit Results</p>
+                <p className="font-medium">{auditAdded} missing, {auditRephrased} rephrased</p>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wider">Agent 3 Corrected</p>
-                <p className="font-medium">{agent3Corrected} items</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wider">Validation Fixes</p>
+                <p className="font-medium">{validationCorrected} items</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Overall Confidence</p>
