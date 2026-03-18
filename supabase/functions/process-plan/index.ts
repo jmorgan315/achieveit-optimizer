@@ -197,6 +197,8 @@ serve(async (req) => {
       documentHints,
       sessionId: incomingSessionId,
       pageImages,
+      planLevels,
+      pageRange,
     } = body;
 
     if (!documentText && !pageImages) {
