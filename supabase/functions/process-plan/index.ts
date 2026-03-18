@@ -105,21 +105,21 @@ function isUserOverrideCorrection(correction: { type: string; description?: stri
   return false;
 }
 
-// Calculate confidence scores for each item
+// Calculate confidence scores for each item using NAME-based matching
 function calculateConfidence(
   correctedItems: unknown[],
-  agent1Ids: Set<string>,
-  agent1Names: Map<string, string>,
+  agent1NameSet: Set<string>,
   auditFindings: AuditFindings | null,
   corrections: { itemId: string; type: string; description?: string }[]
 ): void {
-  const rephrasedIds = new Set(
+  // Collect rephrased item names from audit findings
+  const rephrasedNames = new Set(
     (auditFindings?.rephrasedItems || [])
-      .map(r => r.extractedItemId)
+      .map(r => r.extractedName?.toLowerCase().trim())
       .filter(Boolean)
   );
 
-  // Group corrections by item
+  // Group corrections by item ID
   const correctionsByItem = new Map<string, typeof corrections>();
   for (const c of corrections) {
     if (!correctionsByItem.has(c.itemId)) correctionsByItem.set(c.itemId, []);
@@ -128,8 +128,9 @@ function calculateConfidence(
 
   function processItems(items: unknown[]): void {
     for (const item of items) {
-      const i = item as { id?: string; confidence?: number; corrections?: string[]; children?: unknown[] };
+      const i = item as { id?: string; name?: string; confidence?: number; corrections?: string[]; children?: unknown[] };
       const id = i.id || "";
+      const name = (i.name || "").toLowerCase().trim();
       const itemCorrections = correctionsByItem.get(id) || [];
 
       // Build tagged correction strings
@@ -146,23 +147,25 @@ function calculateConfidence(
       // Separate user-override from real agent corrections
       const agentCorrections = itemCorrections.filter(c => !isUserOverrideCorrection(c));
 
-      // Calculate confidence based on real agent corrections only
+      // Default: 100. Only reduce based on actual issues.
       if (id.startsWith("new-")) {
         // Item was missing from Agent 1, added by pipeline
         i.confidence = 40;
-      } else if (!agent1Ids.has(id)) {
-        // Unknown origin
+      } else if (name && !agent1NameSet.has(name)) {
+        // Name not found in Agent 1 output — truly unknown origin
         i.confidence = 20;
-      } else if (rephrasedIds.has(id)) {
+      } else if (rephrasedNames.has(name)) {
         // Was rephrased, corrected back
         i.confidence = 60;
       } else if (agentCorrections.length > 0) {
-        // Has real structural corrections
+        // Has real structural corrections (not user-override)
         i.confidence = 80;
       } else {
-        // All agents agree (user-override corrections don't count)
+        // No issues — all agents agree or only user-override corrections
         i.confidence = 100;
       }
+
+      console.log(`[confidence] "${i.name}" | corrections=${itemCorrections.length} (agent=${agentCorrections.length}) | confidence=${i.confidence}`);
 
       if (i.children?.length) processItems(i.children);
     }
