@@ -23,6 +23,7 @@ interface LevelVerificationModalProps {
   onOpenChange: (open: boolean) => void;
   levels: PlanLevel[];
   items?: PlanItem[];
+  userDefinedLevels?: Array<{ depth: number; name: string }>;
   onConfirm: (levels: PlanLevel[]) => void;
 }
 
@@ -31,16 +32,42 @@ export function LevelVerificationModal({
   onOpenChange,
   levels: initialLevels,
   items = [],
+  userDefinedLevels,
   onConfirm,
 }: LevelVerificationModalProps) {
   const [levels, setLevels] = useState<PlanLevel[]>(initialLevels);
+  const [showMismatchWarning, setShowMismatchWarning] = useState(false);
+  const [detectedLevelNames, setDetectedLevelNames] = useState<string[]>([]);
 
   // Sync internal state whenever the modal opens with new levels
   useEffect(() => {
     if (open) {
-      setLevels(initialLevels);
+      if (userDefinedLevels && userDefinedLevels.length > 0) {
+        // Pre-populate with user-defined levels
+        const userLevels: PlanLevel[] = userDefinedLevels.map((l, idx) => ({
+          id: String(idx + 1),
+          name: l.name,
+          depth: l.depth,
+        }));
+        setLevels(userLevels);
+
+        // Check if AI-detected levels differ
+        const aiNames = initialLevels.map(l => l.name.toLowerCase().trim());
+        const userNames = userDefinedLevels.map(l => l.name.toLowerCase().trim());
+        const mismatch = aiNames.length > 0 && (
+          aiNames.length !== userNames.length ||
+          aiNames.some((name, idx) => name !== userNames[idx])
+        );
+        setShowMismatchWarning(mismatch);
+        if (mismatch) {
+          setDetectedLevelNames(initialLevels.map(l => l.name));
+        }
+      } else {
+        setLevels(initialLevels);
+        setShowMismatchWarning(false);
+      }
     }
-  }, [open, initialLevels]);
+  }, [open, initialLevels, userDefinedLevels]);
 
   const addLevel = () => {
     const newId = String(Date.now());
