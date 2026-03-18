@@ -73,6 +73,7 @@ export function SortableTreeItem({
   reorderLevelName,
   sessionId,
   dimmed,
+  showConfidence = true,
 }: SortableTreeItemProps) {
   const {
     attributes,
