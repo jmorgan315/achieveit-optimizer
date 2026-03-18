@@ -430,9 +430,9 @@ export function PlanOptimizerStep({
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-6">
-      {/* Session Summary + Confidence Banner */}
-      <SessionSummaryCard sessionId={sessionId} items={items} />
-      <ConfidenceBanner items={items} />
+      {/* Session Summary + Confidence Banner — only when toggle is on */}
+      {showConfidence && <SessionSummaryCard sessionId={sessionId} items={items} />}
+      {showConfidence && <ConfidenceBanner items={items} />}
 
       {/* View Mode Toggle + Stats Bar */}
       <div className="flex items-center justify-between">
@@ -447,8 +447,20 @@ export function PlanOptimizerStep({
             {viewMode === 'full' ? 'Full Editor' : 'Summary'}
           </Label>
         </div>
-        <div className="flex items-center gap-2">
-          {needsReviewCount > 0 && (
+        <div className="flex items-center gap-4">
+          {/* AI Confidence toggle */}
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={showConfidence}
+              onCheckedChange={(checked) => {
+                setShowConfidence(checked);
+                localStorage.setItem('achieveit-show-confidence', String(checked));
+                if (!checked) setActiveFilter(prev => prev === 'needs-review' ? null : prev);
+              }}
+            />
+            <Label className="text-sm text-muted-foreground">AI Confidence</Label>
+          </div>
+          {showConfidence && needsReviewCount > 0 && (
             <Button
               variant={activeFilter === 'needs-review' ? 'default' : 'outline'}
               size="sm"
