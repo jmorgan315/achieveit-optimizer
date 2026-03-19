@@ -263,11 +263,31 @@ export function FileUploadStep({
 
       return { items, levels, personMappings, sessionConfidence };
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Vision pipeline error:', error);
+      const errorMessage = error?.message || String(error);
+      
+      // Log error to api_call_logs for admin visibility
+      if (sessionId) {
+        try {
+          await supabase.from('api_call_logs').insert({
+            session_id: sessionId,
+            edge_function: 'process-plan',
+            step_label: 'Vision extraction failed',
+            status: 'error',
+            error_message: errorMessage,
+          });
+          await supabase.from('processing_sessions').update({ status: 'failed' }).eq('id', sessionId);
+        } catch (logErr) {
+          console.error('[Vision] Failed to log error:', logErr);
+        }
+      }
+
+      // Show inline error with paste fallback instead of just a toast
+      setVisionError(errorMessage);
       toast({
         title: "Extraction Failed",
-        description: getUserFriendlyError(error, 'vision'),
+        description: "This document couldn't be processed automatically. You can paste the plan text instead.",
         variant: "destructive",
       });
       return null;
