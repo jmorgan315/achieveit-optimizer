@@ -519,6 +519,7 @@ serve(async (req) => {
         organizationName,
         industry,
         planLevels,
+        classification: classification || null,
       };
 
       if (hasSourceText) {
