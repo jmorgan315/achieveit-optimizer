@@ -217,6 +217,8 @@ export function FileUploadStep({
         }),
       });
 
+      setStepProgress('classify', 100);
+      addMessage('Classification complete');
       setStepProgress('extract', 60);
 
       if (!response.ok) {
