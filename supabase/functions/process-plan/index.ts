@@ -319,6 +319,68 @@ serve(async (req) => {
     const sessionId = await ensureSession(incomingSessionId);
     console.log("[process-plan] Pipeline starting, sessionId:", sessionId);
 
+    const useVision = !!pageImages && (!documentText || documentText.trim().length < 50);
+
+    // ==============================
+    // AGENT 0: Document Classification
+    // ==============================
+    let classification: Record<string, unknown> | null = null;
+    let extractionMode: "standard" | "table" | "presentation" = "standard";
+
+    if (useVision) {
+      console.log("[process-plan] Starting Step 0 (document classification)");
+      try {
+        const classifyResult = await callEdgeFunction("classify-document", {
+          pageImages,
+          orgName: organizationName || "",
+          industry: industry || "",
+          userPlanLevels: planLevels || null,
+          pageRange: pageRange || null,
+          additionalNotes: documentHints || null,
+          sessionId,
+        });
+
+        if (classifyResult.ok && (classifyResult.data as { success: boolean }).success) {
+          classification = (classifyResult.data as { classification: Record<string, unknown> }).classification;
+          console.log("[process-plan] Step 0 complete, document_type:", classification?.document_type);
+
+          // Derive extraction mode
+          const docType = classification?.document_type as string;
+          const tableStructure = classification?.table_structure;
+          if (docType === "tabular" && tableStructure) {
+            extractionMode = "table";
+          } else if (docType === "presentation" || docType === "mixed") {
+            extractionMode = "presentation";
+          }
+          console.log("[process-plan] Extraction mode:", extractionMode);
+
+          // Save classification to session
+          const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+          try {
+            await fetch(`${SUPABASE_URL}/rest/v1/processing_sessions?id=eq.${sessionId}`, {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                "apikey": SUPABASE_SERVICE_ROLE_KEY,
+                "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+                "Prefer": "return=minimal",
+              },
+              body: JSON.stringify({
+                document_type: classification?.document_type || null,
+                classification_result: classification,
+              }),
+            });
+          } catch (e) {
+            console.error("[process-plan] Failed to save classification to session:", e);
+          }
+        } else {
+          console.warn("[process-plan] Step 0 failed (non-fatal):", JSON.stringify(classifyResult.data));
+        }
+      } catch (err) {
+        console.error("[process-plan] Step 0 exception (non-fatal):", err);
+      }
+    }
+
     // ==============================
     // AGENT 1: Extraction
     // ==============================
@@ -326,12 +388,22 @@ serve(async (req) => {
     let extractionMethod = "text";
     let agent1Error: string | null = null;
 
-    const useVision = !!pageImages && (!documentText || documentText.trim().length < 50);
-
     if (useVision) {
       extractionMethod = "vision";
-      // Batch vision images in groups of 5, same as frontend used to do
-      const images = pageImages as string[];
+      // Filter page images based on classification
+      let images = pageImages as string[];
+      if (classification?.plan_content_pages && Array.isArray(classification.plan_content_pages) && (classification.plan_content_pages as number[]).length > 0) {
+        const contentPages = classification.plan_content_pages as number[];
+        const filtered = contentPages
+          .filter((p: number) => p >= 1 && p <= images.length)
+          .map((p: number) => images[p - 1]); // 1-indexed to 0-indexed
+        if (filtered.length > 0) {
+          console.log(`[process-plan] Step 1: Filtering from ${images.length} to ${filtered.length} content pages`);
+          images = filtered;
+        }
+      }
+
+      // Batch vision images in groups of 5
       const batches = batchImages(images, 5);
       let allItems: unknown[] = [];
       let detectedLevels: { depth: number; name: string }[] = [];
@@ -356,7 +428,7 @@ serve(async (req) => {
           planLevels,
           pageRange,
           sessionId,
-          batchLabel: `Step 1: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
+          batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
         });
 
         if (result.ok && (result.data as { success: boolean }).success) {
