@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, CheckCircle2, ChevronDown, Search, GitBranch, FileText, Lightbulb } from 'lucide-react';
+import { Brain, CheckCircle2, ChevronDown, Search, GitBranch, FileText, Lightbulb, ScanSearch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type ProcessingStep = 'upload' | 'classify' | 'extract' | 'audit' | 'validate';
