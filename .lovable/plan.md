@@ -1,43 +1,74 @@
 
 
-# Fix Missing Request Payload in validate-hierarchy Logging
+# Create `classify-document` Edge Function
 
-## Problem
-In `validate-hierarchy/index.ts` line 305, the `request_payload` logged is just metadata:
-```typescript
-request_payload: { sourceTextLength: sourceText.length, extractedItemCount: extractedItems.length, hasAuditFindings: !!auditFindings }
+## Overview
+New edge function that classifies a document's structure before extraction, using Claude vision with the provided system prompt. Returns a structured JSON classification to guide downstream agents.
+
+## File: `supabase/functions/classify-document/index.ts`
+
+### Structure
+- Same CORS headers, retry logic, and error handling patterns as `extract-plan-vision`
+- Reuse `callAnthropicWithRetry` (copied inline since edge functions can't share non-`_shared` code, or import from `_shared`)
+- Import `logApiCall`, `ensureSession`, `extractTokenUsage`, `truncateImagePayload` from `../_shared/logging.ts`
+
+### Input parsing
+- Extract `pageImages`, `orgName`, `industry`, `userPlanLevels`, `pageRange`, `additionalNotes`, `sessionId` from request body
+- Validate `pageImages` is non-empty array, each image is a string under 5MB
+
+### Claude API call
+- Model: `claude-sonnet-4-20250514` (same as vision extraction)
+- `max_tokens: 4096`
+- System prompt: the full classification prompt from the user's spec (verbatim)
+- User message: multipart content with dynamic text prompt + all page images as Anthropic `image` blocks
+- No tool_use — raw JSON response expected (the system prompt says "return ONLY a JSON object")
+
+### User prompt construction
 ```
-This explains the empty Request tab in admin — it has no `messages` or `system` field for the renderer to display.
+Classify this document for strategic plan extraction.
 
-Meanwhile, `audit-completeness` correctly logs the full `requestBody` (with image truncation for vision mode) at line 398.
+Organization: {orgName}
+Industry: {industry}
+[User-specified plan levels: Level 1: X, Level 2: Y, ...]
+[User-specified page range: {pageRange}]
+[Additional context: {additionalNotes}]
 
-## Fix — `supabase/functions/validate-hierarchy/index.ts`
-
-Replace the `request_payload` in both `logApiCall` calls (success at line 305 and error at line 280) with the actual `requestBody`, truncating the source text to keep payload size reasonable:
-
-```typescript
-// Build a log-safe version of the request (truncate source text in the user message)
-const logPayload = {
-  ...requestBody,
-  messages: requestBody.messages.map(msg => ({
-    ...msg,
-    content: typeof msg.content === 'string' && msg.content.length > 10000
-      ? msg.content.slice(0, 10000) + `\n[TRUNCATED: ${msg.content.length} chars total]`
-      : msg.content,
-  })),
-};
+Analyze all provided page images and return ONLY the JSON classification object.
 ```
 
-Use `logPayload` as the `request_payload` in both logApiCall invocations.
+### Response parsing
+- Strip markdown fencing if present (`json ... `)
+- `JSON.parse` the response text
+- On parse failure: log raw response, return default fallback classification:
+  - `document_type: "text_heavy"`
+  - `plan_content_pages`: all page numbers (1..N)
+  - `primary_method: "vision"`
+  - All pages annotated as `plan_content`
 
-For the error path (line 280), the `requestBody` variable is already constructed by that point (line 251-262), so it just needs to reference it.
+### Logging
+- Log to `api_call_logs` with:
+  - `step_label: "Step 0: Document Classification"`
+  - `edge_function: "classify-document"`
+  - Full request payload (images truncated via `truncateImagePayload`)
+  - Full response payload
+  - Token usage, duration, status
 
-### audit-completeness — already correct
-Line 398 builds `logPayload` with image truncation and passes it. No changes needed.
+### Error handling
+- Missing API key → 500
+- Invalid input → 400
+- Claude API errors → retry with backoff, then return fallback classification (not an error response)
 
-## Files to modify
+## Config: `supabase/config.toml`
+Add:
+```toml
+[functions.classify-document]
+verify_jwt = false
+```
 
-| File | Change |
+## Files
+
+| File | Action |
 |------|--------|
-| `supabase/functions/validate-hierarchy/index.ts` | Log full `requestBody` (with truncated user message) instead of metadata-only object |
+| `supabase/functions/classify-document/index.ts` | Create — full edge function |
+| `supabase/config.toml` | Add function entry (auto-managed, but noting for completeness) |
 
