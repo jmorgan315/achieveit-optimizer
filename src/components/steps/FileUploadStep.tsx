@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, FileText, CheckCircle2, Loader2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, Loader2, AlertTriangle, ClipboardPaste } from 'lucide-react';
 import { SAMPLE_RAW_TEXT, PlanItem, PersonMapping, PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
 import { toast } from '@/hooks/use-toast';
 import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
@@ -10,6 +10,7 @@ import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages } from '@/utils/pdfToImages';
 import { ProcessingOverlay, ProcessingStep } from './ProcessingOverlay';
 import { supabase } from '@/integrations/supabase/client';
+import { Textarea } from '@/components/ui/textarea';
 
 import { OrgProfile } from '@/types/plan';
 
