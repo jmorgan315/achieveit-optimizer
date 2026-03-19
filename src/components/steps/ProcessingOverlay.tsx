@@ -5,7 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Brain, CheckCircle2, ChevronDown, Search, GitBranch, FileText, Lightbulb } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type ProcessingStep = 'upload' | 'extract' | 'audit' | 'validate';
+export type ProcessingStep = 'upload' | 'classify' | 'extract' | 'audit' | 'validate';
 
 interface ProcessingOverlayProps {
   currentStep: ProcessingStep;
