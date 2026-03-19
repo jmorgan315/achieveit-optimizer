@@ -582,9 +582,26 @@ export function FileUploadStep({
     setDetectedLevels(null);
     setProcessingStatus('');
     setUseVisionAI(false);
+    setVisionError(null);
+    setPasteMode(false);
+    setPastedText('');
     resetProgress();
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePasteSubmit = async () => {
+    if (!pastedText.trim()) return;
+    setVisionError(null);
+    setPasteMode(false);
+    setFileContent(pastedText);
+    const result = await extractPlanItemsWithAI(pastedText);
+    if (result) {
+      setExtractedItems(result.items);
+      setExtractedMappings(result.personMappings);
+      setDetectedLevels(result.levels);
+      finalizeExtraction(result.items, 'text');
     }
   };
 
