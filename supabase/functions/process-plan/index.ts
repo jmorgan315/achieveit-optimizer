@@ -429,10 +429,12 @@ serve(async (req) => {
           pageRange,
           sessionId,
           batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
-          // Table mode params from Agent 0
+          // Specialized mode params from Agent 0
           extractionMode,
           tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
-          hierarchyPattern: extractionMode === "table" ? classification?.hierarchy_pattern : undefined,
+          hierarchyPattern: (extractionMode === "table" || extractionMode === "presentation") ? classification?.hierarchy_pattern : undefined,
+          pageAnnotations: extractionMode === "presentation" ? classification?.page_annotations : undefined,
+          nonPlanContent: extractionMode === "presentation" ? classification?.non_plan_content : undefined,
         });
 
         if (result.ok && (result.data as { success: boolean }).success) {

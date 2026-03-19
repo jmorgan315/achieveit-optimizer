@@ -894,6 +894,87 @@ Extract all strategic plan items with their proper hierarchy.`
     }
 
     // ========================
+    // PRESENTATION EXTRACTION MODE
+    // ========================
+    if (extractionMode === "presentation") {
+      console.log('[extract-plan-vision] Using PRESENTATION extraction mode');
+
+      const presentationSystemPrompt = buildPresentationExtractionPrompt(pageAnnotations, hierarchyPattern, nonPlanContent as Record<string, unknown> | null);
+
+      const presentationPayload: Record<string, unknown> = {
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 16384,
+        system: presentationSystemPrompt,
+        messages: [
+          { role: "user", content: anthropicContent }
+        ],
+      };
+
+      const startTime = Date.now();
+      const response = await callAnthropicWithRetry(ANTHROPIC_API_KEY, presentationPayload);
+      const durationMs = Date.now() - startTime;
+
+      if (!response.ok) {
+        if (response.status === 429) return createSafeError(503, 'Service temporarily busy. Please try again in a moment.');
+        if (response.status === 402) return createSafeError(503, 'Service temporarily unavailable. Please try again later.');
+        return createSafeError(500, 'Vision processing failed. Please try again.', await response.text());
+      }
+
+      const aiResponse = await response.json();
+
+      if (sessionId) {
+        const tokens = extractTokenUsage(aiResponse);
+        logApiCall({
+          session_id: sessionId,
+          edge_function: "extract-plan-vision",
+          step_label: batchLabel || `Step 1: Presentation Extraction (${pageImages.length} pages)`,
+          model: "claude-sonnet-4-20250514",
+          request_payload: truncateImagePayload(presentationPayload),
+          response_payload: aiResponse,
+          input_tokens: tokens.input_tokens,
+          output_tokens: tokens.output_tokens,
+          duration_ms: durationMs,
+          status: "success",
+        });
+      }
+
+      const textBlock = aiResponse.content?.find((block: { type: string }) => block.type === "text");
+      if (!textBlock?.text) {
+        return createSafeError(500, 'Unable to extract plan items from presentation document.', 'No text in AI response');
+      }
+
+      let flatItems: Array<Record<string, unknown>>;
+      try {
+        let jsonText = textBlock.text.trim();
+        const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) jsonText = fenceMatch[1].trim();
+        flatItems = JSON.parse(jsonText);
+      } catch (e) {
+        return createSafeError(500, 'Failed to parse presentation extraction response.', e);
+      }
+
+      console.log(`[extract-plan-vision] Presentation extraction returned ${flatItems.length} flat items`);
+
+      const { items: nestedItems, detectedLevels, documentTerminology } = convertFlatToNested(flatItems);
+
+      let extractedData: Record<string, unknown> = { items: nestedItems, detectedLevels, documentTerminology };
+      extractedData = normalizeResponse(extractedData);
+
+      console.log(`[extract-plan-vision] Presentation mode: ${(extractedData.items as unknown[])?.length || 0} top-level items after nesting`);
+
+      let contextSummary = "";
+      if ((extractedData.items as unknown[])?.length > 0) {
+        const topLevelNames = (extractedData.items as Array<{ name: string }>).slice(0, 5).map((item) => item.name);
+        contextSummary = `Previously found Level 1 items: ${topLevelNames.join(", ")}`;
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, data: extractedData, contextSummary, sessionId }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ========================
     // STANDARD EXTRACTION MODE
     // ========================
     const anthropicPayload: Record<string, unknown> = {
