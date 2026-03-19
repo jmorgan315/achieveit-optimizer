@@ -26,6 +26,8 @@ interface Session {
   total_output_tokens: number;
   total_duration_ms: number;
   status: string;
+  document_type: string | null;
+  classification_result: Json;
 }
 
 interface ApiLog {
