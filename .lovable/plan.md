@@ -1,30 +1,30 @@
 
 
-# Option C: Remove Path Step, Add Simple/Full Toggle to Review Step
+# Add Industry-Specific Tips to Processing Overlay
 
-## Summary
-Remove the standalone "Choose Path" wizard step entirely. Add a "Simple View / Full Editor" toggle inside `PlanOptimizerStep`. Simple view shows a summary table with stats and a direct download button. Full view is the existing tree editor. Wizard goes from 5 steps to 4.
+## Overview
+Replace the static contextual message card with rotating industry-specific tips that match the user's selected industry. Falls back to generic messages when no industry is provided.
 
 ## Changes
 
-### 1. Remove Path Step from Wizard (`src/pages/Index.tsx`)
-- Remove `PathSelectorStep` import and `ProcessingPath` import
-- Update `WIZARD_STEPS` to 4 steps: Organization → Upload Plan → Map People → Review & Export
-- Remove `handlePathSelect` handler and `setProcessingPath` from destructuring
-- After level confirmation, go directly to People Mapper (step 2 instead of step 3)
-- Shift all step indices down by 1 (people = 2, review = 3)
-- Update sticky action bar condition from `currentStep === 4` to `currentStep === 3`
+### 1. `ProcessingOverlay.tsx` — add industry tips and rotation
 
-### 2. Delete `src/components/steps/PathSelectorStep.tsx`
+- Add new prop: `industry?: string`
+- Create an `INDUSTRY_TIPS` map with all 7 industries as keys, each containing the provided tip strings
+- Create a `GENERIC_TIPS` array using the current contextual messages as fallback
+- Replace the static `CONTEXTUAL_MESSAGES[currentStep]` card with a rotating tip display:
+  - On mount and every ~8 seconds, pick the next tip from the industry's list
+  - Show the industry name as a small label (e.g. "LOCAL GOVERNMENT INSIGHT")
+  - If no industry match, show the current step-based contextual message (existing behavior)
 
-### 3. Clean up types and state
-- Remove `ProcessingPath` type from `src/types/plan.ts`
-- Remove `processingPath` from `PlanState` interface
-- Remove `setProcessingPath` from `src/hooks/usePlanState.ts`
+### 2. `FileUploadStep.tsx` — pass industry prop
 
-### 4. Add Simple/Full toggle to `PlanOptimizerStep.tsx`
-- Add local state `viewMode: 'simple' | 'full'` (default: `'full'`)
-- Add a toggle near the top (next to the stats bar) with two options: "Summary" and "Full Editor"
-- **Summary view**: Compact card showing item counts per level, owner/date/metric coverage percentages, and a prominent "Download" button. No tree editing.
-- **Full Editor view**: The existing tree view with drag-and-drop, editing, etc. (current behavior)
+- Add `industry={orgProfile?.industry}` to the `<ProcessingOverlay>` usage (line 652)
+
+### Files
+
+| File | Change |
+|------|--------|
+| `src/components/steps/ProcessingOverlay.tsx` | Add `industry` prop, `INDUSTRY_TIPS` data, rotating tip display |
+| `src/components/steps/FileUploadStep.tsx` | Pass `industry` prop to ProcessingOverlay |
 
