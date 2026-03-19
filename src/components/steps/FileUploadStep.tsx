@@ -188,7 +188,15 @@ export function FileUploadStep({
 
     try {
       const pageRange = orgProfile?.pageRange;
-      const { images, pageCount } = await renderPDFToImages(file, 20, 1.0, pageRange);
+      const { images, pageCount } = await renderPDFToImages(file, 20, 0.75, pageRange);
+
+      // Log image sizes for debugging
+      const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024)); // approx KB
+      const totalKB = imageSizes.reduce((s, k) => s + k, 0);
+      const avgKB = Math.round(totalKB / images.length);
+      console.log(`[Vision] Rendered ${images.length} pages, avg ${avgKB}KB/page, total ${(totalKB / 1024).toFixed(1)}MB`);
+      addMessage(`Rendered ${images.length} pages (avg ${avgKB}KB each)`);
+
       setStepProgress('extract', 20);
 
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
