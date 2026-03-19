@@ -177,6 +177,65 @@ export function FileUploadStep({
     if (!hasAny) walk(items);
   };
 
+  // Poll processing_sessions for async pipeline results
+  const pollForResults = async (pollSessionId: string): Promise<{
+    success: boolean;
+    data?: any;
+    totalItems?: number;
+    corrections?: any[];
+    sessionConfidence?: number;
+    auditSummary?: any;
+    extractionMethod?: string;
+    pipelineComplete?: boolean;
+    error?: string;
+  }> => {
+    const POLL_INTERVAL = 3000;
+    const MAX_POLLS = 120; // 6 minutes max
+
+    for (let i = 0; i < MAX_POLLS; i++) {
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
+
+      const { data: session, error } = await supabase
+        .from('processing_sessions')
+        .select('status, current_step, step_results')
+        .eq('id', pollSessionId)
+        .single();
+
+      if (error) {
+        console.error('[Polling] Error:', error);
+        continue;
+      }
+
+      if (!session) continue;
+
+      // Update UI based on current_step
+      const step = (session as any).current_step as string;
+      if (step === 'classifying') {
+        setStepProgress('classify', 50);
+        addMessage('Classifying document structure...');
+      } else if (step === 'extracting') {
+        setStepProgress('extract', 50);
+        addMessage('Extracting plan items...');
+      } else if (step === 'validating') {
+        setStepProgress('validate', 50);
+        addMessage('Auditing and validating...');
+      }
+
+      if (session.status === 'completed') {
+        const results = (session as any).step_results as any;
+        if (results) return results;
+        return { success: false, error: 'Completed but no results found' };
+      }
+
+      if (session.status === 'error') {
+        const results = (session as any).step_results as any;
+        throw new Error(results?.error || 'Pipeline failed');
+      }
+    }
+
+    throw new Error('Pipeline timed out after 6 minutes');
+  };
+
   const extractWithVisionPipeline = async (
     file: File,
     _levelHints?: PlanLevel[]
@@ -190,8 +249,7 @@ export function FileUploadStep({
       const pageRange = orgProfile?.pageRange;
       const { images, pageCount } = await renderPDFToImages(file, 20, 0.75, pageRange);
 
-      // Log image sizes for debugging
-      const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024)); // approx KB
+      const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024));
       const totalKB = imageSizes.reduce((s, k) => s + k, 0);
       const avgKB = Math.round(totalKB / images.length);
       console.log(`[Vision] Rendered ${images.length} pages, avg ${avgKB}KB/page, total ${(totalKB / 1024).toFixed(1)}MB`);
@@ -201,8 +259,9 @@ export function FileUploadStep({
       addMessage('Document prepared');
 
       setStepProgress('classify', 0);
-      addMessage('Classifying document structure...');
+      addMessage('Starting AI pipeline...');
 
+      // Fire off process-plan (returns immediately with sessionId)
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -217,18 +276,21 @@ export function FileUploadStep({
         }),
       });
 
-      setStepProgress('classify', 100);
-      addMessage('Classification complete');
-      setStepProgress('extract', 60);
-
       if (!response.ok) {
         const error = await response.json();
-        if (response.status === 429) throw new Error('AI rate limit reached. Please wait a moment and try again.');
-        if (response.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-        throw new Error(error.error || 'Extraction failed');
+        throw new Error(error.error || 'Failed to start pipeline');
       }
 
-      const result = await response.json();
+      const initResult = await response.json();
+      if (!initResult.success) {
+        throw new Error(initResult.error || 'Failed to start pipeline');
+      }
+
+      const pipelineSessionId = initResult.sessionId || sessionId;
+      addMessage('Pipeline started, monitoring progress...');
+
+      // Poll for results
+      const result = await pollForResults(pipelineSessionId);
 
       if (!result.success || !result.data) {
         throw new Error(result.error || 'Extraction returned no data');
@@ -237,13 +299,9 @@ export function FileUploadStep({
       setStepProgress('extract', 100);
       addMessage(`Extraction complete — found ${result.totalItems || 0} items`);
 
-      setStepProgress('audit', 50);
-      addMessage('Reviewing for completeness...');
       setStepProgress('audit', 100);
       addMessage('Audit complete');
 
-      setStepProgress('validate', 50);
-      addMessage('Validating structure...');
       setStepProgress('validate', 100);
       addMessage('Validation complete');
 
@@ -273,7 +331,6 @@ export function FileUploadStep({
       console.error('Vision pipeline error:', error);
       const errorMessage = error?.message || String(error);
       
-      // Log error to api_call_logs for admin visibility
       if (sessionId) {
         try {
           await supabase.from('api_call_logs').insert({
@@ -289,7 +346,6 @@ export function FileUploadStep({
         }
       }
 
-      // Show inline error with paste fallback instead of just a toast
       setVisionError(errorMessage);
       toast({
         title: "Extraction Failed",
@@ -322,16 +378,25 @@ export function FileUploadStep({
         }),
       });
 
-      setStepProgress('extract', 50);
+      setStepProgress('extract', 20);
 
       if (!response.ok) {
         const error = await response.json();
         if (response.status === 429) throw new Error('AI rate limit reached. Please wait a moment and try again.');
         if (response.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-        throw new Error(error.error || 'Extraction failed');
+        throw new Error(error.error || 'Failed to start pipeline');
       }
 
-      const result = await response.json();
+      const initResult = await response.json();
+      if (!initResult.success) {
+        throw new Error(initResult.error || 'Failed to start pipeline');
+      }
+
+      const pipelineSessionId = initResult.sessionId || sessionId;
+      addMessage('Pipeline started, monitoring progress...');
+
+      // Poll for results
+      const result = await pollForResults(pipelineSessionId);
 
       if (!result.success || !result.data) {
         throw new Error(result.error || 'Extraction returned no data');
@@ -340,13 +405,9 @@ export function FileUploadStep({
       setStepProgress('extract', 100);
       addMessage(`Extraction complete — found ${result.totalItems || 0} items`);
 
-      setStepProgress('audit', 50);
-      addMessage('Reviewing for completeness...');
       setStepProgress('audit', 100);
       addMessage('Audit complete');
 
-      setStepProgress('validate', 50);
-      addMessage('Validating structure...');
       setStepProgress('validate', 100);
       addMessage('Validation complete');
 

@@ -74,6 +74,7 @@ export type Database = {
         Row: {
           classification_result: Json | null
           created_at: string
+          current_step: string
           document_name: string | null
           document_size_bytes: number | null
           document_type: string | null
@@ -82,6 +83,7 @@ export type Database = {
           org_industry: string | null
           org_name: string | null
           status: string
+          step_results: Json | null
           total_api_calls: number
           total_duration_ms: number
           total_input_tokens: number
@@ -91,6 +93,7 @@ export type Database = {
         Insert: {
           classification_result?: Json | null
           created_at?: string
+          current_step?: string
           document_name?: string | null
           document_size_bytes?: number | null
           document_type?: string | null
@@ -99,6 +102,7 @@ export type Database = {
           org_industry?: string | null
           org_name?: string | null
           status?: string
+          step_results?: Json | null
           total_api_calls?: number
           total_duration_ms?: number
           total_input_tokens?: number
@@ -108,6 +112,7 @@ export type Database = {
         Update: {
           classification_result?: Json | null
           created_at?: string
+          current_step?: string
           document_name?: string | null
           document_size_bytes?: number | null
           document_type?: string | null
@@ -116,6 +121,7 @@ export type Database = {
           org_industry?: string | null
           org_name?: string | null
           status?: string
+          step_results?: Json | null
           total_api_calls?: number
           total_duration_ms?: number
           total_input_tokens?: number
