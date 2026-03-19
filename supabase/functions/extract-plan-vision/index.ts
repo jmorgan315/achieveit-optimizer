@@ -711,7 +711,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { pageImages, previousContext, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId, batchLabel, extractionMode, tableStructure, hierarchyPattern } = body;
+    const { pageImages, previousContext, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId, batchLabel, extractionMode, tableStructure, hierarchyPattern, pageAnnotations, nonPlanContent } = body;
     console.log('[extract-plan-vision] Received sessionId:', incomingSessionId, 'extractionMode:', extractionMode || 'standard');
 
     if (!pageImages || !Array.isArray(pageImages) || pageImages.length === 0) {
