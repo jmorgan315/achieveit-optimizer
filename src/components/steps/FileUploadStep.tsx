@@ -703,6 +703,66 @@ export function FileUploadStep({
                 />
               )}
 
+              {/* Vision error with paste fallback */}
+              {!isLoading && visionError && !extractedItems && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+                      <div className="space-y-2">
+                        <p className="font-medium text-foreground">
+                          This document couldn't be processed automatically
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Complex tables and merged cells can be difficult to extract. Try pasting the plan text directly, or re-save the PDF at a lower resolution.
+                        </p>
+                        {!pasteMode && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPasteMode(true)}
+                            className="mt-2"
+                          >
+                            <ClipboardPaste className="h-4 w-4 mr-2" />
+                            Paste Text Instead
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {pasteMode && (
+                    <div className="space-y-3">
+                      <Textarea
+                        placeholder="Paste your strategic plan text here..."
+                        value={pastedText}
+                        onChange={(e) => setPastedText(e.target.value)}
+                        className="min-h-[200px] text-sm"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={handlePasteSubmit}
+                          disabled={!pastedText.trim() || isExtracting}
+                          className="flex-1"
+                        >
+                          {isExtracting ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Extracting...
+                            </>
+                          ) : (
+                            'Extract from Pasted Text'
+                          )}
+                        </Button>
+                        <Button variant="ghost" onClick={() => { setPasteMode(false); setPastedText(''); }}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Completed extraction status */}
               {!isLoading && extractedItems && (
                 <div className="flex items-center justify-between p-4 rounded-lg border bg-success/10 border-success/20">
