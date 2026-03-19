@@ -72,9 +72,11 @@ export type Database = {
       }
       processing_sessions: {
         Row: {
+          classification_result: Json | null
           created_at: string
           document_name: string | null
           document_size_bytes: number | null
+          document_type: string | null
           extraction_method: string | null
           id: string
           org_industry: string | null
@@ -87,9 +89,11 @@ export type Database = {
           total_output_tokens: number
         }
         Insert: {
+          classification_result?: Json | null
           created_at?: string
           document_name?: string | null
           document_size_bytes?: number | null
+          document_type?: string | null
           extraction_method?: string | null
           id?: string
           org_industry?: string | null
@@ -102,9 +106,11 @@ export type Database = {
           total_output_tokens?: number
         }
         Update: {
+          classification_result?: Json | null
           created_at?: string
           document_name?: string | null
           document_size_bytes?: number | null
+          document_type?: string | null
           extraction_method?: string | null
           id?: string
           org_industry?: string | null
