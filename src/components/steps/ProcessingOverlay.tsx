@@ -33,6 +33,7 @@ const STEP_RANGES: Record<ProcessingStep, { start: number; size: number }> = {
 
 const CONTEXTUAL_MESSAGES: Record<ProcessingStep, string> = {
   upload: 'Preparing your document for analysis...',
+  classify: 'Analyzing document structure and layout...',
   extract: 'Scanning your document for goals, priorities, and initiatives...',
   audit: 'Cross-checking extracted items against your document...',
   validate: 'Verifying hierarchy and structure...',
