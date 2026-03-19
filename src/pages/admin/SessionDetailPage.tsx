@@ -26,6 +26,8 @@ interface Session {
   total_output_tokens: number;
   total_duration_ms: number;
   status: string;
+  document_type: string | null;
+  classification_result: Json;
 }
 
 interface ApiLog {
@@ -116,6 +118,59 @@ function renderResponseContent(payload: Json) {
   return <pre className="text-xs whitespace-pre overflow-x-auto">{JSON.stringify(payload, null, 2)}</pre>;
 }
 
+function ClassificationCard({ classification }: { classification: Record<string, Json> }) {
+  const [expanded, setExpanded] = useState(false);
+  const docType = String(classification.document_type || 'unknown');
+  const confidence = classification.confidence as number | undefined;
+  const contentPages = classification.plan_content_pages as number[] | undefined;
+  const hierarchy = classification.hierarchy_pattern as Record<string, Json> | undefined;
+  const detectedLevels = hierarchy?.detected_levels as string[] | undefined;
+
+  return (
+    <Collapsible>
+      <Card>
+        <CollapsibleTrigger className="w-full">
+          <div className="flex items-center gap-3 p-4 text-sm hover:bg-muted/30 transition-colors">
+            <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+            <span className="font-semibold">Document Classification</span>
+            <Badge variant="outline">{docType}</Badge>
+            {confidence != null && <span className="text-xs text-muted-foreground">{Math.round(confidence * 100)}% confidence</span>}
+          </div>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-t border-border p-4 space-y-3 text-sm">
+            {contentPages && contentPages.length > 0 && (
+              <div>
+                <span className="text-muted-foreground">Plan content pages: </span>
+                <span>{contentPages.join(', ')}</span>
+              </div>
+            )}
+            {detectedLevels && detectedLevels.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-muted-foreground">Hierarchy: </span>
+                {detectedLevels.map((l, i) => (
+                  <Badge key={i} variant="secondary" className="text-xs">{l}</Badge>
+                ))}
+              </div>
+            )}
+            <Collapsible open={expanded} onOpenChange={setExpanded}>
+              <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                Full Classification JSON
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <pre className="mt-2 text-xs bg-muted/30 rounded p-3 whitespace-pre overflow-x-auto max-h-[400px] overflow-y-auto">
+                  {JSON.stringify(classification, null, 2)}
+                </pre>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+        </CollapsibleContent>
+      </Card>
+    </Collapsible>
+  );
+}
+
 function CopyButton({ text }: { text: string }) {
   const { toast } = useToast();
   return (
@@ -175,6 +230,11 @@ export default function SessionDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Document Classification */}
+      {session.classification_result && typeof session.classification_result === 'object' && (
+        <ClassificationCard classification={session.classification_result as Record<string, Json>} />
+      )}
 
       <h2 className="text-lg font-semibold">API Call Timeline ({logs.length})</h2>
 

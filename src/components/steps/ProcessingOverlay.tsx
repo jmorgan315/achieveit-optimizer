@@ -2,10 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, CheckCircle2, ChevronDown, Search, GitBranch, FileText, Lightbulb } from 'lucide-react';
+import { Brain, CheckCircle2, ChevronDown, Search, GitBranch, FileText, Lightbulb, ScanSearch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export type ProcessingStep = 'upload' | 'extract' | 'audit' | 'validate';
+export type ProcessingStep = 'upload' | 'classify' | 'extract' | 'audit' | 'validate';
 
 interface ProcessingOverlayProps {
   currentStep: ProcessingStep;
@@ -17,20 +17,23 @@ interface ProcessingOverlayProps {
 
 const STEP_CONFIG: { id: ProcessingStep; label: string; icon: typeof Brain }[] = [
   { id: 'upload', label: 'Upload', icon: FileText },
+  { id: 'classify', label: 'Classify', icon: ScanSearch },
   { id: 'extract', label: 'Extract', icon: Brain },
   { id: 'audit', label: 'Audit', icon: Search },
   { id: 'validate', label: 'Validate', icon: GitBranch },
 ];
 
 const STEP_RANGES: Record<ProcessingStep, { start: number; size: number }> = {
-  upload: { start: 0, size: 15 },
-  extract: { start: 15, size: 45 },
+  upload: { start: 0, size: 10 },
+  classify: { start: 10, size: 10 },
+  extract: { start: 20, size: 40 },
   audit: { start: 60, size: 20 },
   validate: { start: 80, size: 20 },
 };
 
 const CONTEXTUAL_MESSAGES: Record<ProcessingStep, string> = {
   upload: 'Preparing your document for analysis...',
+  classify: 'Analyzing document structure and layout...',
   extract: 'Scanning your document for goals, priorities, and initiatives...',
   audit: 'Cross-checking extracted items against your document...',
   validate: 'Verifying hierarchy and structure...',
