@@ -57,6 +57,9 @@ export function FileUploadStep({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
+  const [visionError, setVisionError] = useState<string | null>(null);
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pastedText, setPastedText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
