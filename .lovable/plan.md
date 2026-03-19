@@ -1,37 +1,75 @@
 
 
-# Fix: Strip data URL prefix from base64 images in classify-document
+# Fix Pipeline Timeout: Parallel Agents + Async Polling
 
 ## Problem
-The `classify-document` edge function sends page images to Claude with the full data URL prefix (e.g., `data:image/jpeg;base64,/9j/4AAQ...`). Claude expects only raw base64 data. The function also hardcodes `media_type: "image/png"` even when images are JPEG.
+The `process-plan` edge function takes ~170s, exceeding the browser connection timeout (~120s). The pipeline completes on the server but the frontend never receives the response.
 
-## Fix (single file)
-**`supabase/functions/classify-document/index.ts`**, lines 264-273
+## Change 1: Parallelize Agents 2 & 3
 
-Replace the image-building loop to match the pattern used in `extract-plan-vision` (lines 796-803):
+**File**: `supabase/functions/process-plan/index.ts` (lines 511-584)
+
+Run `audit-completeness` and `validate-hierarchy` concurrently with `Promise.allSettled`. They are independent — saves ~18-20s.
 
 ```typescript
-for (let i = 0; i < pageImages.length; i++) {
-  let base64Data = pageImages[i];
-  let mediaType = "image/png";
-  
-  // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,...")
-  const match = base64Data.match(/^data:(image\/[^;]+);base64,(.+)$/);
-  if (match) {
-    mediaType = match[1];
-    base64Data = match[2];
-  }
-  
-  userContent.push({
-    type: "image",
-    source: {
-      type: "base64",
-      media_type: mediaType,
-      data: base64Data,
-    },
-  });
-}
+const [auditSettled, validateSettled] = await Promise.allSettled([
+  (async () => { /* audit logic */ })(),
+  (async () => { /* validate logic */ })(),
+]);
+// Extract results from settled promises, keep same error handling
 ```
 
-This extracts the actual media type from the data URL prefix and sends only the raw base64 string to Claude.
+## Change 2: Async Processing with Polling
+
+### 2a. Database Migration
+
+Add two columns to `processing_sessions`:
+- `current_step` (text, default `'queued'`) — tracks pipeline progress
+- `step_results` (jsonb, nullable) — stores final pipeline output
+
+### 2b. Edge Function: Fire-and-Forget Pattern
+
+**File**: `supabase/functions/process-plan/index.ts`
+
+Restructure `serve()` handler:
+1. Parse request, ensure session, return `{ success: true, sessionId }` immediately
+2. Run the full pipeline in a non-awaited async function (Supabase Edge Functions keep the isolate alive after responding — the function already runs ~170s today)
+3. At each checkpoint, update `processing_sessions` row:
+   - After Agent 0: `current_step = 'classifying'`, save classification
+   - After Agent 1: `current_step = 'extracting'`, save item count
+   - After Agents 2+3: `current_step = 'validating'`
+   - On completion: `status = 'completed'`, `current_step = 'complete'`, `step_results = { full result payload }`
+   - On error: `status = 'error'`, `step_results = { error details }`
+
+### 2c. Frontend: Poll for Results
+
+**File**: `src/components/steps/FileUploadStep.tsx`
+
+Replace the single long `fetch()` in both `extractWithVisionPipeline` and `extractPlanItemsWithAI`:
+
+1. `POST` to `process-plan` — returns immediately with `{ sessionId }`
+2. Start a polling loop (every 3s) querying `processing_sessions` by sessionId
+3. Map `current_step` values to `ProcessingStep` UI states:
+   - `'classifying'` → `setStepProgress('classify', 50)`
+   - `'extracting'` → `setStepProgress('extract', 50)`
+   - `'validating'` → `setStepProgress('validate', 50)`
+   - `'completed'` → read `step_results`, process as before
+   - `'error'` → show error from `step_results`
+4. On `status = 'completed'`, parse `step_results` exactly as the current `result` response is parsed (same fields: `data`, `totalItems`, `corrections`, `sessionConfidence`, etc.)
+
+### 2d. Enable Realtime (optional optimization)
+
+Add `processing_sessions` to realtime publication so a future iteration can use subscriptions instead of polling. Not required for this change.
+
+```sql
+ALTER PUBLICATION supabase_realtime ADD TABLE public.processing_sessions;
+```
+
+## Files to Modify
+
+| File | Change |
+|------|--------|
+| `supabase/functions/process-plan/index.ts` | Parallel agents, return-early + background processing, DB progress updates |
+| `src/components/steps/FileUploadStep.tsx` | Replace long fetch with POST + poll loop |
+| Database migration | Add `current_step` and `step_results` columns |
 
