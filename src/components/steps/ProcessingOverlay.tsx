@@ -17,14 +17,16 @@ interface ProcessingOverlayProps {
 
 const STEP_CONFIG: { id: ProcessingStep; label: string; icon: typeof Brain }[] = [
   { id: 'upload', label: 'Upload', icon: FileText },
+  { id: 'classify', label: 'Classify', icon: ScanSearch },
   { id: 'extract', label: 'Extract', icon: Brain },
   { id: 'audit', label: 'Audit', icon: Search },
   { id: 'validate', label: 'Validate', icon: GitBranch },
 ];
 
 const STEP_RANGES: Record<ProcessingStep, { start: number; size: number }> = {
-  upload: { start: 0, size: 15 },
-  extract: { start: 15, size: 45 },
+  upload: { start: 0, size: 10 },
+  classify: { start: 10, size: 10 },
+  extract: { start: 20, size: 40 },
   audit: { start: 60, size: 20 },
   validate: { start: 80, size: 20 },
 };
