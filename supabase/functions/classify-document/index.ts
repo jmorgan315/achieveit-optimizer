@@ -262,12 +262,22 @@ serve(async (req) => {
       { type: "text", text: userPrompt },
     ];
     for (let i = 0; i < pageImages.length; i++) {
+      let base64Data = pageImages[i];
+      let mediaType = "image/png";
+
+      // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,...")
+      const match = base64Data.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (match) {
+        mediaType = match[1];
+        base64Data = match[2];
+      }
+
       userContent.push({
         type: "image",
         source: {
           type: "base64",
-          media_type: "image/png",
-          data: pageImages[i],
+          media_type: mediaType,
+          data: base64Data,
         },
       });
     }
