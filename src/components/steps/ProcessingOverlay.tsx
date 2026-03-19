@@ -1,17 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Brain, CheckCircle2, ChevronDown, Search, GitBranch, FileText } from 'lucide-react';
+import { Brain, CheckCircle2, ChevronDown, Search, GitBranch, FileText, Lightbulb } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export type ProcessingStep = 'upload' | 'extract' | 'audit' | 'validate';
 
 interface ProcessingOverlayProps {
   currentStep: ProcessingStep;
-  stepProgress: number; // 0-100 within current step
+  stepProgress: number;
   statusMessages: string[];
   orgName?: string;
+  industry?: string;
 }
 
 const STEP_CONFIG: { id: ProcessingStep; label: string; icon: typeof Brain }[] = [
@@ -35,6 +36,46 @@ const CONTEXTUAL_MESSAGES: Record<ProcessingStep, string> = {
   validate: 'Verifying hierarchy and structure...',
 };
 
+const INDUSTRY_TIPS: Record<string, string[]> = {
+  'Local Government': [
+    'Government plans often include community impact metrics alongside operational KPIs — both matter for accountability.',
+    'Citizen satisfaction scores are one of the most tracked metrics in local government strategic plans.',
+    'The most effective government strategic plans connect department-level work to citywide or countywide goals.',
+    'Public sector plans benefit from transparency — publishing progress reports builds community trust.',
+  ],
+  'State Government': [
+    'State-level strategic plans that align agency goals with legislative priorities see stronger budget support.',
+    'Cross-agency coordination is the top execution challenge for state government plans — clear ownership at every level helps.',
+    'State plans that track both operational efficiency and constituent outcomes tend to have the strongest legislative backing.',
+  ],
+  'Federal Government': [
+    'Federal strategic plans aligned to agency performance frameworks (like GPRA) see better cross-department execution.',
+    'The most effective federal plans tie program-level activities directly to mission-level outcomes.',
+    'Interagency collaboration on shared priorities is a leading indicator of federal plan success.',
+  ],
+  'Education': [
+    'Education strategic plans that track student outcomes at every level see the strongest long-term results.',
+    'Successful education plans connect classroom initiatives to district-wide strategic goals.',
+    'Schools that align professional development to strategic priorities see faster progress on achievement gaps.',
+  ],
+  'Healthcare': [
+    'Healthcare organizations that align strategic plans with quality metrics see better patient outcomes and regulatory compliance.',
+    'The most common healthcare strategic priorities are patient experience, workforce development, and financial sustainability.',
+    'Health systems that cascade strategic goals to department-level action plans see 2x better execution rates.',
+  ],
+  'Non-Profit': [
+    'Nonprofit strategic plans that tie program activities to measurable mission impact are more effective at securing funding.',
+    'Board alignment on strategic priorities is the #1 predictor of nonprofit plan execution success.',
+    'Nonprofits that review strategic plans quarterly with their board report stronger donor confidence.',
+  ],
+  'Commercial': [
+    'Companies that align department goals with enterprise strategy see 40% better execution rates.',
+    'Commercial organizations with cascaded strategic plans report higher employee engagement and faster growth.',
+    'The most successful commercial strategic plans balance growth targets with operational efficiency metrics.',
+    'Organizations that connect individual performance goals to company strategy see 31% higher productivity.',
+  ],
+};
+
 function calcOverallProgress(step: ProcessingStep, stepProgress: number): number {
   const range = STEP_RANGES[step];
   return Math.min(100, range.start + (stepProgress / 100) * range.size);
@@ -45,9 +86,13 @@ export function ProcessingOverlay({
   stepProgress,
   statusMessages,
   orgName,
+  industry,
 }: ProcessingOverlayProps) {
   const [logOpen, setLogOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [activeTipIndex, setActiveTipIndex] = useState(0);
+
+  const tips = useMemo(() => (industry && INDUSTRY_TIPS[industry]) || null, [industry]);
 
   useEffect(() => {
     const start = Date.now();
@@ -56,6 +101,14 @@ export function ProcessingOverlay({
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!tips || tips.length <= 1) return;
+    const interval = setInterval(() => {
+      setActiveTipIndex((prev) => (prev + 1) % tips.length);
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [tips]);
 
   const overallProgress = calcOverallProgress(currentStep, stepProgress);
   const currentStepIndex = STEP_CONFIG.findIndex(s => s.id === currentStep);
@@ -116,16 +169,32 @@ export function ProcessingOverlay({
           </div>
         </div>
 
-        {/* Contextual status card */}
+        {/* Contextual tip / status card */}
         <div className="rounded-lg bg-muted/50 border border-border p-4">
-          <div className="flex items-start gap-3">
-            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-              <Brain className="h-4 w-4 text-primary" />
+          {tips ? (
+            <div className="flex items-start gap-3">
+              <div className="h-8 w-8 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-0.5">
+                <Lightbulb className="h-4 w-4 text-accent-foreground" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                  {industry} Insight
+                </p>
+                <p className="text-sm text-foreground leading-relaxed transition-opacity duration-500">
+                  {tips[activeTipIndex]}
+                </p>
+              </div>
             </div>
-            <p className="text-sm text-foreground leading-relaxed">
-              {CONTEXTUAL_MESSAGES[currentStep]}
-            </p>
-          </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                <Brain className="h-4 w-4 text-primary" />
+              </div>
+              <p className="text-sm text-foreground leading-relaxed">
+                {CONTEXTUAL_MESSAGES[currentStep]}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Activity log */}
