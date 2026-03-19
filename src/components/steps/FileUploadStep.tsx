@@ -650,6 +650,7 @@ export function FileUploadStep({
                   stepProgress={progressState.stepProgress}
                   statusMessages={progressState.messages}
                   orgName={orgProfile?.organizationName}
+                  industry={orgProfile?.industry}
                 />
               )}
 
