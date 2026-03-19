@@ -1,79 +1,66 @@
 
 
-# Wire classify-document into process-plan Pipeline
+# Add Table-Aware Extraction Mode to extract-plan-vision
 
 ## Overview
-Add classify-document as Step 0 in the extraction pipeline, update the frontend to show 5 steps (upload + 4 agent steps), and show classification results in the admin session detail page. Also add two new columns to `processing_sessions` for classification metadata.
+When `extractionMode === "table"`, use a specialized system prompt that leverages Agent 0's `tableStructure` and `hierarchyPattern` to extract items from tabular documents. The standard tool_use approach is replaced with a direct JSON response since the table prompt specifies a flat array with `parent_name` references.
 
-## 1. Database Migration
-Add two columns to `processing_sessions`:
-- `document_type text` (nullable)
-- `classification_result jsonb` (nullable)
+## 1. `supabase/functions/extract-plan-vision/index.ts`
 
-## 2. Edge Function: `supabase/functions/process-plan/index.ts`
+**Parse new optional params** (line ~430):
+- `extractionMode` (string, default "standard")
+- `tableStructure` (object or null)
+- `hierarchyPattern` (object or null)
 
-**Before Agent 1 extraction block, insert Agent 0 — Document Classification:**
-- Call `classify-document` via `callEdgeFunction` with `{ pageImages, orgName: organizationName, industry, userPlanLevels: planLevels, pageRange, sessionId }`
-- Only run when `useVision` is true (vision path has page images; text path doesn't benefit from classification)
-- Store result as `classification`
-- Derive `extractionMode`: `"table"` if `document_type === "tabular" && table_structure`, `"presentation"` if `document_type === "presentation" || "mixed"`, else `"standard"`
-- Log `extractionMode` to console
-- Update session row: `document_type` and `classification_result`
+**Add table extraction prompt** as a new constant `TABLE_EXTRACTION_PROMPT` containing the full system prompt from the user's spec, with `{TABLE_STRUCTURE}` and `{HIERARCHY_MAPPING}` placeholders.
 
-**Filter page images for Agent 1:**
-- If `classification.plan_content_pages` exists and is non-empty, filter `pageImages` to only those 1-indexed pages before passing to extraction batching
-- For text path, if `classification.extraction_recommendations.page_range` exists, slice text (not implemented yet since text path skips classification)
+**Branch logic based on extractionMode** (line ~528):
+- When `extractionMode === "table"`:
+  - Build system prompt by injecting `JSON.stringify(tableStructure, null, 2)` and `JSON.stringify(hierarchyPattern, null, 2)` into the template
+  - Do NOT use `tools` or `tool_choice` — the prompt asks for raw JSON output
+  - Set `max_tokens: 16384` (same as standard)
+  - Parse the response text as JSON (strip markdown fencing if present)
+  - Convert the flat array with `parent_name` references into a nested tree structure matching the standard output format (`items` with `children`)
+  - Map `level`/`level_name` to `levelType` for compatibility
+  - Preserve extra fields (`source_column`, `metadata`) — they pass through harmlessly
 
-**Pass classification to Agent 2:**
-- Add `classification` field to the audit-completeness payload
+- When `extractionMode !== "table"`: existing behavior unchanged
 
-**Renumber console logs:**
-- Agent 0 = "Step 0", Agent 1 = "Step 1", Agent 2 = "Step 2", Agent 3 = "Step 3"
+**Add helper: `convertFlatToNested`**:
+- Takes the flat array from table extraction (each item has `parent_name` or `null`)
+- Groups items by level, links children to parents by matching `parent_name` to `name`
+- Returns nested tree + `detectedLevels` derived from unique `level_name` values
 
-## 3. Frontend: `src/components/steps/ProcessingOverlay.tsx`
+**Normalize table output** to match standard format:
+- Map `level_name` → `levelType` field
+- Wrap in `{ items, detectedLevels, documentTerminology }` structure
+- Run through existing `normalizeResponse` (extra fields like `metadata` and `source_column` pass through safely)
 
-Update to 5 steps:
+## 2. `supabase/functions/process-plan/index.ts`
+
+**In the vision extraction loop** (line ~422), pass classification data when in table mode:
+```typescript
+const result = await callEdgeFunction("extract-plan-vision", {
+  pageImages: batch,
+  previousContext,
+  organizationName,
+  industry,
+  documentHints,
+  planLevels,
+  pageRange,
+  sessionId,
+  batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
+  // Table mode params
+  extractionMode,
+  tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
+  hierarchyPattern: extractionMode === "table" ? classification?.hierarchy_pattern : undefined,
+});
 ```
-ProcessingStep = 'upload' | 'classify' | 'extract' | 'audit' | 'validate'
-
-STEP_CONFIG: Upload, Classify, Extract, Audit, Validate
-  - Classify icon: Eye (or Scan)
-
-STEP_RANGES:
-  upload:   { start: 0,  size: 10 }
-  classify: { start: 10, size: 10 }
-  extract:  { start: 20, size: 40 }
-  audit:    { start: 60, size: 20 }
-  validate: { start: 80, size: 20 }
-```
-
-Add contextual message for classify step.
-
-## 4. Frontend: `src/components/steps/FileUploadStep.tsx`
-
-In `extractWithVisionPipeline`, update progress calls:
-- After rendering images: `setStepProgress('classify', 0)` then `addMessage('Classifying document structure...')`
-- After process-plan returns: step through classify→extract→audit→validate progress updates
-
-## 5. Admin: `src/pages/admin/SessionDetailPage.tsx`
-
-**Add classification card** between session summary and API Call Timeline:
-- Only show if `session.classification_result` exists
-- Collapsible card titled "Document Classification"
-- Show `document_type` as a badge, `confidence` as percentage
-- Show `plan_content_pages` as comma-separated list
-- Show `hierarchy_pattern.detected_levels` as badges
-- Expandable "Full Classification JSON" section with pre-formatted JSON
-
-**Update Session interface** to include `document_type` and `classification_result` fields.
 
 ## Files to modify
 
 | File | Change |
 |------|--------|
-| Migration | Add `document_type` and `classification_result` columns to `processing_sessions` |
-| `supabase/functions/process-plan/index.ts` | Add Agent 0 call, page filtering, pass classification to audit, update session |
-| `src/components/steps/ProcessingOverlay.tsx` | Add 'classify' step, update ranges |
-| `src/components/steps/FileUploadStep.tsx` | Add classify progress step |
-| `src/pages/admin/SessionDetailPage.tsx` | Add classification card, update Session type |
+| `supabase/functions/extract-plan-vision/index.ts` | Add table prompt, branching logic, flat-to-nested converter |
+| `supabase/functions/process-plan/index.ts` | Pass extractionMode + classification data to extract-plan-vision |
 
