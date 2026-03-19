@@ -273,6 +273,17 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     });
     const durationMs = Date.now() - startTime;
 
+    // Build a log-safe version of the request (truncate large user messages)
+    const logPayload = {
+      ...requestBody,
+      messages: requestBody.messages.map((msg: { role: string; content: string }) => ({
+        ...msg,
+        content: typeof msg.content === 'string' && msg.content.length > 10000
+          ? msg.content.slice(0, 10000) + `\n[TRUNCATED: ${msg.content.length} chars total]`
+          : msg.content,
+      })),
+    };
+
     if (!response.ok) {
       const errText = await response.text();
       console.error("[validate-hierarchy] Anthropic error:", response.status, errText);
