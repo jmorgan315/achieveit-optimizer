@@ -293,6 +293,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
         edge_function: "validate-hierarchy",
         step_label: "Step 3: Structure Validation",
         model: "claude-sonnet-4-20250514",
+        request_payload: logPayload,
         duration_ms: durationMs,
         status: "error",
         error_message: `Anthropic ${response.status}: ${errText.slice(0, 500)}`,
