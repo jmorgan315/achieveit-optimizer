@@ -1,66 +1,44 @@
 
 
-# Add Table-Aware Extraction Mode to extract-plan-vision
+# Add Presentation Extraction Mode
 
 ## Overview
-When `extractionMode === "table"`, use a specialized system prompt that leverages Agent 0's `tableStructure` and `hierarchyPattern` to extract items from tabular documents. The standard tool_use approach is replaced with a direct JSON response since the table prompt specifies a flat array with `parent_name` references.
+Add a `"presentation"` branch in `extract-plan-vision` (same pattern as the existing `"table"` branch) and update `process-plan` to pass the required classification fields.
 
 ## 1. `supabase/functions/extract-plan-vision/index.ts`
 
-**Parse new optional params** (line ~430):
-- `extractionMode` (string, default "standard")
-- `tableStructure` (object or null)
-- `hierarchyPattern` (object or null)
+**Parse new optional params** on line 610: add `pageAnnotations` and `nonPlanContent` to destructuring.
 
-**Add table extraction prompt** as a new constant `TABLE_EXTRACTION_PROMPT` containing the full system prompt from the user's spec, with `{TABLE_STRUCTURE}` and `{HIERARCHY_MAPPING}` placeholders.
+**Add `buildPresentationExtractionPrompt` helper** (near the existing `buildTableExtractionPrompt`):
+- Accepts `pageAnnotations`, `hierarchyPattern`, `nonPlanContent`
+- Returns the full presentation system prompt with `{PAGE_ANNOTATIONS}`, `{HIERARCHY}`, and conditional action-item metadata section injected
 
-**Branch logic based on extractionMode** (line ~528):
-- When `extractionMode === "table"`:
-  - Build system prompt by injecting `JSON.stringify(tableStructure, null, 2)` and `JSON.stringify(hierarchyPattern, null, 2)` into the template
-  - Do NOT use `tools` or `tool_choice` — the prompt asks for raw JSON output
-  - Set `max_tokens: 16384` (same as standard)
-  - Parse the response text as JSON (strip markdown fencing if present)
-  - Convert the flat array with `parent_name` references into a nested tree structure matching the standard output format (`items` with `children`)
-  - Map `level`/`level_name` to `levelType` for compatibility
-  - Preserve extra fields (`source_column`, `metadata`) — they pass through harmlessly
+**Add presentation branch** between the table block (ends line 790) and standard block (line 792):
+```
+if (extractionMode === "presentation") { ... }
+```
+- Same structure as the table branch: build prompt, call Anthropic without tools, parse JSON array, run through `convertFlatToNested`, `normalizeResponse`, return
 
-- When `extractionMode !== "table"`: existing behavior unchanged
-
-**Add helper: `convertFlatToNested`**:
-- Takes the flat array from table extraction (each item has `parent_name` or `null`)
-- Groups items by level, links children to parents by matching `parent_name` to `name`
-- Returns nested tree + `detectedLevels` derived from unique `level_name` values
-
-**Normalize table output** to match standard format:
-- Map `level_name` → `levelType` field
-- Wrap in `{ items, detectedLevels, documentTerminology }` structure
-- Run through existing `normalizeResponse` (extra fields like `metadata` and `source_column` pass through safely)
+**System prompt**: Verbatim from user spec, with three template slots:
+- `{PAGE_ANNOTATIONS}` → `JSON.stringify(pageAnnotations, null, 2)`
+- `{HIERARCHY}` → `JSON.stringify(hierarchyPattern, null, 2)`
+- Conditional action-item metadata section when `nonPlanContent?.has_action_items_with_metadata`
 
 ## 2. `supabase/functions/process-plan/index.ts`
 
-**In the vision extraction loop** (line ~422), pass classification data when in table mode:
+**Update the extract-plan-vision call** (line ~422-436) to pass presentation-mode params:
 ```typescript
-const result = await callEdgeFunction("extract-plan-vision", {
-  pageImages: batch,
-  previousContext,
-  organizationName,
-  industry,
-  documentHints,
-  planLevels,
-  pageRange,
-  sessionId,
-  batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
-  // Table mode params
-  extractionMode,
-  tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
-  hierarchyPattern: extractionMode === "table" ? classification?.hierarchy_pattern : undefined,
-});
+extractionMode,
+tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
+hierarchyPattern: (extractionMode === "table" || extractionMode === "presentation") ? classification?.hierarchy_pattern : undefined,
+pageAnnotations: extractionMode === "presentation" ? classification?.page_annotations : undefined,
+nonPlanContent: extractionMode === "presentation" ? classification?.non_plan_content : undefined,
 ```
 
 ## Files to modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/extract-plan-vision/index.ts` | Add table prompt, branching logic, flat-to-nested converter |
-| `supabase/functions/process-plan/index.ts` | Pass extractionMode + classification data to extract-plan-vision |
+| `supabase/functions/extract-plan-vision/index.ts` | Add presentation prompt builder, presentation extraction branch |
+| `supabase/functions/process-plan/index.ts` | Pass pageAnnotations + nonPlanContent for presentation mode |
 
