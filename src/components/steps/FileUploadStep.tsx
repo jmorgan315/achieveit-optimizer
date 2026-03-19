@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, FileText, CheckCircle2, Loader2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, Loader2, AlertTriangle, ClipboardPaste } from 'lucide-react';
 import { SAMPLE_RAW_TEXT, PlanItem, PersonMapping, PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
 import { toast } from '@/hooks/use-toast';
 import { getUserFriendlyError } from '@/utils/getUserFriendlyError';
@@ -10,6 +10,7 @@ import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages } from '@/utils/pdfToImages';
 import { ProcessingOverlay, ProcessingStep } from './ProcessingOverlay';
 import { supabase } from '@/integrations/supabase/client';
+import { Textarea } from '@/components/ui/textarea';
 
 import { OrgProfile } from '@/types/plan';
 
@@ -56,6 +57,9 @@ export function FileUploadStep({
   const [isProcessing, setIsProcessing] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
+  const [visionError, setVisionError] = useState<string | null>(null);
+  const [pasteMode, setPasteMode] = useState(false);
+  const [pastedText, setPastedText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
@@ -184,7 +188,15 @@ export function FileUploadStep({
 
     try {
       const pageRange = orgProfile?.pageRange;
-      const { images, pageCount } = await renderPDFToImages(file, 20, 1.0, pageRange);
+      const { images, pageCount } = await renderPDFToImages(file, 20, 0.75, pageRange);
+
+      // Log image sizes for debugging
+      const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024)); // approx KB
+      const totalKB = imageSizes.reduce((s, k) => s + k, 0);
+      const avgKB = Math.round(totalKB / images.length);
+      console.log(`[Vision] Rendered ${images.length} pages, avg ${avgKB}KB/page, total ${(totalKB / 1024).toFixed(1)}MB`);
+      addMessage(`Rendered ${images.length} pages (avg ${avgKB}KB each)`);
+
       setStepProgress('extract', 20);
 
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
@@ -251,11 +263,31 @@ export function FileUploadStep({
 
       return { items, levels, personMappings, sessionConfidence };
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Vision pipeline error:', error);
+      const errorMessage = error?.message || String(error);
+      
+      // Log error to api_call_logs for admin visibility
+      if (sessionId) {
+        try {
+          await supabase.from('api_call_logs').insert({
+            session_id: sessionId,
+            edge_function: 'process-plan',
+            step_label: 'Vision extraction failed',
+            status: 'error',
+            error_message: errorMessage,
+          });
+          await supabase.from('processing_sessions').update({ status: 'failed' }).eq('id', sessionId);
+        } catch (logErr) {
+          console.error('[Vision] Failed to log error:', logErr);
+        }
+      }
+
+      // Show inline error with paste fallback instead of just a toast
+      setVisionError(errorMessage);
       toast({
         title: "Extraction Failed",
-        description: getUserFriendlyError(error, 'vision'),
+        description: "This document couldn't be processed automatically. You can paste the plan text instead.",
         variant: "destructive",
       });
       return null;
@@ -550,9 +582,26 @@ export function FileUploadStep({
     setDetectedLevels(null);
     setProcessingStatus('');
     setUseVisionAI(false);
+    setVisionError(null);
+    setPasteMode(false);
+    setPastedText('');
     resetProgress();
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePasteSubmit = async () => {
+    if (!pastedText.trim()) return;
+    setVisionError(null);
+    setPasteMode(false);
+    setFileContent(pastedText);
+    const result = await extractPlanItemsWithAI(pastedText);
+    if (result) {
+      setExtractedItems(result.items);
+      setExtractedMappings(result.personMappings);
+      setDetectedLevels(result.levels);
+      finalizeExtraction(result.items, 'text');
     }
   };
 
@@ -652,6 +701,66 @@ export function FileUploadStep({
                   orgName={orgProfile?.organizationName}
                   industry={orgProfile?.industry}
                 />
+              )}
+
+              {/* Vision error with paste fallback */}
+              {!isLoading && visionError && !extractedItems && (
+                <div className="space-y-4">
+                  <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+                      <div className="space-y-2">
+                        <p className="font-medium text-foreground">
+                          This document couldn't be processed automatically
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          Complex tables and merged cells can be difficult to extract. Try pasting the plan text directly, or re-save the PDF at a lower resolution.
+                        </p>
+                        {!pasteMode && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setPasteMode(true)}
+                            className="mt-2"
+                          >
+                            <ClipboardPaste className="h-4 w-4 mr-2" />
+                            Paste Text Instead
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {pasteMode && (
+                    <div className="space-y-3">
+                      <Textarea
+                        placeholder="Paste your strategic plan text here..."
+                        value={pastedText}
+                        onChange={(e) => setPastedText(e.target.value)}
+                        className="min-h-[200px] text-sm"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          onClick={handlePasteSubmit}
+                          disabled={!pastedText.trim() || isExtracting}
+                          className="flex-1"
+                        >
+                          {isExtracting ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Extracting...
+                            </>
+                          ) : (
+                            'Extract from Pasted Text'
+                          )}
+                        </Button>
+                        <Button variant="ghost" onClick={() => { setPasteMode(false); setPastedText(''); }}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Completed extraction status */}

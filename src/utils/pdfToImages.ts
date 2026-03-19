@@ -24,7 +24,7 @@ export interface PDFRenderResult {
 export async function renderPDFToImages(
   file: File,
   maxPages: number = 20,
-  scale: number = 1.0,
+  scale: number = 0.75,
   pageRange?: { startPage: number; endPage: number }
 ): Promise<PDFRenderResult> {
   const arrayBuffer = await file.arrayBuffer();
@@ -37,11 +37,20 @@ export async function renderPDFToImages(
   const rangeEnd = pageRange?.endPage ? Math.min(pageCount, pageRange.endPage) : pageCount;
   const effectiveEnd = Math.min(rangeEnd, rangeStart + maxPages - 1);
 
-  console.log(`[renderPDFToImages] Rendering pages ${rangeStart}-${effectiveEnd} of ${pageCount}${pageRange ? ` (user range: ${pageRange.startPage}-${pageRange.endPage})` : ''}`);
+  const MAX_DIMENSION = 1600;
+
+  console.log(`[renderPDFToImages] Rendering pages ${rangeStart}-${effectiveEnd} of ${pageCount}${pageRange ? ` (user range: ${pageRange.startPage}-${pageRange.endPage})` : ''}, scale=${scale}`);
 
   for (let pageNum = rangeStart; pageNum <= effectiveEnd; pageNum++) {
     const page = await pdf.getPage(pageNum);
-    const viewport = page.getViewport({ scale });
+    let viewport = page.getViewport({ scale });
+
+    // Cap dimensions to MAX_DIMENSION to prevent oversized images
+    if (viewport.width > MAX_DIMENSION || viewport.height > MAX_DIMENSION) {
+      const downScale = MAX_DIMENSION / Math.max(viewport.width, viewport.height);
+      viewport = page.getViewport({ scale: scale * downScale });
+      console.log(`[renderPDFToImages] Page ${pageNum} capped: ${Math.round(viewport.width)}x${Math.round(viewport.height)}`);
+    }
 
     // Create canvas
     const canvas = document.createElement('canvas');
@@ -61,7 +70,7 @@ export async function renderPDFToImages(
     }).promise;
 
     // Convert to data URL (JPEG for smaller size, lower quality for faster transfer)
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.5);
 
     images.push({
       pageNumber: pageNum,
