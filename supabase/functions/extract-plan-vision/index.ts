@@ -477,6 +477,110 @@ If a cell contains both a bold summary AND detailed description, use the bold te
 }
 
 /**
+ * Build presentation-aware extraction prompt using classification metadata.
+ */
+function buildPresentationExtractionPrompt(
+  pageAnnotations: unknown,
+  hierarchyPattern: unknown,
+  nonPlanContent: Record<string, unknown> | null
+): string {
+  const annotationsJson = JSON.stringify(pageAnnotations ?? {}, null, 2);
+  const hierarchyJson = JSON.stringify(hierarchyPattern ?? {}, null, 2);
+
+  let actionItemSection = "";
+  if (nonPlanContent?.has_action_items_with_metadata) {
+    const cols = Array.isArray(nonPlanContent.metadata_columns)
+      ? (nonPlanContent.metadata_columns as string[]).join(", ")
+      : "Department, Target Date, Status, Notes";
+    actionItemSection = `\nACTION ITEM METADATA COLUMNS DETECTED: ${cols}\n`;
+  }
+
+  return `You are a strategic plan extractor specialized in presentation-format and designed documents. These documents contain a mix of decorative pages, background context, and actual plan content on specific pages.
+
+A document classifier has already analyzed this document and identified which pages contain plan items.
+
+PAGE ANNOTATIONS: ${annotationsJson}
+
+HIERARCHY: ${hierarchyJson}
+${actionItemSection}
+YOUR TASK: Extract plan items ONLY from the pages provided. These pages have been pre-filtered to only include plan content and action item pages. All decorative, background, SWOT, and other non-plan pages have already been removed. Return ONLY a JSON array.
+
+WHAT IS A PLAN ITEM:
+
+Strategic goals, objectives, priorities, focus areas
+
+Strategies, tactics, initiatives, action items
+
+Projects, programs, activities with assigned owners or timelines
+
+WHAT IS NOT A PLAN ITEM (never extract these even if they appear on plan pages):
+
+Vision statements, mission statements
+
+Values, principles, beliefs
+
+SWOT items (strengths, weaknesses, opportunities, threats)
+
+"Evidence of Success" indicators (these are KPIs/metrics, not plan items)
+
+Workshop agenda items or consultant process recommendations
+
+Gap analysis "current state" or "desired state" descriptions
+
+Priority ranking scores or voting results
+
+Section divider text or decorative headers
+
+FOR ACTION ITEM TABLES:
+
+Each row in an action item table is typically ONE plan item at the lowest hierarchy level
+
+The table header usually identifies a parent goal (e.g., "Goal 1: Meet the public safety needs...")
+
+Extract the goal statement from the table header as a parent item at level 1
+
+Extract each action item row as a child of that goal at level 2
+
+Capture Department, Target Date, Status, Notes, Completion Date as metadata — NOT as separate plan items
+
+If action items span multiple pages under the same goal header, they all belong to the same parent
+
+FOR BULLET/NUMBERED LISTS ON PLAN PAGES:
+
+Numbered or bulleted items under a goal heading are plan items
+
+The heading is the parent; bullets are children
+
+Preserve the EXACT text
+
+DUPLICATE HANDLING:
+
+A goal may appear both on a summary page (e.g., listed as "Goal 1: Infrastructure") and as a table header on an action items page. Extract it ONCE. Use the more complete/formal wording.
+
+If you encounter the same strategy in both a bullet list and an action item table, extract it ONCE.
+
+OUTPUT FORMAT — return a JSON array where each item looks like:
+
+Level 1 items: { "name": "Exact goal/objective/strategy text from document", "level": 1, "level_name": "Strategic Goal", "parent_name": null, "source_page": 17, "metadata": {} }
+
+Level 2 items: { "name": "Exact action item text", "level": 2, "level_name": "Action Item", "parent_name": "Exact text of parent goal", "source_page": 34, "metadata": { "department": "Fire Department", "target_date": "04/01/2016", "status": "", "notes": "" } }
+
+CRITICAL REMINDERS:
+
+Extract VERBATIM text from the document — do not rephrase or summarize
+
+ONLY process the pages you've been given (they are pre-filtered)
+
+Every item needs a parent_name except top-level items (which have null)
+
+parent_name must EXACTLY match the name of an item at the level above
+
+Do not hallucinate items — only extract what you can see on the page
+
+When a goal is stated on multiple pages, extract it ONCE using the most complete wording`;
+}
+
+/**
  * Convert a flat array of items with parent_name references into a nested tree.
  * Each item has: name, level, level_name, parent_name, source_page, source_column, metadata
  * Returns nested tree compatible with the standard extraction output format.
