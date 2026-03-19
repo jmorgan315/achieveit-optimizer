@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { ensureSession } from "../_shared/logging.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,6 +9,21 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+function getServiceClient() {
+  return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+}
+
+async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
+  try {
+    const client = getServiceClient();
+    const { error } = await client.from("processing_sessions").update(updates).eq("id", sessionId);
+    if (error) console.error("[process-plan] Failed to update session progress:", error.message);
+  } catch (e) {
+    console.error("[process-plan] updateSessionProgress exception:", e);
+  }
+}
 
 interface PipelineProgress {
   agent: number;
@@ -84,13 +100,10 @@ interface ValidationResult {
 function isUserOverrideCorrection(correction: { type: string; description?: string }): boolean {
   const desc = (correction.description || "").toLowerCase();
   const type = correction.type.toLowerCase();
-  // Level name changes to match user-defined structure
   if (type === "relevel" || type === "level_changed") {
     if (/match|user[- ]defined|plan structure|to match|mapped to/.test(desc)) return true;
   }
-  // Renamed only to match user terminology
   if (type === "renamed" && /match|user[- ]defined|plan structure|to match|mapped to/.test(desc)) return true;
-  // Reordering to match user-defined hierarchy (not structural)
   if ((type === "reordered" || type === "moved") && /match|user[- ]defined|plan structure|to match/.test(desc)) return true;
   return false;
 }
@@ -106,14 +119,12 @@ function calculateConfidence(
   auditFindings: AuditFindings | null,
   corrections: { itemId: string; type: string; description?: string }[]
 ): void {
-  // Collect rephrased item names from audit findings
   const rephrasedNames = new Set(
     (auditFindings?.rephrasedItems || [])
       .map(r => r.extractedName?.toLowerCase().trim())
       .filter(Boolean)
   );
 
-  // Group corrections by item ID
   const correctionsByItem = new Map<string, typeof corrections>();
   for (const c of corrections) {
     if (!correctionsByItem.has(c.itemId)) correctionsByItem.set(c.itemId, []);
@@ -127,13 +138,11 @@ function calculateConfidence(
       const name = (i.name || "").toLowerCase().trim();
       const itemCorrections = correctionsByItem.get(id) || [];
 
-      // Build tagged correction strings, detecting capitalization-only changes
       const correctionDescs: string[] = [];
       const capOnlyIds = new Set<number>();
       for (let ci = 0; ci < itemCorrections.length; ci++) {
         const c = itemCorrections[ci];
         const cAny = c as { agent?: string; originalName?: string; correctedName?: string };
-        // Check if this is a capitalization-only rename/rephrase
         const isCapOnly = (c.type === 'renamed' || /rephras/i.test(c.description || ''))
           && cAny.originalName && cAny.correctedName
           && isCapitalizationOnlyChange(cAny.originalName, cAny.correctedName);
@@ -151,24 +160,17 @@ function calculateConfidence(
       }
       i.corrections = correctionDescs;
 
-      // Separate user-override and cap-only from real agent corrections
       const agentCorrections = itemCorrections.filter((c, ci) => !isUserOverrideCorrection(c) && !capOnlyIds.has(ci));
 
-      // Default: 100. Only reduce based on actual issues.
       if (id.startsWith("new-")) {
-        // Item was missing from Agent 1, added by pipeline
         i.confidence = 40;
       } else if (name && !agent1NameSet.has(name)) {
-        // Name not found in Agent 1 output — truly unknown origin
         i.confidence = 20;
       } else if (rephrasedNames.has(name)) {
-        // Was rephrased, corrected back
         i.confidence = 60;
       } else if (agentCorrections.length > 0) {
-        // Has real structural corrections (not user-override)
         i.confidence = 80;
       } else {
-        // No issues — all agents agree or only user-override corrections
         i.confidence = 100;
       }
 
@@ -181,12 +183,10 @@ function calculateConfidence(
   processItems(correctedItems);
 }
 
-// Normalize a name for fuzzy comparison
 function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
 }
 
-// Programmatic safety net: enforce max depth and merge adjacent duplicates
 function enforceMaxDepth(
   items: unknown[],
   maxDepth: number,
@@ -197,18 +197,15 @@ function enforceMaxDepth(
     const item = items[i] as { levelType?: string; levelName?: string; children?: unknown[]; name?: string };
     const children = item.children || [];
 
-    // Merge adjacent parent-child duplicates (same name at adjacent levels)
     for (let c = children.length - 1; c >= 0; c--) {
       const child = children[c] as { name?: string; children?: unknown[] };
       if (item.name && child.name && normalizeName(item.name) === normalizeName(child.name)) {
         console.log(`[enforceMaxDepth] Merging duplicate child "${child.name}" into parent "${item.name}"`);
-        // Move grandchildren up to parent
         const grandchildren = (child.children || []) as unknown[];
         children.splice(c, 1, ...grandchildren);
       }
     }
 
-    // Enforce depth limit
     if (currentDepth > maxDepth) {
       const deepestLevel = planLevels[maxDepth - 1];
       if (deepestLevel) {
@@ -223,7 +220,6 @@ function enforceMaxDepth(
   }
 }
 
-// Batch page images into groups of N
 function batchImages(images: string[], batchSize: number): string[][] {
   const batches: string[][] = [];
   for (let i = 0; i < images.length; i += batchSize) {
@@ -232,21 +228,15 @@ function batchImages(images: string[], batchSize: number): string[][] {
   return batches;
 }
 
-// Select a representative subset of images for the audit step (max 10)
-// Strategy: take first 2 pages (likely overview/TOC), last page, and evenly space the rest
 function selectAuditImages(images: string[]): string[] {
   if (images.length <= 10) return images;
   const selected: string[] = [];
   const indices = new Set<number>();
 
-  // Always include first 2 pages (overview, TOC)
   indices.add(0);
   if (images.length > 1) indices.add(1);
-
-  // Always include last page
   indices.add(images.length - 1);
 
-  // Fill remaining slots evenly from the middle
   const remaining = 10 - indices.size;
   const middleStart = 2;
   const middleEnd = images.length - 2;
@@ -257,7 +247,6 @@ function selectAuditImages(images: string[]): string[] {
     }
   }
 
-  // Sort and collect
   const sortedIndices = [...indices].sort((a, b) => a - b);
   for (const idx of sortedIndices) {
     if (idx >= 0 && idx < images.length) selected.push(images[idx]);
@@ -266,7 +255,6 @@ function selectAuditImages(images: string[]): string[] {
   return selected;
 }
 
-// Merge vision batch results, deduplicating by name
 function mergeVisionBatchResults(
   existing: unknown[],
   newItems: unknown[]
@@ -292,34 +280,22 @@ function mergeVisionBatchResults(
   return [...existing, ...unique];
 }
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
+// ==============================
+// The actual pipeline logic, runs in background after early return
+// ==============================
+async function runPipeline(sessionId: string, body: Record<string, unknown>): Promise<void> {
   try {
-    const body = await req.json();
     const {
       documentText,
       organizationName,
       industry,
       documentHints,
-      sessionId: incomingSessionId,
       pageImages,
       planLevels,
       pageRange,
     } = body;
 
-    if (!documentText && !pageImages) {
-      return new Response(JSON.stringify({ success: false, error: "documentText or pageImages required" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const sessionId = await ensureSession(incomingSessionId);
-    console.log("[process-plan] Pipeline starting, sessionId:", sessionId);
-
-    const useVision = !!pageImages && (!documentText || documentText.trim().length < 50);
+    const useVision = !!pageImages && (!documentText || (documentText as string).trim().length < 50);
 
     // ==============================
     // AGENT 0: Document Classification
@@ -329,6 +305,8 @@ serve(async (req) => {
 
     if (useVision) {
       console.log("[process-plan] Starting Step 0 (document classification)");
+      await updateSessionProgress(sessionId, { current_step: "classifying" });
+
       try {
         const classifyResult = await callEdgeFunction("classify-document", {
           pageImages,
@@ -344,7 +322,6 @@ serve(async (req) => {
           classification = (classifyResult.data as { classification: Record<string, unknown> }).classification;
           console.log("[process-plan] Step 0 complete, document_type:", classification?.document_type);
 
-          // Derive extraction mode
           const docType = classification?.document_type as string;
           const tableStructure = classification?.table_structure;
           if (docType === "tabular" && tableStructure) {
@@ -355,24 +332,10 @@ serve(async (req) => {
           console.log("[process-plan] Extraction mode:", extractionMode);
 
           // Save classification to session
-          const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-          try {
-            await fetch(`${SUPABASE_URL}/rest/v1/processing_sessions?id=eq.${sessionId}`, {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-                "apikey": SUPABASE_SERVICE_ROLE_KEY,
-                "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-                "Prefer": "return=minimal",
-              },
-              body: JSON.stringify({
-                document_type: classification?.document_type || null,
-                classification_result: classification,
-              }),
-            });
-          } catch (e) {
-            console.error("[process-plan] Failed to save classification to session:", e);
-          }
+          await updateSessionProgress(sessionId, {
+            document_type: classification?.document_type || null,
+            classification_result: classification,
+          });
         } else {
           console.warn("[process-plan] Step 0 failed (non-fatal):", JSON.stringify(classifyResult.data));
         }
@@ -384,26 +347,26 @@ serve(async (req) => {
     // ==============================
     // AGENT 1: Extraction
     // ==============================
+    await updateSessionProgress(sessionId, { current_step: "extracting" });
+
     let agent1Data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } | null = null;
     let extractionMethod = "text";
     let agent1Error: string | null = null;
 
     if (useVision) {
       extractionMethod = "vision";
-      // Filter page images based on classification
       let images = pageImages as string[];
       if (classification?.plan_content_pages && Array.isArray(classification.plan_content_pages) && (classification.plan_content_pages as number[]).length > 0) {
         const contentPages = classification.plan_content_pages as number[];
         const filtered = contentPages
           .filter((p: number) => p >= 1 && p <= images.length)
-          .map((p: number) => images[p - 1]); // 1-indexed to 0-indexed
+          .map((p: number) => images[p - 1]);
         if (filtered.length > 0) {
           console.log(`[process-plan] Step 1: Filtering from ${images.length} to ${filtered.length} content pages`);
           images = filtered;
         }
       }
 
-      // Batch vision images in groups of 5
       const batches = batchImages(images, 5);
       let allItems: unknown[] = [];
       let detectedLevels: { depth: number; name: string }[] = [];
@@ -414,7 +377,6 @@ serve(async (req) => {
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
         const batch = batches[batchIdx];
 
-        // Rate limit between batches
         if (batchIdx > 0) {
           await new Promise(resolve => setTimeout(resolve, 3000));
         }
@@ -429,7 +391,6 @@ serve(async (req) => {
           pageRange,
           sessionId,
           batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
-          // Specialized mode params from Agent 0
           extractionMode,
           tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
           hierarchyPattern: (extractionMode === "table" || extractionMode === "presentation") ? classification?.hierarchy_pattern : undefined,
@@ -444,7 +405,6 @@ serve(async (req) => {
             allItems = mergeVisionBatchResults(allItems, d.items);
           }
 
-          // Capture levels from first batch or first non-empty
           if (batchIdx === 0 && d.documentTerminology?.columnHierarchy?.length) {
             detectedLevels = d.documentTerminology.columnHierarchy.map(
               (name: string, idx: number) => ({ depth: idx + 1, name })
@@ -453,7 +413,6 @@ serve(async (req) => {
             detectedLevels = d.detectedLevels;
           }
 
-          // Carry context forward for next batch
           const ctx = (result.data as { contextSummary?: string }).contextSummary;
           if (ctx) previousContext = ctx;
         } else {
@@ -495,13 +454,12 @@ serve(async (req) => {
 
     if (!agent1Data || agent1Data.items.length === 0) {
       console.error("[process-plan] Agent 1 failed:", agent1Error);
-      return new Response(JSON.stringify({
-        success: false,
-        error: agent1Error || "Extraction produced no items",
-        pipelineStep: "agent1",
-      }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      await updateSessionProgress(sessionId, {
+        status: "error",
+        current_step: "error",
+        step_results: { error: agent1Error || "Extraction produced no items", pipelineStep: "agent1" },
       });
+      return;
     }
 
     const agent1ItemCount = countAllItems(agent1Data.items);
@@ -509,78 +467,97 @@ serve(async (req) => {
     console.log(`[process-plan] Step 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
 
     // ==============================
-    // STEP 2: Completeness Audit
+    // STEPS 2 & 3: Audit + Validation (PARALLEL)
     // ==============================
-    console.log("[process-plan] Starting Step 2 (completeness audit)");
-    let auditFindings: AuditFindings | null = null;
+    await updateSessionProgress(sessionId, { current_step: "validating" });
+    console.log("[process-plan] Starting Steps 2 & 3 in parallel (audit + validation)");
 
-    const sourceForAudit = documentText || "";
+    const sourceForAudit = (documentText as string) || "";
     const hasSourceText = sourceForAudit.length > 100;
 
-    try {
-      // Build audit payload — use text if available, otherwise send page images
-      const auditPayload: Record<string, unknown> = {
-        extractedItems: agent1Data.items,
-        sessionId,
-        organizationName,
-        industry,
-        planLevels,
-        classification: classification || null,
-      };
+    // Build audit payload
+    const auditPayload: Record<string, unknown> = {
+      extractedItems: agent1Data.items,
+      sessionId,
+      organizationName,
+      industry,
+      planLevels,
+      classification: classification || null,
+    };
 
-      if (hasSourceText) {
-        auditPayload.sourceText = sourceForAudit;
-        console.log("[process-plan] Step 2: text-based audit");
-      } else if (useVision && pageImages) {
-        // For vision path, send a subset of images (max 10 for efficiency)
-        const images = pageImages as string[];
-        const auditImages = images.length <= 10 ? images : selectAuditImages(images);
-        auditPayload.pageImages = auditImages;
-        console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
-      }
-
-      if (hasSourceText || (useVision && pageImages)) {
-        const auditResult = await callEdgeFunction("audit-completeness", auditPayload);
-
-        if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
-          auditFindings = (auditResult.data as { data: AuditFindings }).data;
-          console.log("[process-plan] Step 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
-        } else {
-          console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
-        }
-      } else {
-        console.log("[process-plan] Step 2 skipped — no source text or images available");
-      }
-    } catch (err) {
-      console.error("[process-plan] Step 2 exception:", err);
+    if (hasSourceText) {
+      auditPayload.sourceText = sourceForAudit;
+      console.log("[process-plan] Step 2: text-based audit");
+    } else if (useVision && pageImages) {
+      const images = pageImages as string[];
+      const auditImages = images.length <= 10 ? images : selectAuditImages(images);
+      auditPayload.pageImages = auditImages;
+      console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
     }
 
-    // ==============================
-    // AGENT 3: Hierarchy Validation
-    // ==============================
-    console.log("[process-plan] Starting Step 3 (structure validation)");
-    let validationResult: ValidationResult | null = null;
+    const shouldRunAudit = hasSourceText || (useVision && !!pageImages);
 
-    try {
-      const validateResult = await callEdgeFunction("validate-hierarchy", {
-        sourceText: sourceForAudit,
-        extractedItems: agent1Data.items,
-        auditFindings,
-        detectedLevels: agent1Data.detectedLevels,
-        sessionId,
-        organizationName,
-        industry,
-        planLevels,
-      });
+    // Run both in parallel
+    const [auditSettled, validateSettled] = await Promise.allSettled([
+      // STEP 2: Completeness Audit
+      (async (): Promise<AuditFindings | null> => {
+        if (!shouldRunAudit) {
+          console.log("[process-plan] Step 2 skipped — no source text or images available");
+          return null;
+        }
+        try {
+          const auditResult = await callEdgeFunction("audit-completeness", auditPayload);
+          if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
+            const findings = (auditResult.data as { data: AuditFindings }).data;
+            console.log("[process-plan] Step 2 complete:", JSON.stringify(findings?.auditSummary || {}));
+            return findings;
+          } else {
+            console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
+            return null;
+          }
+        } catch (err) {
+          console.error("[process-plan] Step 2 exception:", err);
+          return null;
+        }
+      })(),
 
-      if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
-        validationResult = (validateResult.data as { data: ValidationResult }).data;
-        console.log("[process-plan] Step 3 complete:", validationResult.corrections?.length || 0, "corrections");
-      } else {
-        console.error("[process-plan] Step 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
-      }
-    } catch (err) {
-      console.error("[process-plan] Step 3 exception:", err);
+      // STEP 3: Hierarchy Validation
+      (async (): Promise<ValidationResult | null> => {
+        try {
+          const validateResult = await callEdgeFunction("validate-hierarchy", {
+            sourceText: sourceForAudit,
+            extractedItems: agent1Data!.items,
+            auditFindings: null, // audit runs in parallel, so not available yet
+            detectedLevels: agent1Data!.detectedLevels,
+            sessionId,
+            organizationName,
+            industry,
+            planLevels,
+          });
+
+          if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
+            const result = (validateResult.data as { data: ValidationResult }).data;
+            console.log("[process-plan] Step 3 complete:", result.corrections?.length || 0, "corrections");
+            return result;
+          } else {
+            console.error("[process-plan] Step 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
+            return null;
+          }
+        } catch (err) {
+          console.error("[process-plan] Step 3 exception:", err);
+          return null;
+        }
+      })(),
+    ]);
+
+    const auditFindings = auditSettled.status === "fulfilled" ? auditSettled.value : null;
+    const validationResult = validateSettled.status === "fulfilled" ? validateSettled.value : null;
+
+    if (auditSettled.status === "rejected") {
+      console.error("[process-plan] Audit promise rejected:", auditSettled.reason);
+    }
+    if (validateSettled.status === "rejected") {
+      console.error("[process-plan] Validation promise rejected:", validateSettled.reason);
     }
 
     // ==============================
@@ -597,22 +574,18 @@ serve(async (req) => {
         : agent1Data.detectedLevels;
       corrections = validationResult.corrections || [];
     } else {
-      // Fallback to Agent 1 output
       finalItems = agent1Data.items;
       finalLevels = agent1Data.detectedLevels;
     }
 
-    // Post-Agent-3 safety net: enforce user-defined level count
-    if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
-      const maxDepth = planLevels.length;
+    if (planLevels && Array.isArray(planLevels) && (planLevels as unknown[]).length > 0) {
+      const maxDepth = (planLevels as unknown[]).length;
       enforceMaxDepth(finalItems, maxDepth, planLevels as { depth: number; name: string }[]);
       console.log(`[process-plan] Post-validation: enforced max depth ${maxDepth}`);
     }
 
-    // Calculate confidence scores using name-based matching
     calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
 
-    // Calculate session confidence
     const allConfidences: number[] = [];
     function gatherConfidences(items: unknown[]) {
       for (const item of items) {
@@ -629,7 +602,8 @@ serve(async (req) => {
     const finalItemCount = countAllItems(finalItems);
     console.log(`[process-plan] Pipeline complete: ${finalItemCount} items, ${corrections.length} corrections, confidence=${sessionConfidence}%`);
 
-    return new Response(JSON.stringify({
+    // Write final results to DB
+    const finalResult = {
       success: true,
       data: {
         items: finalItems,
@@ -642,14 +616,67 @@ serve(async (req) => {
       extractionMethod,
       pipelineComplete: true,
       sessionId,
+    };
+
+    await updateSessionProgress(sessionId, {
+      status: "completed",
+      current_step: "complete",
+      step_results: finalResult,
+      extraction_method: extractionMethod,
+      total_items_extracted: finalItemCount,
+    });
+
+  } catch (error) {
+    console.error("[process-plan] Pipeline error:", error);
+    await updateSessionProgress(sessionId, {
+      status: "error",
+      current_step: "error",
+      step_results: { error: "Pipeline processing failed. Please try again." },
+    });
+  }
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const body = await req.json();
+    const { sessionId: incomingSessionId, documentText, pageImages } = body;
+
+    if (!documentText && !pageImages) {
+      return new Response(JSON.stringify({ success: false, error: "documentText or pageImages required" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const sessionId = await ensureSession(incomingSessionId);
+    console.log("[process-plan] Pipeline starting, sessionId:", sessionId);
+
+    // Update session to in_progress
+    await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued" });
+
+    // Fire off the pipeline in the background (non-awaited)
+    // Deno edge functions keep the isolate alive after responding
+    runPipeline(sessionId, body).catch((err) => {
+      console.error("[process-plan] Background pipeline fatal error:", err);
+    });
+
+    // Return immediately with sessionId
+    return new Response(JSON.stringify({
+      success: true,
+      sessionId,
+      async: true,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (error) {
-    console.error("[process-plan] Pipeline error:", error);
+    console.error("[process-plan] Request error:", error);
     return new Response(JSON.stringify({
       success: false,
-      error: "Pipeline processing failed. Please try again.",
+      error: "Failed to start pipeline. Please try again.",
     }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
