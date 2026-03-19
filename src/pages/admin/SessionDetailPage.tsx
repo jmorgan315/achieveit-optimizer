@@ -178,6 +178,11 @@ export default function SessionDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Document Classification */}
+      {session.classification_result && typeof session.classification_result === 'object' && (
+        <ClassificationCard classification={session.classification_result as Record<string, Json>} />
+      )}
+
       <h2 className="text-lg font-semibold">API Call Timeline ({logs.length})</h2>
 
       <div className="space-y-2">
