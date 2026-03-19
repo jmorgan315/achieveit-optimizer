@@ -1,74 +1,79 @@
 
 
-# Create `classify-document` Edge Function
+# Wire classify-document into process-plan Pipeline
 
 ## Overview
-New edge function that classifies a document's structure before extraction, using Claude vision with the provided system prompt. Returns a structured JSON classification to guide downstream agents.
+Add classify-document as Step 0 in the extraction pipeline, update the frontend to show 5 steps (upload + 4 agent steps), and show classification results in the admin session detail page. Also add two new columns to `processing_sessions` for classification metadata.
 
-## File: `supabase/functions/classify-document/index.ts`
+## 1. Database Migration
+Add two columns to `processing_sessions`:
+- `document_type text` (nullable)
+- `classification_result jsonb` (nullable)
 
-### Structure
-- Same CORS headers, retry logic, and error handling patterns as `extract-plan-vision`
-- Reuse `callAnthropicWithRetry` (copied inline since edge functions can't share non-`_shared` code, or import from `_shared`)
-- Import `logApiCall`, `ensureSession`, `extractTokenUsage`, `truncateImagePayload` from `../_shared/logging.ts`
+## 2. Edge Function: `supabase/functions/process-plan/index.ts`
 
-### Input parsing
-- Extract `pageImages`, `orgName`, `industry`, `userPlanLevels`, `pageRange`, `additionalNotes`, `sessionId` from request body
-- Validate `pageImages` is non-empty array, each image is a string under 5MB
+**Before Agent 1 extraction block, insert Agent 0 — Document Classification:**
+- Call `classify-document` via `callEdgeFunction` with `{ pageImages, orgName: organizationName, industry, userPlanLevels: planLevels, pageRange, sessionId }`
+- Only run when `useVision` is true (vision path has page images; text path doesn't benefit from classification)
+- Store result as `classification`
+- Derive `extractionMode`: `"table"` if `document_type === "tabular" && table_structure`, `"presentation"` if `document_type === "presentation" || "mixed"`, else `"standard"`
+- Log `extractionMode` to console
+- Update session row: `document_type` and `classification_result`
 
-### Claude API call
-- Model: `claude-sonnet-4-20250514` (same as vision extraction)
-- `max_tokens: 4096`
-- System prompt: the full classification prompt from the user's spec (verbatim)
-- User message: multipart content with dynamic text prompt + all page images as Anthropic `image` blocks
-- No tool_use — raw JSON response expected (the system prompt says "return ONLY a JSON object")
+**Filter page images for Agent 1:**
+- If `classification.plan_content_pages` exists and is non-empty, filter `pageImages` to only those 1-indexed pages before passing to extraction batching
+- For text path, if `classification.extraction_recommendations.page_range` exists, slice text (not implemented yet since text path skips classification)
 
-### User prompt construction
+**Pass classification to Agent 2:**
+- Add `classification` field to the audit-completeness payload
+
+**Renumber console logs:**
+- Agent 0 = "Step 0", Agent 1 = "Step 1", Agent 2 = "Step 2", Agent 3 = "Step 3"
+
+## 3. Frontend: `src/components/steps/ProcessingOverlay.tsx`
+
+Update to 5 steps:
 ```
-Classify this document for strategic plan extraction.
+ProcessingStep = 'upload' | 'classify' | 'extract' | 'audit' | 'validate'
 
-Organization: {orgName}
-Industry: {industry}
-[User-specified plan levels: Level 1: X, Level 2: Y, ...]
-[User-specified page range: {pageRange}]
-[Additional context: {additionalNotes}]
+STEP_CONFIG: Upload, Classify, Extract, Audit, Validate
+  - Classify icon: Eye (or Scan)
 
-Analyze all provided page images and return ONLY the JSON classification object.
-```
-
-### Response parsing
-- Strip markdown fencing if present (`json ... `)
-- `JSON.parse` the response text
-- On parse failure: log raw response, return default fallback classification:
-  - `document_type: "text_heavy"`
-  - `plan_content_pages`: all page numbers (1..N)
-  - `primary_method: "vision"`
-  - All pages annotated as `plan_content`
-
-### Logging
-- Log to `api_call_logs` with:
-  - `step_label: "Step 0: Document Classification"`
-  - `edge_function: "classify-document"`
-  - Full request payload (images truncated via `truncateImagePayload`)
-  - Full response payload
-  - Token usage, duration, status
-
-### Error handling
-- Missing API key → 500
-- Invalid input → 400
-- Claude API errors → retry with backoff, then return fallback classification (not an error response)
-
-## Config: `supabase/config.toml`
-Add:
-```toml
-[functions.classify-document]
-verify_jwt = false
+STEP_RANGES:
+  upload:   { start: 0,  size: 10 }
+  classify: { start: 10, size: 10 }
+  extract:  { start: 20, size: 40 }
+  audit:    { start: 60, size: 20 }
+  validate: { start: 80, size: 20 }
 ```
 
-## Files
+Add contextual message for classify step.
 
-| File | Action |
+## 4. Frontend: `src/components/steps/FileUploadStep.tsx`
+
+In `extractWithVisionPipeline`, update progress calls:
+- After rendering images: `setStepProgress('classify', 0)` then `addMessage('Classifying document structure...')`
+- After process-plan returns: step through classify→extract→audit→validate progress updates
+
+## 5. Admin: `src/pages/admin/SessionDetailPage.tsx`
+
+**Add classification card** between session summary and API Call Timeline:
+- Only show if `session.classification_result` exists
+- Collapsible card titled "Document Classification"
+- Show `document_type` as a badge, `confidence` as percentage
+- Show `plan_content_pages` as comma-separated list
+- Show `hierarchy_pattern.detected_levels` as badges
+- Expandable "Full Classification JSON" section with pre-formatted JSON
+
+**Update Session interface** to include `document_type` and `classification_result` fields.
+
+## Files to modify
+
+| File | Change |
 |------|--------|
-| `supabase/functions/classify-document/index.ts` | Create — full edge function |
-| `supabase/config.toml` | Add function entry (auto-managed, but noting for completeness) |
+| Migration | Add `document_type` and `classification_result` columns to `processing_sessions` |
+| `supabase/functions/process-plan/index.ts` | Add Agent 0 call, page filtering, pass classification to audit, update session |
+| `src/components/steps/ProcessingOverlay.tsx` | Add 'classify' step, update ranges |
+| `src/components/steps/FileUploadStep.tsx` | Add classify progress step |
+| `src/pages/admin/SessionDetailPage.tsx` | Add classification card, update Session type |
 
