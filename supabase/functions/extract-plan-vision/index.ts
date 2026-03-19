@@ -427,8 +427,8 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { pageImages, previousContext, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId, batchLabel } = body;
-    console.log('[extract-plan-vision] Received sessionId:', incomingSessionId);
+    const { pageImages, previousContext, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId, batchLabel, extractionMode, tableStructure, hierarchyPattern } = body;
+    console.log('[extract-plan-vision] Received sessionId:', incomingSessionId, 'extractionMode:', extractionMode || 'standard');
 
     if (!pageImages || !Array.isArray(pageImages) || pageImages.length === 0) {
       return createSafeError(400, "Page images are required as a non-empty array.");
