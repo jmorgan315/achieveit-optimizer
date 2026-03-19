@@ -385,6 +385,186 @@ function normalizeResponse(data: Record<string, unknown>): Record<string, unknow
   return data;
 }
 
+// ========================
+// TABLE-AWARE EXTRACTION
+// ========================
+
+function buildTableExtractionPrompt(tableStructure: unknown, hierarchyPattern: unknown): string {
+  const tsJson = JSON.stringify(tableStructure || {}, null, 2);
+  const hpJson = JSON.stringify(hierarchyPattern || {}, null, 2);
+
+  return `You are a strategic plan extractor specialized in tabular/matrix-format documents. The document you are analyzing organizes its plan hierarchy using TABLE COLUMNS — each column represents a different level in the plan hierarchy.
+
+A document classifier has already analyzed this document and provided the following structure:
+
+TABLE STRUCTURE: ${tsJson}
+
+HIERARCHY MAPPING: ${hpJson}
+
+YOUR TASK: Extract every plan item from the provided pages using the column-to-level mapping to assign the correct hierarchy level to each item. Return ONLY a JSON array.
+
+READING THE TABLE:
+
+Column position defines hierarchy level. Use the column_to_level_mapping to determine which level each item belongs to.
+
+Merged cells apply to all adjacent rows. If a cell in column 1 spans 5 rows, that value is the PARENT of all items in columns 2+ across those 5 rows.
+
+Read left to right, top to bottom. Process each row completely before moving to the next.
+
+Empty cells inherit from above. If a cell is empty, the value from the cell above it in the same column still applies (equivalent to a merged cell).
+
+WHAT TO EXTRACT AS PLAN ITEMS:
+
+Items in columns mapped as is_plan_item: true become plan items in the hierarchy
+
+Each unique text value in a plan-item column becomes one item
+
+Preserve the EXACT text from the document — do not rephrase, summarize, or clean up
+
+WHAT TO EXTRACT AS METADATA (NOT plan items):
+
+Items in columns mapped as is_plan_item: false become metadata attached to their nearest plan item
+
+KPIs/metrics attach to the plan item in the same row (or the nearest plan-item column to the left)
+
+Capture metadata in the metadata field of the item it belongs to
+
+HANDLING NUMBERED LISTS WITHIN CELLS:
+
+A single table cell may contain a numbered list (e.g., "1. Strategy A 2. Strategy B 3. Strategy C")
+
+Each numbered item is a SEPARATE plan item at that column's hierarchy level
+
+They all share the same parent (the item to their left in the table)
+
+HANDLING COLOR CODING AND FORMATTING:
+
+Note color coding (red/green/bold) in the metadata field if present
+
+Color coding typically indicates priority or data availability — it is NOT hierarchy information
+
+Bold vs. non-bold within a column does NOT change the hierarchy level
+
+DUPLICATE DETECTION:
+
+The same item text may appear in a table header row AND in detail rows — extract it only ONCE
+
+If a pillar/goal name appears as both a row header and a column header, extract it only as a row item
+
+OUTPUT FORMAT — return a JSON array where each item looks like:
+
+{ "name": "Exact text from document", "level": 1, "level_name": "Pillar", "parent_name": null, "source_page": 2, "source_column": "Pillar", "metadata": { "outcome_kpis": ["KPI 1", "KPI 2"], "strategy_kpis": ["KPI A", "KPI B"], "color_coding": "bold = new/restated, grey = prior" } }
+
+Level 2 items look like: { "name": "Objective text here", "level": 2, "level_name": "Objective", "parent_name": "Exact text of parent from level 1", "source_page": 2, "source_column": "Objective", "metadata": { "outcome_kpis": ["KPI 1", "KPI 2"] } }
+
+Level 3 items look like: { "name": "Strategy text here", "level": 3, "level_name": "Strategy", "parent_name": "Exact text of parent from level 2", "source_page": 2, "source_column": "Strategies", "metadata": { "strategy_kpis": ["KPI A"] } }
+
+CRITICAL REMINDERS:
+
+Extract VERBATIM text — do not rephrase
+
+Every item must have a parent_name (except level 1 items which have null)
+
+The parent_name must EXACTLY match the name of an item at the level above
+
+Do not skip items because they seem minor — extract everything
+
+Do not extract column headers as plan items
+
+Do not extract the definitions page content as plan items
+
+If a cell contains both a bold summary AND detailed description, use the bold text as the item name and put the description in metadata`;
+}
+
+/**
+ * Convert a flat array of items with parent_name references into a nested tree.
+ * Each item has: name, level, level_name, parent_name, source_page, source_column, metadata
+ * Returns nested tree compatible with the standard extraction output format.
+ */
+function convertFlatToNested(flatItems: Array<Record<string, unknown>>): {
+  items: unknown[];
+  detectedLevels: { depth: number; name: string }[];
+  documentTerminology: Record<string, unknown>;
+} {
+  // Collect unique levels
+  const levelMap = new Map<number, string>();
+  for (const item of flatItems) {
+    const level = item.level as number;
+    const levelName = item.level_name as string;
+    if (level && levelName && !levelMap.has(level)) {
+      levelMap.set(level, levelName);
+    }
+  }
+
+  const sortedLevels = [...levelMap.entries()].sort((a, b) => a[0] - b[0]);
+  const detectedLevels = sortedLevels.map(([depth, name]) => ({ depth, name }));
+
+  // Map level_name to standard levelType
+  const levelTypeMap: Record<number, string> = {};
+  const standardTypes = ["strategic_priority", "focus_area", "goal", "action_item", "sub_action"];
+  sortedLevels.forEach(([depth], idx) => {
+    levelTypeMap[depth] = standardTypes[idx] || standardTypes[standardTypes.length - 1];
+  });
+
+  // Build a lookup of items by name for parent matching
+  const itemsByName = new Map<string, Record<string, unknown>>();
+  
+  // Convert flat items to tree nodes
+  const treeNodes: Record<string, unknown>[] = flatItems.map(item => {
+    const level = item.level as number;
+    const node: Record<string, unknown> = {
+      name: item.name,
+      levelType: levelTypeMap[level] || "action_item",
+      children: [],
+    };
+    // Preserve extra fields
+    if (item.source_column) node.source_column = item.source_column;
+    if (item.source_page) node.source_page = item.source_page;
+    if (item.metadata) node.metadata = item.metadata;
+    if (item.description) node.description = item.description;
+
+    // Store for parent lookup (use first occurrence)
+    const nameKey = (item.name as string || "").toLowerCase().trim();
+    if (!itemsByName.has(nameKey)) {
+      itemsByName.set(nameKey, node);
+    }
+
+    return { ...node, _parent_name: item.parent_name, _level: level };
+  });
+
+  // Build tree by attaching children to parents
+  const roots: Record<string, unknown>[] = [];
+  for (const node of treeNodes) {
+    const parentName = node._parent_name as string | null;
+    delete node._parent_name;
+    delete node._level;
+
+    if (!parentName) {
+      roots.push(node);
+    } else {
+      const parentKey = parentName.toLowerCase().trim();
+      const parent = itemsByName.get(parentKey);
+      if (parent) {
+        (parent.children as unknown[]).push(node);
+      } else {
+        // Orphan — add as root
+        console.warn(`[convertFlatToNested] Orphan item "${node.name}" — parent "${parentName}" not found`);
+        roots.push(node);
+      }
+    }
+  }
+
+  // Build documentTerminology
+  const documentTerminology: Record<string, unknown> = {
+    columnHierarchy: sortedLevels.map(([, name]) => name),
+  };
+  sortedLevels.forEach(([, name], idx) => {
+    documentTerminology[`level${idx + 1}Term`] = name;
+  });
+
+  return { items: roots, detectedLevels, documentTerminology };
+}
+
 function normalizeItems(items: unknown[]): unknown[] {
   return items.map(item => {
     if (!item || typeof item !== 'object') return null;

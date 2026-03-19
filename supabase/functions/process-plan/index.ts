@@ -429,6 +429,10 @@ serve(async (req) => {
           pageRange,
           sessionId,
           batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
+          // Table mode params from Agent 0
+          extractionMode,
+          tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
+          hierarchyPattern: extractionMode === "table" ? classification?.hierarchy_pattern : undefined,
         });
 
         if (result.ok && (result.data as { success: boolean }).success) {
