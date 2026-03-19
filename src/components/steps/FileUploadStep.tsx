@@ -378,16 +378,25 @@ export function FileUploadStep({
         }),
       });
 
-      setStepProgress('extract', 50);
+      setStepProgress('extract', 20);
 
       if (!response.ok) {
         const error = await response.json();
         if (response.status === 429) throw new Error('AI rate limit reached. Please wait a moment and try again.');
         if (response.status === 402) throw new Error('AI credits exhausted. Please add credits to continue.');
-        throw new Error(error.error || 'Extraction failed');
+        throw new Error(error.error || 'Failed to start pipeline');
       }
 
-      const result = await response.json();
+      const initResult = await response.json();
+      if (!initResult.success) {
+        throw new Error(initResult.error || 'Failed to start pipeline');
+      }
+
+      const pipelineSessionId = initResult.sessionId || sessionId;
+      addMessage('Pipeline started, monitoring progress...');
+
+      // Poll for results
+      const result = await pollForResults(pipelineSessionId);
 
       if (!result.success || !result.data) {
         throw new Error(result.error || 'Extraction returned no data');
@@ -396,13 +405,9 @@ export function FileUploadStep({
       setStepProgress('extract', 100);
       addMessage(`Extraction complete — found ${result.totalItems || 0} items`);
 
-      setStepProgress('audit', 50);
-      addMessage('Reviewing for completeness...');
       setStepProgress('audit', 100);
       addMessage('Audit complete');
 
-      setStepProgress('validate', 50);
-      addMessage('Validating structure...');
       setStepProgress('validate', 100);
       addMessage('Validation complete');
 
