@@ -525,6 +525,93 @@ Extract all strategic plan items with their proper hierarchy.`
       }
     }
 
+    // ========================
+    // TABLE EXTRACTION MODE
+    // ========================
+    if (extractionMode === "table") {
+      console.log('[extract-plan-vision] Using TABLE extraction mode');
+
+      const tableSystemPrompt = buildTableExtractionPrompt(tableStructure, hierarchyPattern);
+
+      const tablePayload: Record<string, unknown> = {
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 16384,
+        system: tableSystemPrompt,
+        messages: [
+          { role: "user", content: anthropicContent }
+        ],
+      };
+
+      const startTime = Date.now();
+      const response = await callAnthropicWithRetry(ANTHROPIC_API_KEY, tablePayload);
+      const durationMs = Date.now() - startTime;
+
+      if (!response.ok) {
+        if (response.status === 429) return createSafeError(503, 'Service temporarily busy. Please try again in a moment.');
+        if (response.status === 402) return createSafeError(503, 'Service temporarily unavailable. Please try again later.');
+        return createSafeError(500, 'Vision processing failed. Please try again.', await response.text());
+      }
+
+      const aiResponse = await response.json();
+
+      if (sessionId) {
+        const tokens = extractTokenUsage(aiResponse);
+        logApiCall({
+          session_id: sessionId,
+          edge_function: "extract-plan-vision",
+          step_label: batchLabel || `Step 1: Table Extraction (${pageImages.length} pages)`,
+          model: "claude-sonnet-4-20250514",
+          request_payload: truncateImagePayload(tablePayload),
+          response_payload: aiResponse,
+          input_tokens: tokens.input_tokens,
+          output_tokens: tokens.output_tokens,
+          duration_ms: durationMs,
+          status: "success",
+        });
+      }
+
+      // Extract text from response
+      const textBlock = aiResponse.content?.find((block: { type: string }) => block.type === "text");
+      if (!textBlock?.text) {
+        return createSafeError(500, 'Unable to extract plan items from table document.', 'No text in AI response');
+      }
+
+      // Parse JSON from response (strip markdown fencing if present)
+      let flatItems: Array<Record<string, unknown>>;
+      try {
+        let jsonText = textBlock.text.trim();
+        const fenceMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)```/);
+        if (fenceMatch) jsonText = fenceMatch[1].trim();
+        flatItems = JSON.parse(jsonText);
+      } catch (e) {
+        return createSafeError(500, 'Failed to parse table extraction response.', e);
+      }
+
+      console.log(`[extract-plan-vision] Table extraction returned ${flatItems.length} flat items`);
+
+      // Convert flat items to nested tree
+      const { items: nestedItems, detectedLevels, documentTerminology } = convertFlatToNested(flatItems);
+
+      let extractedData: Record<string, unknown> = { items: nestedItems, detectedLevels, documentTerminology };
+      extractedData = normalizeResponse(extractedData);
+
+      console.log(`[extract-plan-vision] Table mode: ${(extractedData.items as unknown[])?.length || 0} top-level items after nesting`);
+
+      let contextSummary = "";
+      if ((extractedData.items as unknown[])?.length > 0) {
+        const topLevelNames = (extractedData.items as Array<{ name: string }>).slice(0, 5).map((item) => item.name);
+        contextSummary = `Previously found Level 1 items: ${topLevelNames.join(", ")}`;
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, data: extractedData, contextSummary, sessionId }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ========================
+    // STANDARD EXTRACTION MODE
+    // ========================
     const anthropicPayload: Record<string, unknown> = {
       model: "claude-sonnet-4-20250514",
       max_tokens: 16384,
