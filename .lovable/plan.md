@@ -1,44 +1,37 @@
 
 
-# Add Presentation Extraction Mode
+# Fix: Strip data URL prefix from base64 images in classify-document
 
-## Overview
-Add a `"presentation"` branch in `extract-plan-vision` (same pattern as the existing `"table"` branch) and update `process-plan` to pass the required classification fields.
+## Problem
+The `classify-document` edge function sends page images to Claude with the full data URL prefix (e.g., `data:image/jpeg;base64,/9j/4AAQ...`). Claude expects only raw base64 data. The function also hardcodes `media_type: "image/png"` even when images are JPEG.
 
-## 1. `supabase/functions/extract-plan-vision/index.ts`
+## Fix (single file)
+**`supabase/functions/classify-document/index.ts`**, lines 264-273
 
-**Parse new optional params** on line 610: add `pageAnnotations` and `nonPlanContent` to destructuring.
+Replace the image-building loop to match the pattern used in `extract-plan-vision` (lines 796-803):
 
-**Add `buildPresentationExtractionPrompt` helper** (near the existing `buildTableExtractionPrompt`):
-- Accepts `pageAnnotations`, `hierarchyPattern`, `nonPlanContent`
-- Returns the full presentation system prompt with `{PAGE_ANNOTATIONS}`, `{HIERARCHY}`, and conditional action-item metadata section injected
-
-**Add presentation branch** between the table block (ends line 790) and standard block (line 792):
-```
-if (extractionMode === "presentation") { ... }
-```
-- Same structure as the table branch: build prompt, call Anthropic without tools, parse JSON array, run through `convertFlatToNested`, `normalizeResponse`, return
-
-**System prompt**: Verbatim from user spec, with three template slots:
-- `{PAGE_ANNOTATIONS}` → `JSON.stringify(pageAnnotations, null, 2)`
-- `{HIERARCHY}` → `JSON.stringify(hierarchyPattern, null, 2)`
-- Conditional action-item metadata section when `nonPlanContent?.has_action_items_with_metadata`
-
-## 2. `supabase/functions/process-plan/index.ts`
-
-**Update the extract-plan-vision call** (line ~422-436) to pass presentation-mode params:
 ```typescript
-extractionMode,
-tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
-hierarchyPattern: (extractionMode === "table" || extractionMode === "presentation") ? classification?.hierarchy_pattern : undefined,
-pageAnnotations: extractionMode === "presentation" ? classification?.page_annotations : undefined,
-nonPlanContent: extractionMode === "presentation" ? classification?.non_plan_content : undefined,
+for (let i = 0; i < pageImages.length; i++) {
+  let base64Data = pageImages[i];
+  let mediaType = "image/png";
+  
+  // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,...")
+  const match = base64Data.match(/^data:(image\/[^;]+);base64,(.+)$/);
+  if (match) {
+    mediaType = match[1];
+    base64Data = match[2];
+  }
+  
+  userContent.push({
+    type: "image",
+    source: {
+      type: "base64",
+      media_type: mediaType,
+      data: base64Data,
+    },
+  });
+}
 ```
 
-## Files to modify
-
-| File | Change |
-|------|--------|
-| `supabase/functions/extract-plan-vision/index.ts` | Add presentation prompt builder, presentation extraction branch |
-| `supabase/functions/process-plan/index.ts` | Pass pageAnnotations + nonPlanContent for presentation mode |
+This extracts the actual media type from the data URL prefix and sends only the raw base64 string to Claude.
 
