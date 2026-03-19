@@ -197,7 +197,11 @@ export function FileUploadStep({
       console.log(`[Vision] Rendered ${images.length} pages, avg ${avgKB}KB/page, total ${(totalKB / 1024).toFixed(1)}MB`);
       addMessage(`Rendered ${images.length} pages (avg ${avgKB}KB each)`);
 
-      setStepProgress('extract', 20);
+      setStepProgress('upload', 100);
+      addMessage('Document prepared');
+
+      setStepProgress('classify', 0);
+      addMessage('Classifying document structure...');
 
       const response = await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
         method: 'POST',
