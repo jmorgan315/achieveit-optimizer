@@ -273,6 +273,17 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     });
     const durationMs = Date.now() - startTime;
 
+    // Build a log-safe version of the request (truncate large user messages)
+    const logPayload = {
+      ...requestBody,
+      messages: requestBody.messages.map((msg: { role: string; content: string }) => ({
+        ...msg,
+        content: typeof msg.content === 'string' && msg.content.length > 10000
+          ? msg.content.slice(0, 10000) + `\n[TRUNCATED: ${msg.content.length} chars total]`
+          : msg.content,
+      })),
+    };
+
     if (!response.ok) {
       const errText = await response.text();
       console.error("[validate-hierarchy] Anthropic error:", response.status, errText);
@@ -282,6 +293,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
         edge_function: "validate-hierarchy",
         step_label: "Step 3: Structure Validation",
         model: "claude-sonnet-4-20250514",
+        request_payload: logPayload,
         duration_ms: durationMs,
         status: "error",
         error_message: `Anthropic ${response.status}: ${errText.slice(0, 500)}`,
@@ -302,7 +314,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
       edge_function: "validate-hierarchy",
       step_label: "Step 3: Structure Validation",
       model: "claude-sonnet-4-20250514",
-      request_payload: { sourceTextLength: sourceText.length, extractedItemCount: extractedItems.length, hasAuditFindings: !!auditFindings },
+      request_payload: logPayload,
       response_payload: aiResponse,
       input_tokens: tokens.input_tokens,
       output_tokens: tokens.output_tokens,
