@@ -23,7 +23,7 @@ export interface PDFRenderResult {
  */
 export async function renderPDFToImages(
   file: File,
-  maxPages: number = 20,
+  maxPages: number = 100,
   scale: number = 0.75,
   pageRange?: { startPage: number; endPage: number }
 ): Promise<PDFRenderResult> {
