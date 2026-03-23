@@ -418,6 +418,28 @@ Please audit the extraction above against the source document. Identify any miss
     }
 
     const auditFindings = toolUse.input;
+
+    // Post-process: resolve rephrased item IDs by matching extractedName to actual items
+    if (auditFindings.rephrasedItems?.length) {
+      const nameToId = new Map<string, string>();
+      function indexItems(items: unknown[]) {
+        for (const item of items) {
+          const i = item as { id?: string; name?: string; children?: unknown[] };
+          if (i.name && i.id) nameToId.set(i.name.toLowerCase().trim(), i.id);
+          if (i.children?.length) indexItems(i.children);
+        }
+      }
+      indexItems(extractedItems);
+
+      for (const r of auditFindings.rephrasedItems) {
+        if (!r.extractedItemId || r.extractedItemId === "<UNKNOWN>" || r.extractedItemId === "unknown") {
+          const match = nameToId.get(r.extractedName?.toLowerCase().trim());
+          r.extractedItemId = match || "unknown";
+        }
+      }
+      console.log(`[audit-completeness] Resolved ${auditFindings.rephrasedItems.length} rephrased item IDs`);
+    }
+
     console.log("[audit-completeness] Findings:", JSON.stringify(auditFindings.auditSummary));
 
     return new Response(JSON.stringify({ success: true, data: auditFindings, sessionId }), {
