@@ -255,21 +255,33 @@ function selectAuditImages(images: string[]): string[] {
   return selected;
 }
 
+function flattenItems(items: unknown[]): unknown[] {
+  const flat: unknown[] = [];
+  for (const item of items) {
+    const i = item as Record<string, unknown>;
+    const { children, ...rest } = i;
+    flat.push(rest);
+    if (Array.isArray(children) && children.length > 0) {
+      flat.push(...flattenItems(children as unknown[]));
+    }
+  }
+  return flat;
+}
+
 function mergeVisionBatchResults(
   existing: unknown[],
   newItems: unknown[]
 ): unknown[] {
-  if (existing.length === 0) return newItems;
+  // Flatten both inputs to ensure no nested children are lost
+  const flatExisting = flattenItems(existing);
+  const flatNew = flattenItems(newItems);
+  if (flatExisting.length === 0) return flatNew;
   const names = new Set<string>();
-  function collectNames(items: unknown[]) {
-    for (const item of items) {
-      const i = item as { name?: string; children?: unknown[] };
-      if (i.name) names.add(i.name.toLowerCase());
-      if (i.children?.length) collectNames(i.children);
-    }
+  for (const item of flatExisting) {
+    const i = item as { name?: string };
+    if (i.name) names.add(i.name.toLowerCase());
   }
-  collectNames(existing);
-  const unique = newItems.filter((item) => {
+  const unique = flatNew.filter((item) => {
     const i = item as { name?: string };
     if (!i.name) return false;
     const lower = i.name.toLowerCase();
@@ -277,7 +289,7 @@ function mergeVisionBatchResults(
     names.add(lower);
     return true;
   });
-  return [...existing, ...unique];
+  return [...flatExisting, ...unique];
 }
 
 // ==============================

@@ -774,7 +774,7 @@ IMPORTANT INSTRUCTIONS:
 2. Find the document's ACTUAL hierarchy terminology (look for definitions, column headers)
 3. For TABLES: Capture content from ALL columns, including the rightmost KPI columns
 4. Handle merged cells by "filling down" the parent value
-5. Return NESTED items with children arrays, not a flat list
+5. Extract ALL items at every level of the hierarchy
 
 Extract all strategic plan items with their proper hierarchy.`
     });
