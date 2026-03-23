@@ -1,80 +1,99 @@
 
 
-# Fix: Flatten Nested Items to Prevent Child Loss During Batch Merging
+# Fix Rephrased Item Handling Across the Pipeline
 
-## Root Cause
-
-The extraction pipeline has two compounding issues:
-
-1. **Standard mode user prompt** (line 777 in `extract-plan-vision/index.ts`) explicitly instructs "Return NESTED items with children arrays, not a flat list" — this conflicts with presentation/table modes that use flat output
-2. **`mergeVisionBatchResults`** in `process-plan/index.ts` (line 258) only checks top-level item names for deduplication. When batch 1 returns `Goal A` with 10 children, and batch 2 also references `Goal A`, the merger sees it as duplicate and drops it — along with any NEW children from batch 2. All non-top-level items are invisible to the merger.
-
-The logs confirm this: Batch 1 returns 7 items, Batch 2 returns 1, Batch 3 returns 3, Batch 4 returns 3 → total after merging = 8 (only top-level). The ~40 child items (Key Priorities) are lost.
+## Problem
+Three related bugs prevent rephrased items from being properly tracked, corrected, and displayed:
+1. Confidence popover shows "No corrections — extracted cleanly" for rephrased items (confidence=60) because `calculateConfidence` sets the score but never adds a correction string
+2. Agent 3 runs in parallel with Agent 2 and receives `auditFindings: null`, so it can't correct rephrased names
+3. Agent 2 returns `extractedItemId: "<UNKNOWN>"` because the AI doesn't reliably match IDs
 
 ## Changes
 
-### File 1: `supabase/functions/extract-plan-vision/index.ts`
+### File 1: `supabase/functions/audit-completeness/index.ts`
 
-**FIX 1a**: Remove the nesting instruction from the user prompt (line 777).
+**BUG 3 fix**: After receiving audit findings from the AI, post-process `rephrasedItems` to resolve `extractedItemId`. Build a name→id lookup from `extractedItems`, then for each rephrased item, fuzzy-match `extractedName` against the lookup to populate the correct ID.
 
-Change line 777 from:
-```
-5. Return NESTED items with children arrays, not a flat list
-```
-to:
-```
-5. Extract ALL items at every level of the hierarchy
-```
+```typescript
+// After line 420: const auditFindings = toolUse.input;
+// Build name→id map from extractedItems
+const nameToId = new Map<string, string>();
+function indexItems(items: unknown[]) {
+  for (const item of items) {
+    const i = item as { id?: string; name?: string; children?: unknown[] };
+    if (i.name && i.id) nameToId.set(i.name.toLowerCase().trim(), i.id);
+    if (i.children?.length) indexItems(i.children);
+  }
+}
+indexItems(extractedItems);
 
-**FIX 1b**: The standard mode system prompt (`VISION_EXTRACTION_PROMPT`, lines 169-210) also instructs nested output with children arrays, and the tool schema (line 307) defines `children` as a recursive field. These are fundamental to how standard mode works, so we won't change the system prompt — instead we'll handle it in the orchestrator with a flattener.
+// Resolve rephrased item IDs
+if (auditFindings.rephrasedItems) {
+  for (const r of auditFindings.rephrasedItems) {
+    if (!r.extractedItemId || r.extractedItemId === "<UNKNOWN>") {
+      const match = nameToId.get(r.extractedName?.toLowerCase().trim());
+      r.extractedItemId = match || "unknown";
+    }
+  }
+}
+```
 
 ### File 2: `supabase/functions/process-plan/index.ts`
 
-**FIX 2**: Add a `flattenItems` function and apply it to each batch result before merging.
+**BUG 1 fix**: In `calculateConfidence` (around line 160-175), when an item is identified as rephrased via `rephrasedNames`, add a correction description to `correctionDescs` so the popover has something to display. Look up the original text from `auditFindings.rephrasedItems`.
 
+Change the function signature to also accept the full `rephrasedItems` array (not just a Set of names). Then when `rephrasedNames.has(name)` is true, find the matching rephrasedItem and add:
+```
+"[agent-correction] Completeness Audit: Rephrased during extraction. Original: {originalText}"
+```
+
+**BUG 2 fix**: Since Agents 2 & 3 now run in parallel and we can't pass audit findings to Agent 3, handle rephrased corrections in post-processing instead. After the parallel step completes and we have both `auditFindings` and `validationResult`, iterate through `auditFindings.rephrasedItems` and correct item names in `finalItems` directly in the orchestrator (before confidence scoring). This replaces the need for Agent 3 to do it.
+
+Add a new function `applyRephrasedCorrections` after the merge step (around line 658):
 ```typescript
-function flattenItems(items: unknown[]): unknown[] {
-  const flat: unknown[] = [];
-  for (const item of items) {
-    const i = item as Record<string, unknown>;
-    const { children, ...rest } = i;
-    flat.push(rest);
-    if (Array.isArray(children) && children.length > 0) {
-      flat.push(...flattenItems(children));
+function applyRephrasedCorrections(
+  items: unknown[], 
+  rephrasedItems: { extractedName: string; originalText: string }[],
+  corrections: { itemId: string; type: string; description: string }[]
+): void {
+  const rephraseMap = new Map(
+    rephrasedItems.map(r => [r.extractedName.toLowerCase().trim(), r.originalText])
+  );
+  function walk(items: unknown[]) {
+    for (const item of items) {
+      const i = item as { id?: string; name?: string; children?: unknown[] };
+      const key = (i.name || "").toLowerCase().trim();
+      if (rephraseMap.has(key)) {
+        const original = rephraseMap.get(key)!;
+        corrections.push({
+          itemId: i.id || "unknown",
+          type: "renamed",
+          description: `Completeness Audit: Rephrased during extraction. Original: "${original}"`,
+        });
+        i.name = original; // Fix the name
+      }
+      if (i.children?.length) walk(i.children);
     }
   }
-  return flat;
+  walk(items);
 }
 ```
 
-Apply this in the extraction loop (around line 408) before calling `mergeVisionBatchResults`:
-
+Call it after building `finalItems` and `corrections` but before `calculateConfidence`:
 ```typescript
-if (d.items?.length) {
-  const flatBatchItems = flattenItems(d.items);
-  allItems = mergeVisionBatchResults(allItems, flatBatchItems);
+if (auditFindings?.rephrasedItems?.length) {
+  applyRephrasedCorrections(finalItems, auditFindings.rephrasedItems, corrections);
 }
 ```
 
-Also apply in the safety net fallback (around line 509):
+This way:
+- The item name gets corrected back to the original text (BUG 2)
+- A correction entry is added so `calculateConfidence` picks it up and the popover displays it (BUG 1)
 
-```typescript
-if (innerData.items?.length) {
-  const flatFallbackItems = flattenItems(innerData.items);
-  fallbackItems = mergeVisionBatchResults(fallbackItems, flatFallbackItems);
-}
-```
-
-**FIX 3**: Also flatten items in `mergeVisionBatchResults` itself as a safety belt — the `collectNames` helper already traverses children for dedup names, but the actual merge only adds top-level items. After flattening inputs, `collectNames` traversal of children becomes unnecessary but harmless.
-
-### Downstream Impact
-
-The rest of the pipeline (validate-hierarchy, confidence scoring, final output) already handles both flat and nested formats — `countAllItems` and `collectItemNameSet` traverse children recursively, and `calculateConfidence` does too. The frontend (`usePlanState.ts`) builds its own tree from `parentId` fields. So flattening at merge time is safe — the hierarchy is reconstructed later from `levelDepth`/`parent_name` fields.
-
-### Files to modify
+## Files to Modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/extract-plan-vision/index.ts` | Remove "Return NESTED items" from user prompt (line 777) |
-| `supabase/functions/process-plan/index.ts` | Add `flattenItems()` function; apply before `mergeVisionBatchResults` in both extraction loop and safety net |
+| `supabase/functions/audit-completeness/index.ts` | Post-process rephrasedItems to resolve extractedItemId from name matching |
+| `supabase/functions/process-plan/index.ts` | Add `applyRephrasedCorrections` to fix names + add correction entries; update `calculateConfidence` to include rephrased correction descriptions |
 
