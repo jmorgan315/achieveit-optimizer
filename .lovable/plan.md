@@ -1,40 +1,23 @@
 
 
-# Fix: Deduplicate Activity Log Entries During Polling
+# Fix: Increase PDF Page Rendering Limit from 20 to 100
 
 ## Problem
-The polling loop in `FileUploadStep.tsx` (line 195-222) calls `addMessage()` on every 3-second poll, even when `current_step` hasn't changed. This creates 45+ duplicate entries.
+The `renderPDFToImages` function defaults to 20 pages max, and the caller in `FileUploadStep.tsx` explicitly passes `20`. A 40-page document has its second half silently dropped — no agent ever sees those pages.
 
-## Solution
+## Changes
 
-**File**: `src/components/steps/FileUploadStep.tsx`
+### File 1: `src/utils/pdfToImages.ts`
+Change the default `maxPages` parameter from `20` to `100` (line 26).
 
-Track the last reported step in a `useRef` and only call `addMessage` when the step changes. Replace the polling step-update block (lines 211-222):
+### File 2: `src/components/steps/FileUploadStep.tsx`
+Change the call at line 255 from `renderPDFToImages(file, 20, 0.75, pageRange)` to `renderPDFToImages(file, 100, 0.75, pageRange)`.
 
-```typescript
-// Before the polling loop, add a ref to track last step
-let lastReportedStep = '';
-
-// Inside the loop, replace the current block:
-const step = (session as any).current_step as string;
-if (step && step !== lastReportedStep) {
-  lastReportedStep = step;
-  if (step === 'classifying') {
-    setStepProgress('classify', 50);
-    addMessage('Classifying document structure...');
-  } else if (step === 'extracting') {
-    setStepProgress('extract', 50);
-    addMessage('Extracting plan items...');
-  } else if (step === 'validating') {
-    setStepProgress('validate', 50);
-    addMessage('Auditing and validating...');
-  }
-}
-```
-
-This ensures each pipeline step produces exactly one activity log entry, regardless of how many times the session is polled. The activity log will show ~5 clean entries instead of 45+.
+## Note on Issue 2
+The priority misassignment on dense two-column summary pages is an AI accuracy issue, not a code bug. Increasing the page cap will naturally help because the extractor will have access to the dedicated detail pages with clearer formatting.
 
 | File | Change |
 |------|--------|
-| `src/components/steps/FileUploadStep.tsx` | Add `lastReportedStep` tracking in `pollForResults` to deduplicate messages |
+| `src/utils/pdfToImages.ts` | Default `maxPages` from 20 → 100 |
+| `src/components/steps/FileUploadStep.tsx` | Caller passes 100 instead of 20 |
 
