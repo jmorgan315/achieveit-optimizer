@@ -253,6 +253,116 @@ function applyRephrasedCorrections(
   walk(items);
 }
 
+// ==============================
+// FUZZY DEDUPLICATION
+// ==============================
+function normalizeItemName(name: string): string {
+  return (name || "").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+function wordSet(name: string): Set<string> {
+  return new Set(normalizeItemName(name).split(" ").filter(w => w.length > 2));
+}
+
+function wordOverlap(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const w of a) {
+    if (b.has(w)) shared++;
+  }
+  const total = Math.max(a.size, b.size);
+  return total > 0 ? shared / total : 0;
+}
+
+function isDuplicate(nameA: string, nameB: string): boolean {
+  const normA = normalizeItemName(nameA);
+  const normB = normalizeItemName(nameB);
+  if (normA === normB) return true;
+  // Prefix match (first 40 chars)
+  const prefix = 40;
+  if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return true;
+  // Word overlap >= 85%
+  if (wordOverlap(wordSet(nameA), wordSet(nameB)) >= 0.85) return true;
+  return false;
+}
+
+function deduplicateItems(items: unknown[]): unknown[] {
+  // Group by level
+  const byLevel = new Map<string, unknown[]>();
+  for (const item of items) {
+    const i = item as { level?: string; levelType?: string };
+    const lvl = (i.level || i.levelType || "unknown").toLowerCase();
+    if (!byLevel.has(lvl)) byLevel.set(lvl, []);
+    byLevel.get(lvl)!.push(item);
+  }
+
+  const removed = new Set<number>();
+  const itemsArr = [...items];
+
+  for (const [, group] of byLevel) {
+    for (let a = 0; a < group.length; a++) {
+      for (let b = a + 1; b < group.length; b++) {
+        const itemA = group[a] as { name?: string; source_page?: number; parent_name?: string };
+        const itemB = group[b] as { name?: string; source_page?: number; parent_name?: string };
+        if (!itemA.name || !itemB.name) continue;
+        if (!isDuplicate(itemA.name, itemB.name)) continue;
+
+        const idxA = itemsArr.indexOf(group[a]);
+        const idxB = itemsArr.indexOf(group[b]);
+        if (removed.has(idxA) || removed.has(idxB)) continue;
+
+        // Keep higher source_page (detail > summary), tie-break by longer name
+        let keepIdx = idxA, discardIdx = idxB;
+        const pageA = itemA.source_page || 0;
+        const pageB = itemB.source_page || 0;
+        if (pageB > pageA || (pageB === pageA && (itemB.name?.length || 0) > (itemA.name?.length || 0))) {
+          keepIdx = idxB;
+          discardIdx = idxA;
+        }
+
+        // Preserve parent_name from discarded if keeper lacks one
+        const keeper = itemsArr[keepIdx] as { parent_name?: string };
+        const discarded = itemsArr[discardIdx] as { parent_name?: string };
+        if (!keeper.parent_name && discarded.parent_name) {
+          keeper.parent_name = discarded.parent_name;
+        }
+
+        removed.add(discardIdx);
+      }
+    }
+  }
+
+  const before = items.length;
+  const result = itemsArr.filter((_, idx) => !removed.has(idx));
+  if (removed.size > 0) {
+    console.log(`[process-plan] Dedup: removed ${removed.size} duplicate items, ${before} → ${result.length}`);
+  }
+  return result;
+}
+
+// ==============================
+// PAGE RANGE PARSING
+// ==============================
+function parsePageRange(pageRangeStr: string, maxPage: number): Set<number> {
+  const pages = new Set<number>();
+  if (!pageRangeStr || !pageRangeStr.trim()) return pages;
+  const parts = pageRangeStr.split(",").map(p => p.trim()).filter(Boolean);
+  for (const part of parts) {
+    const rangeMatch = part.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      for (let p = start; p <= end; p++) {
+        if (p >= 1 && p <= maxPage) pages.add(p);
+      }
+    } else {
+      const num = parseInt(part, 10);
+      if (!isNaN(num) && num >= 1 && num <= maxPage) pages.add(num);
+    }
+  }
+  return pages;
+}
+
 function batchImages(images: string[], batchSize: number): string[][] {
   const batches: string[][] = [];
   for (let i = 0; i < images.length; i += batchSize) {
