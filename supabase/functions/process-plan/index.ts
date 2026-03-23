@@ -356,15 +356,19 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     if (useVision) {
       extractionMethod = "vision";
       let images = pageImages as string[];
-      if (classification?.plan_content_pages && Array.isArray(classification.plan_content_pages) && (classification.plan_content_pages as number[]).length > 0) {
+      // Only hard-filter pages for table mode — tables are reliably classified.
+      // For presentation mode, send ALL pages; classification is passed as context/guidance.
+      if (extractionMode === "table" && classification?.plan_content_pages && Array.isArray(classification.plan_content_pages) && (classification.plan_content_pages as number[]).length > 0) {
         const contentPages = classification.plan_content_pages as number[];
         const filtered = contentPages
           .filter((p: number) => p >= 1 && p <= images.length)
           .map((p: number) => images[p - 1]);
         if (filtered.length > 0) {
-          console.log(`[process-plan] Step 1: Filtering from ${images.length} to ${filtered.length} content pages`);
+          console.log(`[process-plan] Step 1: Filtering from ${images.length} to ${filtered.length} content pages (table mode)`);
           images = filtered;
         }
+      } else if (extractionMode === "presentation") {
+        console.log(`[process-plan] Step 1: Sending all ${images.length} pages (presentation mode, classification passed as context)`);
       }
 
       const batches = batchImages(images, 5);
