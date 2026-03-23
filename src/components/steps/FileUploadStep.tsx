@@ -190,9 +190,11 @@ export function FileUploadStep({
     error?: string;
   }> => {
     const POLL_INTERVAL = 3000;
-    const MAX_POLLS = 120; // 6 minutes max
+    const MAX_POLLS = 200; // 10 minutes max
 
     let lastReportedStep = '';
+    let extractionCompleteAt: number | null = null;
+    let hasAttemptedResume = false;
 
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
@@ -220,10 +222,37 @@ export function FileUploadStep({
         } else if (step === 'extracting') {
           setStepProgress('extract', 50);
           addMessage('Extracting plan items...');
+        } else if (step === 'extraction_complete') {
+          setStepProgress('extract', 100);
+          addMessage('Extraction complete, running validation...');
         } else if (step === 'validating') {
           setStepProgress('validate', 50);
           addMessage('Auditing and validating...');
         }
+      }
+
+      // Stall detection: if stuck at extraction_complete for >20s, fire resume
+      if (step === 'extraction_complete') {
+        if (!extractionCompleteAt) {
+          extractionCompleteAt = Date.now();
+        }
+        const stallDuration = Date.now() - extractionCompleteAt;
+        if (stallDuration > 20000 && !hasAttemptedResume) {
+          hasAttemptedResume = true;
+          console.log(`[Polling] Stall detected at extraction_complete (${Math.round(stallDuration / 1000)}s), firing resume...`);
+          addMessage('Resuming validation...');
+          try {
+            await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ resume_session_id: pollSessionId }),
+            });
+          } catch (resumeErr) {
+            console.error('[Polling] Resume call failed:', resumeErr);
+          }
+        }
+      } else {
+        extractionCompleteAt = null;
       }
 
       if (session.status === 'completed') {
@@ -238,7 +267,33 @@ export function FileUploadStep({
       }
     }
 
-    throw new Error('Pipeline timed out after 6 minutes');
+    // Timeout fallback: check for partial extraction results
+    console.log('[Polling] MAX_POLLS reached, checking for partial results...');
+    const { data: finalSession } = await supabase
+      .from('processing_sessions')
+      .select('step_results, current_step')
+      .eq('id', pollSessionId)
+      .single();
+
+    const partialResults = (finalSession as any)?.step_results as any;
+    if (partialResults?.extraction?.items?.length > 0) {
+      console.log(`[Polling] Found partial extraction results (${partialResults.extraction.items.length} items), using as fallback`);
+      const items = partialResults.extraction.items;
+      const levels = partialResults.extraction.detectedLevels || [];
+      toast({
+        title: "Partial Results",
+        description: "Extraction complete but validation timed out — results may need manual review.",
+      });
+      return {
+        success: true,
+        data: { items, detectedLevels: levels },
+        totalItems: countAllItems(items),
+        extractionMethod: 'vision',
+        pipelineComplete: false,
+      };
+    }
+
+    throw new Error('Pipeline timed out after 10 minutes');
   };
 
   const extractWithVisionPipeline = async (
