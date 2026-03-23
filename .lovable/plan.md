@@ -1,75 +1,84 @@
 
 
-# Fix Pipeline Timeout: Parallel Agents + Async Polling
+# Fix: Stop Filtering Pages for Presentation Mode + Add Low-Item Fallback
 
 ## Problem
-The `process-plan` edge function takes ~170s, exceeding the browser connection timeout (~120s). The pipeline completes on the server but the frontend never receives the response.
+Agent 0 misclassifies plan content pages as "background", and the orchestrator filters them out before the extractor sees them. The One Chattanooga plan dropped from 47 items to 3-8.
 
-## Change 1: Parallelize Agents 2 & 3
+## Change 1: Don't filter pages for presentation mode
 
-**File**: `supabase/functions/process-plan/index.ts` (lines 511-584)
+**File**: `supabase/functions/process-plan/index.ts`, lines 356-368
 
-Run `audit-completeness` and `validate-hierarchy` concurrently with `Promise.allSettled`. They are independent — saves ~18-20s.
+Current logic (lines 359-368) filters `images` to only `plan_content_pages` for ALL vision modes. Change to only filter for `table` mode:
 
 ```typescript
-const [auditSettled, validateSettled] = await Promise.allSettled([
-  (async () => { /* audit logic */ })(),
-  (async () => { /* validate logic */ })(),
-]);
-// Extract results from settled promises, keep same error handling
+let images = pageImages as string[];
+
+if (extractionMode === "table" && classification?.plan_content_pages && ...) {
+  // Only filter for table mode — tables are reliably classified
+  const contentPages = classification.plan_content_pages as number[];
+  const filtered = contentPages.filter(...).map(...);
+  if (filtered.length > 0) {
+    console.log(`[process-plan] Step 1: Filtering from ${images.length} to ${filtered.length} content pages (table mode)`);
+    images = filtered;
+  }
+} else if (extractionMode === "presentation") {
+  // Send ALL pages — pass classification as guidance, not a hard filter
+  console.log(`[process-plan] Step 1: Sending all ${images.length} pages (presentation mode, classification passed as context)`);
+}
 ```
 
-## Change 2: Async Processing with Polling
+The `pageAnnotations` and `nonPlanContent` are already being passed to `extract-plan-vision` (lines 397-398), so the extractor already receives the classification hints. This change just stops the hard page filtering.
 
-### 2a. Database Migration
+## Change 2: Low-item safety net with standard-mode fallback
 
-Add two columns to `processing_sessions`:
-- `current_step` (text, default `'queued'`) — tracks pipeline progress
-- `step_results` (jsonb, nullable) — stores final pipeline output
+After Agent 1 completes (after line 467), add a check: if extraction produced fewer than 5 items from a document with more than 10 pages, re-run extraction in "standard" mode (no filtering, no specialized prompts) and use whichever result has more items.
 
-### 2b. Edge Function: Fire-and-Forget Pattern
-
-**File**: `supabase/functions/process-plan/index.ts`
-
-Restructure `serve()` handler:
-1. Parse request, ensure session, return `{ success: true, sessionId }` immediately
-2. Run the full pipeline in a non-awaited async function (Supabase Edge Functions keep the isolate alive after responding — the function already runs ~170s today)
-3. At each checkpoint, update `processing_sessions` row:
-   - After Agent 0: `current_step = 'classifying'`, save classification
-   - After Agent 1: `current_step = 'extracting'`, save item count
-   - After Agents 2+3: `current_step = 'validating'`
-   - On completion: `status = 'completed'`, `current_step = 'complete'`, `step_results = { full result payload }`
-   - On error: `status = 'error'`, `step_results = { error details }`
-
-### 2c. Frontend: Poll for Results
-
-**File**: `src/components/steps/FileUploadStep.tsx`
-
-Replace the single long `fetch()` in both `extractWithVisionPipeline` and `extractPlanItemsWithAI`:
-
-1. `POST` to `process-plan` — returns immediately with `{ sessionId }`
-2. Start a polling loop (every 3s) querying `processing_sessions` by sessionId
-3. Map `current_step` values to `ProcessingStep` UI states:
-   - `'classifying'` → `setStepProgress('classify', 50)`
-   - `'extracting'` → `setStepProgress('extract', 50)`
-   - `'validating'` → `setStepProgress('validate', 50)`
-   - `'completed'` → read `step_results`, process as before
-   - `'error'` → show error from `step_results`
-4. On `status = 'completed'`, parse `step_results` exactly as the current `result` response is parsed (same fields: `data`, `totalItems`, `corrections`, `sessionConfidence`, etc.)
-
-### 2d. Enable Realtime (optional optimization)
-
-Add `processing_sessions` to realtime publication so a future iteration can use subscriptions instead of polling. Not required for this change.
-
-```sql
-ALTER PUBLICATION supabase_realtime ADD TABLE public.processing_sessions;
+```typescript
+// Safety net: if suspiciously few items, fallback to standard extraction
+const totalPages = (pageImages as string[]).length;
+if (useVision && agent1ItemCount < 5 && totalPages > 10) {
+  console.warn(`[process-plan] Safety net: only ${agent1ItemCount} items from ${totalPages} pages. Re-running in standard mode...`);
+  
+  // Re-run with ALL pages, standard mode, no Agent 0 context
+  const fallbackBatches = batchImages(pageImages as string[], 5);
+  let fallbackItems: unknown[] = [];
+  let fallbackLevels = [];
+  let fallbackContext = "";
+  
+  for (let bi = 0; bi < fallbackBatches.length; bi++) {
+    if (bi > 0) await new Promise(r => setTimeout(r, 3000));
+    const result = await callEdgeFunction("extract-plan-vision", {
+      pageImages: fallbackBatches[bi], previousContext: fallbackContext,
+      organizationName, industry, documentHints, planLevels, pageRange, sessionId,
+      batchLabel: `Safety net (Batch ${bi+1}/${fallbackBatches.length})`,
+      extractionMode: "standard",
+    });
+    if (result.ok && (result.data as any).success) {
+      const d = (result.data as any).data;
+      if (d.items?.length) fallbackItems = mergeVisionBatchResults(fallbackItems, d.items);
+      if (bi === 0 && d.detectedLevels?.length) fallbackLevels = d.detectedLevels;
+      if ((result.data as any).contextSummary) fallbackContext = (result.data as any).contextSummary;
+    }
+  }
+  
+  const fallbackCount = countAllItems(fallbackItems);
+  console.log(`[process-plan] Safety net result: ${fallbackCount} items vs original ${agent1ItemCount}`);
+  
+  if (fallbackCount > agent1ItemCount) {
+    console.log("[process-plan] Using safety net results (more items)");
+    agent1Data = { items: fallbackItems, detectedLevels: fallbackLevels.length ? fallbackLevels : agent1Data.detectedLevels };
+    // Recalculate
+    agent1NameSet = collectItemNameSet(agent1Data.items);
+  }
+}
 ```
+
+Note: `agent1NameSet` is declared with `const` on line 466 — will need to change to `let`.
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/process-plan/index.ts` | Parallel agents, return-early + background processing, DB progress updates |
-| `src/components/steps/FileUploadStep.tsx` | Replace long fetch with POST + poll loop |
-| Database migration | Add `current_step` and `step_results` columns |
+| `supabase/functions/process-plan/index.ts` | 1) Only filter pages for table mode, 2) Add low-item fallback after extraction |
 
