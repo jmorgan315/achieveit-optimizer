@@ -192,6 +192,8 @@ export function FileUploadStep({
     const POLL_INTERVAL = 3000;
     const MAX_POLLS = 120; // 6 minutes max
 
+    let lastReportedStep = '';
+
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
 
@@ -208,17 +210,20 @@ export function FileUploadStep({
 
       if (!session) continue;
 
-      // Update UI based on current_step
+      // Update UI based on current_step — only add a message when the step changes
       const step = (session as any).current_step as string;
-      if (step === 'classifying') {
-        setStepProgress('classify', 50);
-        addMessage('Classifying document structure...');
-      } else if (step === 'extracting') {
-        setStepProgress('extract', 50);
-        addMessage('Extracting plan items...');
-      } else if (step === 'validating') {
-        setStepProgress('validate', 50);
-        addMessage('Auditing and validating...');
+      if (step && step !== lastReportedStep) {
+        lastReportedStep = step;
+        if (step === 'classifying') {
+          setStepProgress('classify', 50);
+          addMessage('Classifying document structure...');
+        } else if (step === 'extracting') {
+          setStepProgress('extract', 50);
+          addMessage('Extracting plan items...');
+        } else if (step === 'validating') {
+          setStepProgress('validate', 50);
+          addMessage('Auditing and validating...');
+        }
       }
 
       if (session.status === 'completed') {
