@@ -220,6 +220,39 @@ function enforceMaxDepth(
   }
 }
 
+/** Apply rephrased corrections from audit: fix item names back to original text and record corrections */
+function applyRephrasedCorrections(
+  items: unknown[],
+  rephrasedItems: { extractedName: string; originalText?: string }[],
+  corrections: { itemId: string; type: string; description: string }[]
+): void {
+  const rephraseMap = new Map<string, string>();
+  for (const r of rephrasedItems) {
+    if (r.extractedName && r.originalText) {
+      rephraseMap.set(r.extractedName.toLowerCase().trim(), r.originalText);
+    }
+  }
+  if (rephraseMap.size === 0) return;
+
+  function walk(list: unknown[]) {
+    for (const item of list) {
+      const i = item as { id?: string; name?: string; children?: unknown[] };
+      const key = (i.name || "").toLowerCase().trim();
+      if (rephraseMap.has(key)) {
+        const original = rephraseMap.get(key)!;
+        corrections.push({
+          itemId: i.id || "unknown",
+          type: "renamed",
+          description: `Completeness Audit: Rephrased during extraction. Original: "${original}"`,
+        });
+        i.name = original;
+      }
+      if (i.children?.length) walk(i.children);
+    }
+  }
+  walk(items);
+}
+
 function batchImages(images: string[], batchSize: number): string[][] {
   const batches: string[][] = [];
   for (let i = 0; i < images.length; i += batchSize) {
