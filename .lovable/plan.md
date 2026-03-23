@@ -1,84 +1,80 @@
 
 
-# Fix: Stop Filtering Pages for Presentation Mode + Add Low-Item Fallback
+# Fix: Flatten Nested Items to Prevent Child Loss During Batch Merging
 
-## Problem
-Agent 0 misclassifies plan content pages as "background", and the orchestrator filters them out before the extractor sees them. The One Chattanooga plan dropped from 47 items to 3-8.
+## Root Cause
 
-## Change 1: Don't filter pages for presentation mode
+The extraction pipeline has two compounding issues:
 
-**File**: `supabase/functions/process-plan/index.ts`, lines 356-368
+1. **Standard mode user prompt** (line 777 in `extract-plan-vision/index.ts`) explicitly instructs "Return NESTED items with children arrays, not a flat list" — this conflicts with presentation/table modes that use flat output
+2. **`mergeVisionBatchResults`** in `process-plan/index.ts` (line 258) only checks top-level item names for deduplication. When batch 1 returns `Goal A` with 10 children, and batch 2 also references `Goal A`, the merger sees it as duplicate and drops it — along with any NEW children from batch 2. All non-top-level items are invisible to the merger.
 
-Current logic (lines 359-368) filters `images` to only `plan_content_pages` for ALL vision modes. Change to only filter for `table` mode:
+The logs confirm this: Batch 1 returns 7 items, Batch 2 returns 1, Batch 3 returns 3, Batch 4 returns 3 → total after merging = 8 (only top-level). The ~40 child items (Key Priorities) are lost.
 
-```typescript
-let images = pageImages as string[];
+## Changes
 
-if (extractionMode === "table" && classification?.plan_content_pages && ...) {
-  // Only filter for table mode — tables are reliably classified
-  const contentPages = classification.plan_content_pages as number[];
-  const filtered = contentPages.filter(...).map(...);
-  if (filtered.length > 0) {
-    console.log(`[process-plan] Step 1: Filtering from ${images.length} to ${filtered.length} content pages (table mode)`);
-    images = filtered;
-  }
-} else if (extractionMode === "presentation") {
-  // Send ALL pages — pass classification as guidance, not a hard filter
-  console.log(`[process-plan] Step 1: Sending all ${images.length} pages (presentation mode, classification passed as context)`);
-}
+### File 1: `supabase/functions/extract-plan-vision/index.ts`
+
+**FIX 1a**: Remove the nesting instruction from the user prompt (line 777).
+
+Change line 777 from:
+```
+5. Return NESTED items with children arrays, not a flat list
+```
+to:
+```
+5. Extract ALL items at every level of the hierarchy
 ```
 
-The `pageAnnotations` and `nonPlanContent` are already being passed to `extract-plan-vision` (lines 397-398), so the extractor already receives the classification hints. This change just stops the hard page filtering.
+**FIX 1b**: The standard mode system prompt (`VISION_EXTRACTION_PROMPT`, lines 169-210) also instructs nested output with children arrays, and the tool schema (line 307) defines `children` as a recursive field. These are fundamental to how standard mode works, so we won't change the system prompt — instead we'll handle it in the orchestrator with a flattener.
 
-## Change 2: Low-item safety net with standard-mode fallback
+### File 2: `supabase/functions/process-plan/index.ts`
 
-After Agent 1 completes (after line 467), add a check: if extraction produced fewer than 5 items from a document with more than 10 pages, re-run extraction in "standard" mode (no filtering, no specialized prompts) and use whichever result has more items.
+**FIX 2**: Add a `flattenItems` function and apply it to each batch result before merging.
 
 ```typescript
-// Safety net: if suspiciously few items, fallback to standard extraction
-const totalPages = (pageImages as string[]).length;
-if (useVision && agent1ItemCount < 5 && totalPages > 10) {
-  console.warn(`[process-plan] Safety net: only ${agent1ItemCount} items from ${totalPages} pages. Re-running in standard mode...`);
-  
-  // Re-run with ALL pages, standard mode, no Agent 0 context
-  const fallbackBatches = batchImages(pageImages as string[], 5);
-  let fallbackItems: unknown[] = [];
-  let fallbackLevels = [];
-  let fallbackContext = "";
-  
-  for (let bi = 0; bi < fallbackBatches.length; bi++) {
-    if (bi > 0) await new Promise(r => setTimeout(r, 3000));
-    const result = await callEdgeFunction("extract-plan-vision", {
-      pageImages: fallbackBatches[bi], previousContext: fallbackContext,
-      organizationName, industry, documentHints, planLevels, pageRange, sessionId,
-      batchLabel: `Safety net (Batch ${bi+1}/${fallbackBatches.length})`,
-      extractionMode: "standard",
-    });
-    if (result.ok && (result.data as any).success) {
-      const d = (result.data as any).data;
-      if (d.items?.length) fallbackItems = mergeVisionBatchResults(fallbackItems, d.items);
-      if (bi === 0 && d.detectedLevels?.length) fallbackLevels = d.detectedLevels;
-      if ((result.data as any).contextSummary) fallbackContext = (result.data as any).contextSummary;
+function flattenItems(items: unknown[]): unknown[] {
+  const flat: unknown[] = [];
+  for (const item of items) {
+    const i = item as Record<string, unknown>;
+    const { children, ...rest } = i;
+    flat.push(rest);
+    if (Array.isArray(children) && children.length > 0) {
+      flat.push(...flattenItems(children));
     }
   }
-  
-  const fallbackCount = countAllItems(fallbackItems);
-  console.log(`[process-plan] Safety net result: ${fallbackCount} items vs original ${agent1ItemCount}`);
-  
-  if (fallbackCount > agent1ItemCount) {
-    console.log("[process-plan] Using safety net results (more items)");
-    agent1Data = { items: fallbackItems, detectedLevels: fallbackLevels.length ? fallbackLevels : agent1Data.detectedLevels };
-    // Recalculate
-    agent1NameSet = collectItemNameSet(agent1Data.items);
-  }
+  return flat;
 }
 ```
 
-Note: `agent1NameSet` is declared with `const` on line 466 — will need to change to `let`.
+Apply this in the extraction loop (around line 408) before calling `mergeVisionBatchResults`:
 
-## Files to Modify
+```typescript
+if (d.items?.length) {
+  const flatBatchItems = flattenItems(d.items);
+  allItems = mergeVisionBatchResults(allItems, flatBatchItems);
+}
+```
+
+Also apply in the safety net fallback (around line 509):
+
+```typescript
+if (innerData.items?.length) {
+  const flatFallbackItems = flattenItems(innerData.items);
+  fallbackItems = mergeVisionBatchResults(fallbackItems, flatFallbackItems);
+}
+```
+
+**FIX 3**: Also flatten items in `mergeVisionBatchResults` itself as a safety belt — the `collectNames` helper already traverses children for dedup names, but the actual merge only adds top-level items. After flattening inputs, `collectNames` traversal of children becomes unnecessary but harmless.
+
+### Downstream Impact
+
+The rest of the pipeline (validate-hierarchy, confidence scoring, final output) already handles both flat and nested formats — `countAllItems` and `collectItemNameSet` traverse children recursively, and `calculateConfidence` does too. The frontend (`usePlanState.ts`) builds its own tree from `parentId` fields. So flattening at merge time is safe — the hierarchy is reconstructed later from `levelDepth`/`parent_name` fields.
+
+### Files to modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/process-plan/index.ts` | 1) Only filter pages for table mode, 2) Add low-item fallback after extraction |
+| `supabase/functions/extract-plan-vision/index.ts` | Remove "Return NESTED items" from user prompt (line 777) |
+| `supabase/functions/process-plan/index.ts` | Add `flattenItems()` function; apply before `mergeVisionBatchResults` in both extraction loop and safety net |
 
