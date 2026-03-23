@@ -511,19 +511,21 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     if (useVision) {
       extractionMethod = "vision";
       let images = pageImages as string[];
-      // Only hard-filter pages for table mode — tables are reliably classified.
-      // For presentation mode, send ALL pages; classification is passed as context/guidance.
-      if (extractionMode === "table" && classification?.plan_content_pages && Array.isArray(classification.plan_content_pages) && (classification.plan_content_pages as number[]).length > 0) {
-        const contentPages = classification.plan_content_pages as number[];
-        const filtered = contentPages
-          .filter((p: number) => p >= 1 && p <= images.length)
-          .map((p: number) => images[p - 1]);
-        if (filtered.length > 0) {
-          console.log(`[process-plan] Step 1: Filtering from ${images.length} to ${filtered.length} content pages (table mode)`);
+
+      // Use Agent 0's page_range recommendations to filter pages (all modes)
+      const recPageRange = (classification?.extraction_recommendations as Record<string, unknown>)?.page_range as string | undefined;
+      if (recPageRange) {
+        const recommendedPages = parsePageRange(recPageRange, images.length);
+        if (recommendedPages.size > 0) {
+          const allPages = [...recommendedPages].sort((a, b) => a - b);
+          const filtered = allPages.map(p => images[p - 1]);
+          console.log(`[process-plan] Agent 0 recommended pages [${allPages.join(", ")}]. Sending ${filtered.length} of ${images.length} pages to extraction.`);
           images = filtered;
+        } else {
+          console.log(`[process-plan] Agent 0 page_range parsed to empty set, sending all ${images.length} pages`);
         }
-      } else if (extractionMode === "presentation") {
-        console.log(`[process-plan] Step 1: Sending all ${images.length} pages (presentation mode, classification passed as context)`);
+      } else {
+        console.log(`[process-plan] No Agent 0 page_range, sending all ${images.length} pages`);
       }
 
       const batches = batchImages(images, 5);
