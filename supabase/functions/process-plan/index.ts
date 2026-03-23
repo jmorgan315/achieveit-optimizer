@@ -466,9 +466,66 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       return;
     }
 
-    const agent1ItemCount = countAllItems(agent1Data.items);
-    const agent1NameSet = collectItemNameSet(agent1Data.items);
+    let agent1ItemCount = countAllItems(agent1Data.items);
+    let agent1NameSet = collectItemNameSet(agent1Data.items);
     console.log(`[process-plan] Step 1 complete: ${agent1ItemCount} items, ${agent1Data.detectedLevels.length} levels, ${agent1NameSet.size} unique names`);
+
+    // ==============================
+    // SAFETY NET: Low-item fallback to standard mode
+    // ==============================
+    const totalPages = (pageImages as string[]).length;
+    if (useVision && agent1ItemCount < 5 && totalPages > 10) {
+      console.warn(`[process-plan] Safety net triggered: only ${agent1ItemCount} items from ${totalPages} pages. Re-running in standard mode...`);
+
+      await logApiCall({
+        session_id: sessionId,
+        edge_function: "process-plan",
+        step_label: "Safety net: re-extracting in standard mode",
+        status: "success",
+      });
+
+      const fallbackBatches = batchImages(pageImages as string[], 5);
+      let fallbackItems: unknown[] = [];
+      let fallbackLevels: { depth: number; name: string }[] = [];
+      let fallbackContext = "";
+
+      for (let bi = 0; bi < fallbackBatches.length; bi++) {
+        if (bi > 0) await new Promise(r => setTimeout(r, 3000));
+        const result = await callEdgeFunction("extract-plan-vision", {
+          pageImages: fallbackBatches[bi],
+          previousContext: fallbackContext,
+          organizationName,
+          industry,
+          documentHints,
+          planLevels,
+          pageRange,
+          sessionId,
+          batchLabel: `Safety net (Batch ${bi + 1}/${fallbackBatches.length})`,
+          extractionMode: "standard",
+        });
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const d = (result.data as { data: { items?: unknown[]; detectedLevels?: { depth: number; name: string }[] }; contextSummary?: string });
+          const innerData = d.data;
+          if (innerData.items?.length) fallbackItems = mergeVisionBatchResults(fallbackItems, innerData.items);
+          if (bi === 0 && innerData.detectedLevels?.length) fallbackLevels = innerData.detectedLevels;
+          const ctx = (result.data as { contextSummary?: string }).contextSummary;
+          if (ctx) fallbackContext = ctx;
+        }
+      }
+
+      const fallbackCount = countAllItems(fallbackItems);
+      console.log(`[process-plan] Safety net result: ${fallbackCount} items vs original ${agent1ItemCount}`);
+
+      if (fallbackCount > agent1ItemCount) {
+        console.log("[process-plan] Using safety net results (more items)");
+        agent1Data = {
+          items: fallbackItems,
+          detectedLevels: fallbackLevels.length > 0 ? fallbackLevels : agent1Data.detectedLevels,
+        };
+        agent1ItemCount = fallbackCount;
+        agent1NameSet = collectItemNameSet(agent1Data.items);
+      }
+    }
 
     // ==============================
     // STEPS 2 & 3: Audit + Validation (PARALLEL)
