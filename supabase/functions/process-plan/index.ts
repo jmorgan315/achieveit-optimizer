@@ -657,6 +657,12 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       console.log(`[process-plan] Post-validation: enforced max depth ${maxDepth}`);
     }
 
+    // Apply rephrased corrections from Agent 2 (audit) — fix names back to original text
+    if (auditFindings?.rephrasedItems?.length) {
+      applyRephrasedCorrections(finalItems, auditFindings.rephrasedItems, corrections);
+      console.log(`[process-plan] Applied ${auditFindings.rephrasedItems.length} rephrased corrections from audit`);
+    }
+
     calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
 
     const allConfidences: number[] = [];
