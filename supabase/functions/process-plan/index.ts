@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { ensureSession } from "../_shared/logging.ts";
+import { ensureSession, logApiCall } from "../_shared/logging.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -573,6 +573,33 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     }
 
     // ==============================
+    // PERSIST EXTRACTION before Agents 2+3 (resumability checkpoint)
+    // ==============================
+    const extractionSnapshot = {
+      extraction: {
+        items: agent1Data.items,
+        detectedLevels: agent1Data.detectedLevels,
+        completed_at: new Date().toISOString(),
+      },
+      classification: classification || null,
+      pipelineContext: {
+        organizationName,
+        industry,
+        planLevels,
+        documentText: (documentText as string) || "",
+        extractionMethod,
+        useVision,
+      },
+      audit: null,
+      validation: null,
+    };
+    await updateSessionProgress(sessionId, {
+      current_step: "extraction_complete",
+      step_results: extractionSnapshot,
+    });
+    console.log(`[process-plan] Extraction checkpoint persisted (${agent1ItemCount} items), proceeding to Agents 2+3`);
+
+    // ==============================
     // STEPS 2 & 3: Audit + Validation (PARALLEL)
     // ==============================
     await updateSessionProgress(sessionId, { current_step: "validating" });
@@ -748,6 +775,203 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
   }
 }
 
+// ==============================
+// Resume function: runs only Agents 2+3 using persisted extraction data
+// ==============================
+async function runResume(sessionId: string): Promise<void> {
+  try {
+    const client = getServiceClient();
+    const { data: session, error: fetchError } = await client
+      .from("processing_sessions")
+      .select("step_results, current_step, org_name, org_industry")
+      .eq("id", sessionId)
+      .single();
+
+    if (fetchError || !session) {
+      console.error("[process-plan] Resume: session not found", fetchError);
+      return;
+    }
+
+    const currentStep = (session as Record<string, unknown>).current_step as string;
+    if (currentStep === "completed" || currentStep === "complete") {
+      console.log("[process-plan] Resume: already completed, nothing to do");
+      return;
+    }
+
+    if (currentStep !== "extraction_complete") {
+      console.error("[process-plan] Resume: unexpected current_step:", currentStep);
+      return;
+    }
+
+    const stepResults = (session as Record<string, unknown>).step_results as Record<string, unknown>;
+    const extraction = stepResults?.extraction as Record<string, unknown> | undefined;
+    if (!extraction || !Array.isArray(extraction.items) || extraction.items.length === 0) {
+      console.error("[process-plan] Resume: no extraction items in step_results");
+      return;
+    }
+
+    const agent1Items = extraction.items as unknown[];
+    const agent1DetectedLevels = (extraction.detectedLevels || []) as { depth: number; name: string }[];
+    const classification = (stepResults.classification || null) as Record<string, unknown> | null;
+    const pipeCtx = (stepResults.pipelineContext || {}) as Record<string, unknown>;
+    const organizationName = (pipeCtx.organizationName || (session as Record<string, unknown>).org_name) as string | undefined;
+    const industry = (pipeCtx.industry || (session as Record<string, unknown>).org_industry) as string | undefined;
+    const planLevels = pipeCtx.planLevels as unknown[] | undefined;
+    const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
+    const sourceText = (pipeCtx.documentText || "") as string;
+
+    const agent1NameSet = collectItemNameSet(agent1Items);
+    const agent1ItemCount = countAllItems(agent1Items);
+
+    console.log(`[process-plan] Resume: ${agent1ItemCount} items, running Agents 2+3`);
+
+    await logApiCall({
+      session_id: sessionId,
+      edge_function: "process-plan",
+      step_label: "Resume: starting Agents 2+3",
+      status: "success",
+    });
+
+    await updateSessionProgress(sessionId, { current_step: "validating" });
+
+    // Run Agents 2+3 in parallel
+    const hasSourceText = sourceText.length > 100;
+    const auditPayload: Record<string, unknown> = {
+      extractedItems: agent1Items,
+      sessionId,
+      organizationName,
+      industry,
+      planLevels,
+      classification,
+    };
+    if (hasSourceText) {
+      auditPayload.sourceText = sourceText;
+    }
+
+    const [auditSettled, validateSettled] = await Promise.allSettled([
+      // Audit (only if we have source text — images aren't persisted)
+      (async (): Promise<AuditFindings | null> => {
+        if (!hasSourceText) {
+          console.log("[process-plan] Resume: audit skipped (no source text available)");
+          return null;
+        }
+        try {
+          const result = await callEdgeFunction("audit-completeness", auditPayload);
+          if (result.ok && (result.data as { success: boolean }).success) {
+            const findings = (result.data as { data: AuditFindings }).data;
+            console.log("[process-plan] Resume: audit complete:", JSON.stringify(findings?.auditSummary || {}));
+            return findings;
+          }
+          console.warn("[process-plan] Resume: audit failed (non-fatal)");
+          return null;
+        } catch (err) {
+          console.error("[process-plan] Resume: audit error:", err);
+          return null;
+        }
+      })(),
+      // Validation
+      (async (): Promise<ValidationResult | null> => {
+        try {
+          const result = await callEdgeFunction("validate-hierarchy", {
+            sourceText,
+            extractedItems: agent1Items,
+            auditFindings: null,
+            detectedLevels: agent1DetectedLevels,
+            sessionId,
+            organizationName,
+            industry,
+            planLevels,
+          });
+          if (result.ok && (result.data as { success: boolean }).success) {
+            const vr = (result.data as { data: ValidationResult }).data;
+            console.log("[process-plan] Resume: validation complete:", vr.corrections?.length || 0, "corrections");
+            return vr;
+          }
+          console.warn("[process-plan] Resume: validation failed (non-fatal)");
+          return null;
+        } catch (err) {
+          console.error("[process-plan] Resume: validation error:", err);
+          return null;
+        }
+      })(),
+    ]);
+
+    const auditFindings = auditSettled.status === "fulfilled" ? auditSettled.value : null;
+    const validationResult = validateSettled.status === "fulfilled" ? validateSettled.value : null;
+
+    // Merge & confidence scoring (same logic as normal path)
+    let finalItems: unknown[];
+    let finalLevels: { depth: number; name: string }[];
+    let corrections: { itemId: string; type: string; description: string }[] = [];
+
+    if (validationResult?.correctedItems?.length && validationResult.correctedItems.length > 0) {
+      finalItems = validationResult.correctedItems;
+      finalLevels = validationResult.detectedLevels?.length ? validationResult.detectedLevels : agent1DetectedLevels;
+      corrections = validationResult.corrections || [];
+    } else {
+      finalItems = agent1Items;
+      finalLevels = agent1DetectedLevels;
+    }
+
+    if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+      enforceMaxDepth(finalItems, planLevels.length, planLevels as { depth: number; name: string }[]);
+    }
+
+    if (auditFindings?.rephrasedItems?.length) {
+      applyRephrasedCorrections(finalItems, auditFindings.rephrasedItems, corrections);
+    }
+
+    calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
+
+    const allConfidences: number[] = [];
+    function gatherConf(items: unknown[]) {
+      for (const item of items) {
+        const i = item as { confidence?: number; children?: unknown[] };
+        if (typeof i.confidence === "number") allConfidences.push(i.confidence);
+        if (i.children?.length) gatherConf(i.children);
+      }
+    }
+    gatherConf(finalItems);
+    const sessionConfidence = allConfidences.length > 0
+      ? Math.round(allConfidences.reduce((a, b) => a + b, 0) / allConfidences.length)
+      : 0;
+
+    const finalItemCount = countAllItems(finalItems);
+    console.log(`[process-plan] Resume complete: ${finalItemCount} items, confidence=${sessionConfidence}%`);
+
+    await updateSessionProgress(sessionId, {
+      status: "completed",
+      current_step: "complete",
+      step_results: {
+        success: true,
+        data: { items: finalItems, detectedLevels: finalLevels },
+        totalItems: finalItemCount,
+        corrections,
+        sessionConfidence,
+        auditSummary: auditFindings?.auditSummary || null,
+        extractionMethod,
+        pipelineComplete: true,
+        sessionId,
+      },
+      total_items_extracted: finalItemCount,
+    });
+
+    await logApiCall({
+      session_id: sessionId,
+      edge_function: "process-plan",
+      step_label: "Resume: completed successfully",
+      status: "success",
+    });
+  } catch (error) {
+    console.error("[process-plan] Resume error:", error);
+    await updateSessionProgress(sessionId, {
+      status: "error",
+      current_step: "error",
+      step_results: { error: "Resume pipeline failed. Please try again." },
+    });
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -755,6 +979,27 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
+
+    // Resume mode: pick up from extraction_complete and run Agents 2+3 only
+    if (body.resume_session_id) {
+      const resumeSessionId = body.resume_session_id as string;
+      console.log("[process-plan] Resume requested for session:", resumeSessionId);
+
+      runResume(resumeSessionId).catch((err) => {
+        console.error("[process-plan] Resume fatal error:", err);
+      });
+
+      return new Response(JSON.stringify({
+        success: true,
+        sessionId: resumeSessionId,
+        async: true,
+        resumed: true,
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Normal mode
     const { sessionId: incomingSessionId, documentText, pageImages } = body;
 
     if (!documentText && !pageImages) {
@@ -770,7 +1015,6 @@ serve(async (req) => {
     await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued" });
 
     // Fire off the pipeline in the background (non-awaited)
-    // Deno edge functions keep the isolate alive after responding
     runPipeline(sessionId, body).catch((err) => {
       console.error("[process-plan] Background pipeline fatal error:", err);
     });
