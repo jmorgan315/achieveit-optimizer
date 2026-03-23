@@ -84,7 +84,7 @@ function collectItemNameSet(items: unknown[]): Set<string> {
 interface AuditFindings {
   missingItems?: { sourceText: string }[];
   mergedItems?: { extractedItemName: string }[];
-  rephrasedItems?: { extractedItemId?: string; extractedName: string }[];
+  rephrasedItems?: { extractedItemId?: string; extractedName: string; originalText?: string }[];
   duplicateItems?: { item1Name: string; item1Level?: string; item2Name: string; item2Level?: string; recommendation: string }[];
   extraItems?: { extractedItemName: string; reason: string }[];
   auditSummary?: Record<string, number>;
@@ -218,6 +218,39 @@ function enforceMaxDepth(
       enforceMaxDepth(children, maxDepth, planLevels, currentDepth + 1);
     }
   }
+}
+
+/** Apply rephrased corrections from audit: fix item names back to original text and record corrections */
+function applyRephrasedCorrections(
+  items: unknown[],
+  rephrasedItems: { extractedName: string; originalText?: string }[],
+  corrections: { itemId: string; type: string; description: string }[]
+): void {
+  const rephraseMap = new Map<string, string>();
+  for (const r of rephrasedItems) {
+    if (r.extractedName && r.originalText) {
+      rephraseMap.set(r.extractedName.toLowerCase().trim(), r.originalText);
+    }
+  }
+  if (rephraseMap.size === 0) return;
+
+  function walk(list: unknown[]) {
+    for (const item of list) {
+      const i = item as { id?: string; name?: string; children?: unknown[] };
+      const key = (i.name || "").toLowerCase().trim();
+      if (rephraseMap.has(key)) {
+        const original = rephraseMap.get(key)!;
+        corrections.push({
+          itemId: i.id || "unknown",
+          type: "renamed",
+          description: `Completeness Audit: Rephrased during extraction. Original: "${original}"`,
+        });
+        i.name = original;
+      }
+      if (i.children?.length) walk(i.children);
+    }
+  }
+  walk(items);
 }
 
 function batchImages(images: string[], batchSize: number): string[][] {
@@ -655,6 +688,12 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       const maxDepth = (planLevels as unknown[]).length;
       enforceMaxDepth(finalItems, maxDepth, planLevels as { depth: number; name: string }[]);
       console.log(`[process-plan] Post-validation: enforced max depth ${maxDepth}`);
+    }
+
+    // Apply rephrased corrections from Agent 2 (audit) — fix names back to original text
+    if (auditFindings?.rephrasedItems?.length) {
+      applyRephrasedCorrections(finalItems, auditFindings.rephrasedItems, corrections);
+      console.log(`[process-plan] Applied ${auditFindings.rephrasedItems.length} rephrased corrections from audit`);
     }
 
     calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
