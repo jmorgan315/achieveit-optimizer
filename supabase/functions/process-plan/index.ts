@@ -685,6 +685,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     }
 
     // ==============================
+    // DEDUPLICATION (after merge/safety-net, before checkpoint)
+    // ==============================
+    agent1Data.items = deduplicateItems(agent1Data.items);
+    agent1ItemCount = countAllItems(agent1Data.items);
+    agent1NameSet = collectItemNameSet(agent1Data.items);
+
+    // ==============================
     // PERSIST EXTRACTION before Agents 2+3 (resumability checkpoint)
     // ==============================
     const extractionSnapshot = {
