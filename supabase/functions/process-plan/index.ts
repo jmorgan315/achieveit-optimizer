@@ -573,6 +573,33 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     }
 
     // ==============================
+    // PERSIST EXTRACTION before Agents 2+3 (resumability checkpoint)
+    // ==============================
+    const extractionSnapshot = {
+      extraction: {
+        items: agent1Data.items,
+        detectedLevels: agent1Data.detectedLevels,
+        completed_at: new Date().toISOString(),
+      },
+      classification: classification || null,
+      pipelineContext: {
+        organizationName,
+        industry,
+        planLevels,
+        documentText: (documentText as string) || "",
+        extractionMethod,
+        useVision,
+      },
+      audit: null,
+      validation: null,
+    };
+    await updateSessionProgress(sessionId, {
+      current_step: "extraction_complete",
+      step_results: extractionSnapshot,
+    });
+    console.log(`[process-plan] Extraction checkpoint persisted (${agent1ItemCount} items), proceeding to Agents 2+3`);
+
+    // ==============================
     // STEPS 2 & 3: Audit + Validation (PARALLEL)
     // ==============================
     await updateSessionProgress(sessionId, { current_step: "validating" });
