@@ -194,7 +194,12 @@ export function FileUploadStep({
 
     let lastReportedStep = '';
     let extractionCompleteAt: number | null = null;
-    let hasAttemptedResume = false;
+    let hasAttemptedAuditResume = false;
+
+    // Extraction-phase stall detection
+    let lastBatchCount: number | null = null;
+    let batchStallStart: number | null = null;
+    let hasAttemptedExtractionResume = false;
 
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
@@ -214,6 +219,8 @@ export function FileUploadStep({
 
       // Update UI based on current_step — only add a message when the step changes
       const step = (session as any).current_step as string;
+      const stepResults = (session as any).step_results as any;
+
       if (step && step !== lastReportedStep) {
         lastReportedStep = step;
         if (step === 'classifying') {
@@ -231,14 +238,55 @@ export function FileUploadStep({
         }
       }
 
-      // Stall detection: if stuck at extraction_complete for >20s, fire resume
+      // Show batch progress during extraction
+      if (step === 'extracting' && stepResults?.extraction) {
+        const batchesCompleted = stepResults.extraction.batches_completed || 0;
+        const batchesTotal = stepResults.extraction.batches_total || 0;
+        if (batchesTotal > 1 && batchesCompleted > 0) {
+          const pct = Math.round((batchesCompleted / batchesTotal) * 100);
+          setStepProgress('extract', Math.min(pct, 95));
+        }
+      }
+
+      // Extraction-phase stall detection: if batches_completed unchanged for >30s
+      if (step === 'extracting') {
+        const currentBatchCount = stepResults?.extraction?.batches_completed ?? null;
+        if (currentBatchCount !== null) {
+          if (lastBatchCount !== null && currentBatchCount === lastBatchCount) {
+            if (!batchStallStart) {
+              batchStallStart = Date.now();
+            }
+            const stallDuration = Date.now() - batchStallStart;
+            if (stallDuration > 30000 && !hasAttemptedExtractionResume) {
+              hasAttemptedExtractionResume = true;
+              console.log(`[Polling] Extraction stall detected (batch ${currentBatchCount} unchanged for ${Math.round(stallDuration / 1000)}s), firing resume...`);
+              addMessage('Resuming extraction...');
+              try {
+                await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ resume_session_id: pollSessionId }),
+                });
+              } catch (resumeErr) {
+                console.error('[Polling] Extraction resume call failed:', resumeErr);
+              }
+            }
+          } else {
+            // Batch count changed — reset stall timer
+            lastBatchCount = currentBatchCount;
+            batchStallStart = null;
+          }
+        }
+      }
+
+      // Post-extraction stall detection: if stuck at extraction_complete for >20s, fire resume
       if (step === 'extraction_complete') {
         if (!extractionCompleteAt) {
           extractionCompleteAt = Date.now();
         }
         const stallDuration = Date.now() - extractionCompleteAt;
-        if (stallDuration > 20000 && !hasAttemptedResume) {
-          hasAttemptedResume = true;
+        if (stallDuration > 20000 && !hasAttemptedAuditResume) {
+          hasAttemptedAuditResume = true;
           console.log(`[Polling] Stall detected at extraction_complete (${Math.round(stallDuration / 1000)}s), firing resume...`);
           addMessage('Resuming validation...');
           try {
@@ -277,12 +325,18 @@ export function FileUploadStep({
 
     const partialResults = (finalSession as any)?.step_results as any;
     if (partialResults?.extraction?.items?.length > 0) {
-      console.log(`[Polling] Found partial extraction results (${partialResults.extraction.items.length} items), using as fallback`);
+      const batchesCompleted = partialResults.extraction.batches_completed || 0;
+      const batchesTotal = partialResults.extraction.batches_total || 0;
+      const isPartialExtraction = batchesTotal > 0 && batchesCompleted < batchesTotal;
+      
+      console.log(`[Polling] Found partial extraction results (${partialResults.extraction.items.length} items, ${batchesCompleted}/${batchesTotal} batches), using as fallback`);
       const items = partialResults.extraction.items;
       const levels = partialResults.extraction.detectedLevels || [];
       toast({
         title: "Partial Results",
-        description: "Extraction complete but validation timed out — results may need manual review.",
+        description: isPartialExtraction
+          ? `Extraction partially complete (${batchesCompleted} of ${batchesTotal} batches) — some items may be missing.`
+          : "Extraction complete but validation timed out — results may need manual review.",
       });
       return {
         success: true,
