@@ -562,6 +562,14 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       let previousContext = "";
 
       console.log(`[process-plan] Step 1 vision: ${images.length} images in ${batches.length} batches`);
+      // Log each batch's page count for verification
+      for (let bi = 0; bi < batches.length; bi++) {
+        console.log(`[process-plan] Batch ${bi + 1}: ${batches[bi].length} pages`);
+      }
+      const totalBatchedPages = batches.reduce((sum, b) => sum + b.length, 0);
+      if (totalBatchedPages !== images.length) {
+        console.error(`[process-plan] BATCH VERIFICATION FAILED: ${totalBatchedPages} batched pages != ${images.length} filtered pages`);
+      }
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
         const batch = batches[batchIdx];
