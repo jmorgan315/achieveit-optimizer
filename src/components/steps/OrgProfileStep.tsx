@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Building2, CheckCircle2, XCircle, Globe, Layers, FileText, Minus, Plus } from 'lucide-react';
+import { Loader2, Building2, CheckCircle2, XCircle, Globe, Layers, FileText, Plus, Trash2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { OrgProfile } from '@/types/plan';
 import { supabase } from '@/integrations/supabase/client';
@@ -73,14 +73,18 @@ export function OrgProfileStep({
 }: OrgProfileStepProps) {
   const [isLooking, setIsLooking] = useState(false);
 
-  const handleLevelCountChange = (delta: number) => {
-    const newCount = Math.max(1, Math.min(7, levelCount + delta));
+  const handleAddLevel = () => {
+    if (levelCount >= 7) return;
+    const newCount = levelCount + 1;
     setLevelCount(newCount);
-    const updated = [...levelNames];
-    while (updated.length < newCount) {
-      updated.push(DEFAULT_LEVEL_NAMES[updated.length] || `Level ${updated.length + 1}`);
-    }
-    setLevelNames(updated.slice(0, newCount));
+    setLevelNames([...levelNames, '']);
+  };
+
+  const handleRemoveLevel = (index: number) => {
+    if (levelCount <= 1) return;
+    const updated = levelNames.filter((_, i) => i !== index);
+    setLevelCount(updated.length);
+    setLevelNames(updated);
   };
 
   const updateLevelName = (index: number, name: string) => {
@@ -241,36 +245,11 @@ export function OrgProfileStep({
 
               {knowsLevels && (
                 <div className="space-y-3 pl-6 border-l-2 border-primary/20">
-                  <div className="flex items-center gap-3">
-                    <Label className="text-sm whitespace-nowrap">Number of levels</Label>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => handleLevelCountChange(-1)}
-                        disabled={levelCount <= 1}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="w-8 text-center text-sm font-medium">{levelCount}</span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => handleLevelCountChange(1)}
-                        disabled={levelCount >= 7}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-
                   <div className="space-y-2">
                     {levelNames.map((name, idx) => (
                       <div key={idx} className="flex items-center gap-2">
                         <span className="text-xs text-muted-foreground w-24 flex-shrink-0">
-                          Level {idx + 1}{idx === 0 ? ' (highest)' : idx === levelCount - 1 ? ' (lowest)' : ''}:
+                          Level {idx + 1}{idx === 0 ? ' (highest)' : idx === levelNames.length - 1 ? ' (lowest)' : ''}:
                         </span>
                         <Input
                           value={name}
@@ -278,9 +257,30 @@ export function OrgProfileStep({
                           placeholder={DEFAULT_LEVEL_NAMES[idx] || `Level ${idx + 1}`}
                           className="h-8 text-sm"
                         />
+                        {levelNames.length > 1 && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => handleRemoveLevel(idx)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
                       </div>
                     ))}
                   </div>
+                  {levelCount < 7 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5 text-xs"
+                      onClick={handleAddLevel}
+                    >
+                      <Plus className="h-3 w-3" />
+                      Add Level
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>
