@@ -715,7 +715,8 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // DEDUPLICATION (after merge/safety-net, before checkpoint)
     // ==============================
-    agent1Data.items = deduplicateItems(agent1Data.items);
+    const pageAnnotationsForDedup = classification?.page_annotations as unknown[] | undefined;
+    agent1Data.items = deduplicateItems(agent1Data.items, pageAnnotationsForDedup);
     agent1ItemCount = countAllItems(agent1Data.items);
     agent1NameSet = collectItemNameSet(agent1Data.items);
 
