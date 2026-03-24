@@ -1,36 +1,24 @@
 
-
-
-# Per-Batch Persistence for Pipeline Resilience — IMPLEMENTED
+# Upgrade Agents 0+1 to Opus, Add Page Buffer — IMPLEMENTED
 
 ## What was done
 
-### 1. Created `page-images` storage bucket
-Migration creates the bucket with public read + insert + delete policies for resume capability.
+### 1. Model upgrade to Claude Opus 4.6
+- `classify-document/index.ts`: 4 references → `claude-opus-4-6`
+- `extract-plan-vision/index.ts`: 6 references → `claude-opus-4-6`
+- `extract-plan-items/index.ts`: 4 references → `claude-opus-4-6`
+- `audit-completeness` and `validate-hierarchy` remain on `claude-sonnet-4-20250514`
 
-### 2. Per-batch persistence (`process-plan/index.ts`)
-- **Image persistence**: After classification/page filtering, all filtered page images are uploaded to `page-images/{sessionId}/{idx}.jpg` before extraction begins
-- **Incremental state saves**: After each extraction batch, the session row is updated with cumulative `items`, `batches_completed`, `batches_total`, `batch_pages`, and `total_filtered_images`
-- **`current_step: "extracting"`** during batches, `"extraction_complete"` after dedup
-
-### 3. Expanded resume logic
-- **Path A (`extracting`, incomplete batches)**: Downloads images from storage, re-batches, continues from `batches_completed`, runs dedup → Agents 2+3
-- **Path B (`extracting`, all batches done)**: Runs dedup → Agents 2+3 directly
-- **Path C (`extraction_complete`)**: Existing behavior — runs Agents 2+3
-- Extracted shared Agents 2+3 logic into `runPostExtractionResume()` helper
-
-### 4. Frontend stall detection (`FileUploadStep.tsx`)
-- Tracks `batches_completed` changes during `extracting` phase
-- Fires resume after 30s stall (separate from existing 20s `extraction_complete` stall)
-- Shows batch progress percentage during extraction
-- Improved partial results fallback with batch-specific warning message
-
-### 5. Cleanup
-- Fire-and-forget deletion of stored page images after pipeline completes (both normal and resume paths)
+### 2. Page buffer for classification safety
+Added buffer logic in `process-plan/index.ts` after Agent 0 filtering:
+- **Buffer 1**: Includes the page immediately before the first plan page (unless classified as cover/toc/vision_mission/blank/appendix)
+- **Buffer 2**: Fills gaps between consecutive plan pages with intermediate pages (same skip rules)
+- Logs buffered pages for observability
 
 ## Files changed
 | File | Change |
 |------|--------|
-| Migration (SQL) | Created `page-images` storage bucket |
-| `supabase/functions/process-plan/index.ts` | Image persistence, per-batch saves, expanded resume, cleanup |
-| `src/components/steps/FileUploadStep.tsx` | Extraction-phase stall detection, batch progress display |
+| `supabase/functions/classify-document/index.ts` | Model → `claude-opus-4-6` |
+| `supabase/functions/extract-plan-vision/index.ts` | Model → `claude-opus-4-6` |
+| `supabase/functions/extract-plan-items/index.ts` | Model → `claude-opus-4-6` |
+| `supabase/functions/process-plan/index.ts` | Page buffer logic after Agent 0 filtering |
