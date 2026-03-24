@@ -595,7 +595,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
           planLevels,
           pageRange,
           sessionId,
-          batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
+          batchLabel: `Step 1: Plan Extraction (Batch ${batchIdx + 1} of ${batches.length})`,
           extractionMode,
           tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
           hierarchyPattern: (extractionMode === "table" || extractionMode === "presentation") ? classification?.hierarchy_pattern : undefined,
