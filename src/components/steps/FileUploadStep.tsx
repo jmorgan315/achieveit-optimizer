@@ -352,7 +352,8 @@ export function FileUploadStep({
 
   const extractWithVisionPipeline = async (
     file: File,
-    _levelHints?: PlanLevel[]
+    _levelHints?: PlanLevel[],
+    documentText?: string,
   ): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[]; sessionConfidence?: number } | null> => {
     setIsExtracting(true);
     setUseVisionAI(true);
