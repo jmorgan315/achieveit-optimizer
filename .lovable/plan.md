@@ -1,58 +1,41 @@
 
 
-# Fix Page Batching, Context Passing, and Dedup
-
-## Problem
-Three bugs in `process-plan/index.ts` cause incorrect extraction results on large documents:
-1. Using `page_range` string instead of `page_annotations` per-page analysis drops pages
-2. Batch context passes wrong items (first 5 items instead of Level 1 only)  
-3. Dedup word overlap threshold too high to catch summary/detail OCR variations
+# Fix Dedup Preference, Add Dedup Admin Log, Clean Up Timeline Labels
 
 ## Changes
 
-### Fix 1: Switch page filtering from `page_range` to `page_annotations`
+### 1. Fix dedup preference logic + word overlap
+**File: `supabase/functions/process-plan/index.ts`**
 
-**File: `supabase/functions/process-plan/index.ts`** (lines 515-529)
+**Simplify winner selection** (lines 329-342): Remove the `summaryPages` detection entirely. Replace with a simple rule: always prefer higher `source_page`, tie-break by longer name. Remove the `pageAnnotations` parameter from `deduplicateItems` since it's no longer needed for dedup preference.
 
-Replace the `page_range` string parsing with `page_annotations` filtering:
-- Read `classification.page_annotations` as an array of `{ page, contains_plan_items, notes }` objects
-- Filter to pages where `contains_plan_items === true`
-- Map those page numbers to the corresponding images (1-indexed → 0-indexed)
-- Fall back to all pages if `page_annotations` is missing or empty
-- Add logging: filtered page list before batching, and each batch's page contents
-- Add verification: after batching, count total pages across all batches and compare to filtered list
+**Fix word overlap false positives** (line 264): Change `wordSet` to filter out words with length ≤ 3 (currently filters ≤ 2). This excludes common short words like "and", "to", "for", "all" that inflate overlap scores between genuinely different items.
 
-Remove the `parsePageRange` usage for extraction filtering (keep the function since it may be used elsewhere).
+### 2. Add dedup summary to admin log
+**File: `supabase/functions/process-plan/index.ts`** (after dedup call at ~line 727)
 
-### Fix 2: Fix batch context to pass actual Level 1 items
+After `deduplicateItems` returns, call `logApiCall` with:
+- `edge_function: "dedup-merge"`
+- `step_label: "Step 1.5: Dedup & Merge"`
+- `status: "success"`
+- `request_payload`: `{ input_count, output_count, duplicates_removed }`
+- `response_payload`: `{ removed_items: [{ removed_name, removed_page, kept_name, kept_page, match_reason }], final_items: [...names] }`
+- `input_tokens: 0`, `output_tokens: 0`
+- `duration_ms`: measured around the dedup call
 
-**File: `supabase/functions/extract-plan-vision/index.ts`** (lines 884-888, 965-969, 1049-1052)
+To support this, modify `deduplicateItems` to return a structured result object (items + removal details) instead of just the filtered array.
 
-Three places build `contextSummary` with `extractedData.items.slice(0, 5)` — this takes the first 5 items regardless of level. Fix all three to filter by level:
-- Filter `extractedData.items` to only those with `level === 1` or `level === "1"` or depth/hierarchy indicating top-level
-- After flattening, items have a `level` field. Filter where `level === 1`
-- If no level-1 items found, fall back to items that have no `parent_name` (top-level items)
-- Log the context being passed
+### 3. Fix timeline labels
+**File: `supabase/functions/process-plan/index.ts`** (line 590)
+- Change `Step 2: Document Scan` → `Step 1: Plan Extraction`
 
-### Fix 3: Improve dedup for summary/detail OCR variations
-
-**File: `supabase/functions/process-plan/index.ts`** (in `isDuplicate` and `deduplicateItems`)
-
-- Lower word overlap threshold from 85% to 70%
-- Add `parent_name` awareness: if two items share the same `parent_name` (or both null) AND have 70%+ word overlap, they're duplicates
-- Add per-item logging when duplicates are found: `"Dedup: removed '[discarded]' (page X), kept '[kept]' (page Y)"`
-- When choosing between summary and detail page versions: use `page_annotations` from classification if available — prefer items from pages NOT annotated as "overview"/"summary"/"at-a-glance". Otherwise fall back to higher `source_page` heuristic.
+**File: `supabase/functions/extract-plan-vision/index.ts`** (line 1024)
+- Change fallback label from `Step 1: Document Scan` → `Step 1: Plan Extraction`
 
 ### Files Summary
 
 | File | Change |
 |------|--------|
-| `supabase/functions/process-plan/index.ts` | Switch to `page_annotations` filtering; improve dedup with lower threshold + parent awareness + per-item logging |
-| `supabase/functions/extract-plan-vision/index.ts` | Fix context builder to filter Level 1 items only (3 locations) |
-
-### What NOT to change
-- No agent prompt changes
-- No frontend changes
-- No polling/resume logic changes
-- No batch size changes (keep 5 per batch)
+| `supabase/functions/process-plan/index.ts` | Simplify dedup preference to higher page wins; fix word filter to >3 chars; return dedup details for logging; add `logApiCall` for dedup; fix batch label to "Step 1: Plan Extraction" |
+| `supabase/functions/extract-plan-vision/index.ts` | Fix fallback label to "Step 1: Plan Extraction" |
 
