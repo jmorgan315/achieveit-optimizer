@@ -352,7 +352,8 @@ export function FileUploadStep({
 
   const extractWithVisionPipeline = async (
     file: File,
-    _levelHints?: PlanLevel[]
+    _levelHints?: PlanLevel[],
+    documentText?: string,
   ): Promise<{ items: PlanItem[]; levels: PlanLevel[]; personMappings: PersonMapping[]; sessionConfidence?: number } | null> => {
     setIsExtracting(true);
     setUseVisionAI(true);
@@ -381,6 +382,7 @@ export function FileUploadStep({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pageImages: images.map(img => img.dataUrl),
+          documentText: documentText || "",
           organizationName: orgProfile?.organizationName,
           industry: orgProfile?.industry,
           documentHints: orgProfile?.documentHints,
@@ -638,7 +640,7 @@ export function FileUploadStep({
             if (!aiResult || aiResult.items.length === 0) {
               console.log('Text extraction found 0 items, falling back to vision');
               addMessage('Trying visual analysis...');
-              const visionResult = await extractWithVisionPipeline(file);
+              const visionResult = await extractWithVisionPipeline(file, undefined, textResult?.text);
               if (visionResult) {
                 setExtractedItems(visionResult.items);
                 setExtractedMappings(visionResult.personMappings);
@@ -659,7 +661,7 @@ export function FileUploadStep({
 
         // Vision path (text quality poor or text extraction failed)
         setIsProcessing(false);
-        const visionResult = await extractWithVisionPipeline(file);
+        const visionResult = await extractWithVisionPipeline(file, undefined, textResult?.text);
         if (visionResult) {
           setExtractedItems(visionResult.items);
           setExtractedMappings(visionResult.personMappings);
