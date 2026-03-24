@@ -274,19 +274,34 @@ function wordOverlap(a: Set<string>, b: Set<string>): number {
   return total > 0 ? shared / total : 0;
 }
 
-function isDuplicate(nameA: string, nameB: string): boolean {
+function isDuplicate(nameA: string, nameB: string, parentA?: string | null, parentB?: string | null): boolean {
   const normA = normalizeItemName(nameA);
   const normB = normalizeItemName(nameB);
   if (normA === normB) return true;
   // Prefix match (first 40 chars)
   const prefix = 40;
   if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return true;
-  // Word overlap >= 85%
-  if (wordOverlap(wordSet(nameA), wordSet(nameB)) >= 0.85) return true;
+  const overlap = wordOverlap(wordSet(nameA), wordSet(nameB));
+  // 70% overlap with same parent (or both null)
+  const sameParent = (parentA || null) === (parentB || null);
+  if (sameParent && overlap >= 0.70) return true;
+  // 85% overlap regardless of parent
+  if (overlap >= 0.85) return true;
   return false;
 }
 
-function deduplicateItems(items: unknown[]): unknown[] {
+function deduplicateItems(items: unknown[], pageAnnotations?: unknown[]): unknown[] {
+  // Build summary page set from page_annotations
+  const summaryPages = new Set<number>();
+  if (Array.isArray(pageAnnotations)) {
+    for (const ann of pageAnnotations) {
+      const a = ann as { page?: number; notes?: string };
+      if (a.notes && /overview|summary|at-a-glance|at a glance/i.test(a.notes)) {
+        if (a.page) summaryPages.add(a.page);
+      }
+    }
+  }
+
   // Group by level
   const byLevel = new Map<string, unknown[]>();
   for (const item of items) {
@@ -305,28 +320,35 @@ function deduplicateItems(items: unknown[]): unknown[] {
         const itemA = group[a] as { name?: string; source_page?: number; parent_name?: string };
         const itemB = group[b] as { name?: string; source_page?: number; parent_name?: string };
         if (!itemA.name || !itemB.name) continue;
-        if (!isDuplicate(itemA.name, itemB.name)) continue;
+        if (!isDuplicate(itemA.name, itemB.name, itemA.parent_name, itemB.parent_name)) continue;
 
         const idxA = itemsArr.indexOf(group[a]);
         const idxB = itemsArr.indexOf(group[b]);
         if (removed.has(idxA) || removed.has(idxB)) continue;
 
-        // Keep higher source_page (detail > summary), tie-break by longer name
+        // Prefer non-summary page items
         let keepIdx = idxA, discardIdx = idxB;
         const pageA = itemA.source_page || 0;
         const pageB = itemB.source_page || 0;
-        if (pageB > pageA || (pageB === pageA && (itemB.name?.length || 0) > (itemA.name?.length || 0))) {
-          keepIdx = idxB;
-          discardIdx = idxA;
+        const aIsSummary = summaryPages.has(pageA);
+        const bIsSummary = summaryPages.has(pageB);
+
+        if (aIsSummary && !bIsSummary) {
+          keepIdx = idxB; discardIdx = idxA;
+        } else if (bIsSummary && !aIsSummary) {
+          keepIdx = idxA; discardIdx = idxB;
+        } else if (pageB > pageA || (pageB === pageA && (itemB.name?.length || 0) > (itemA.name?.length || 0))) {
+          keepIdx = idxB; discardIdx = idxA;
         }
 
         // Preserve parent_name from discarded if keeper lacks one
-        const keeper = itemsArr[keepIdx] as { parent_name?: string };
-        const discarded = itemsArr[discardIdx] as { parent_name?: string };
+        const keeper = itemsArr[keepIdx] as { parent_name?: string; name?: string; source_page?: number };
+        const discarded = itemsArr[discardIdx] as { parent_name?: string; name?: string; source_page?: number };
         if (!keeper.parent_name && discarded.parent_name) {
           keeper.parent_name = discarded.parent_name;
         }
 
+        console.log(`[process-plan] Dedup: removed '${discarded.name}' (page ${discarded.source_page || '?'}), kept '${keeper.name}' (page ${keeper.source_page || '?'})`);
         removed.add(discardIdx);
       }
     }
@@ -335,7 +357,7 @@ function deduplicateItems(items: unknown[]): unknown[] {
   const before = items.length;
   const result = itemsArr.filter((_, idx) => !removed.has(idx));
   if (removed.size > 0) {
-    console.log(`[process-plan] Dedup: removed ${removed.size} duplicate items, ${before} → ${result.length}`);
+    console.log(`[process-plan] Dedup complete: ${removed.size} duplicates removed, ${result.length} items remaining`);
   }
   return result;
 }
@@ -512,20 +534,26 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       extractionMethod = "vision";
       let images = pageImages as string[];
 
-      // Use Agent 0's page_range recommendations to filter pages (all modes)
-      const recPageRange = (classification?.extraction_recommendations as Record<string, unknown>)?.page_range as string | undefined;
-      if (recPageRange) {
-        const recommendedPages = parsePageRange(recPageRange, images.length);
-        if (recommendedPages.size > 0) {
-          const allPages = [...recommendedPages].sort((a, b) => a - b);
-          const filtered = allPages.map(p => images[p - 1]);
-          console.log(`[process-plan] Agent 0 recommended pages [${allPages.join(", ")}]. Sending ${filtered.length} of ${images.length} pages to extraction.`);
+      // Use Agent 0's page_annotations to filter pages (all modes)
+      const pageAnnotationsArr = classification?.page_annotations as Array<{ page?: number; contains_plan_items?: boolean; notes?: string }> | undefined;
+      if (Array.isArray(pageAnnotationsArr) && pageAnnotationsArr.length > 0) {
+        const planPages = pageAnnotationsArr
+          .filter(a => a.contains_plan_items === true && typeof a.page === 'number')
+          .map(a => a.page!)
+          .filter(p => p >= 1 && p <= images.length)
+          .sort((a, b) => a - b);
+
+        if (planPages.length > 0) {
+          const filtered = planPages.map(p => images[p - 1]);
+          console.log(`[process-plan] Agent 0 recommended pages [${planPages.join(", ")}]. Sending ${filtered.length} of ${images.length} pages to extraction.`);
+          // Verify no pages lost
+          console.log(`[process-plan] Filtered pages for extraction: [${planPages.join(", ")}] (${planPages.length} pages)`);
           images = filtered;
         } else {
-          console.log(`[process-plan] Agent 0 page_range parsed to empty set, sending all ${images.length} pages`);
+          console.log(`[process-plan] Agent 0 page_annotations had no contains_plan_items pages, sending all ${images.length} pages`);
         }
       } else {
-        console.log(`[process-plan] No Agent 0 page_range, sending all ${images.length} pages`);
+        console.log(`[process-plan] No Agent 0 page_annotations, sending all ${images.length} pages`);
       }
 
       const batches = batchImages(images, 5);
@@ -534,6 +562,14 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       let previousContext = "";
 
       console.log(`[process-plan] Step 1 vision: ${images.length} images in ${batches.length} batches`);
+      // Log each batch's page count for verification
+      for (let bi = 0; bi < batches.length; bi++) {
+        console.log(`[process-plan] Batch ${bi + 1}: ${batches[bi].length} pages`);
+      }
+      const totalBatchedPages = batches.reduce((sum, b) => sum + b.length, 0);
+      if (totalBatchedPages !== images.length) {
+        console.error(`[process-plan] BATCH VERIFICATION FAILED: ${totalBatchedPages} batched pages != ${images.length} filtered pages`);
+      }
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
         const batch = batches[batchIdx];
@@ -687,7 +723,8 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // DEDUPLICATION (after merge/safety-net, before checkpoint)
     // ==============================
-    agent1Data.items = deduplicateItems(agent1Data.items);
+    const pageAnnotationsForDedup = classification?.page_annotations as unknown[] | undefined;
+    agent1Data.items = deduplicateItems(agent1Data.items, pageAnnotationsForDedup);
     agent1ItemCount = countAllItems(agent1Data.items);
     agent1NameSet = collectItemNameSet(agent1Data.items);
 
