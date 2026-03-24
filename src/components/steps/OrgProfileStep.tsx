@@ -73,14 +73,18 @@ export function OrgProfileStep({
 }: OrgProfileStepProps) {
   const [isLooking, setIsLooking] = useState(false);
 
-  const handleLevelCountChange = (delta: number) => {
-    const newCount = Math.max(1, Math.min(7, levelCount + delta));
+  const handleAddLevel = () => {
+    if (levelCount >= 7) return;
+    const newCount = levelCount + 1;
     setLevelCount(newCount);
-    const updated = [...levelNames];
-    while (updated.length < newCount) {
-      updated.push(DEFAULT_LEVEL_NAMES[updated.length] || `Level ${updated.length + 1}`);
-    }
-    setLevelNames(updated.slice(0, newCount));
+    setLevelNames([...levelNames, '']);
+  };
+
+  const handleRemoveLevel = (index: number) => {
+    if (levelCount <= 1) return;
+    const updated = levelNames.filter((_, i) => i !== index);
+    setLevelCount(updated.length);
+    setLevelNames(updated);
   };
 
   const updateLevelName = (index: number, name: string) => {
