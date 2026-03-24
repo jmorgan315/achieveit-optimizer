@@ -447,7 +447,7 @@ Document section:\n\n${chunkText}`;
   }
 
   const requestBody = {
-    model: "claude-sonnet-4-20250514",
+    model: "claude-opus-4-6",
     max_tokens: 16384,
     system: EXTRACTION_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
@@ -473,7 +473,7 @@ Document section:\n\n${chunkText}`;
       session_id: sessionId,
       edge_function: "extract-plan-items",
       step_label: `Chunk ${chunkIndex + 1}/${totalChunks} Extraction`,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-6",
       request_payload: requestBody as unknown as Record<string, unknown>,
       response_payload: aiResponse as Record<string, unknown>,
       input_tokens: tokens.input_tokens,
@@ -544,7 +544,7 @@ ${chunkText}
 Look carefully at every bullet point, numbered item, and sub-item. If any are not in the extracted list above, return them as missing items with the correct parent name.`;
 
   const requestBody = {
-    model: "claude-sonnet-4-20250514",
+    model: "claude-opus-4-6",
     max_tokens: 8192,
     system: VERIFICATION_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userMessage }],
@@ -570,7 +570,7 @@ Look carefully at every bullet point, numbered item, and sub-item. If any are no
       session_id: sessionId,
       edge_function: "extract-plan-items",
       step_label: `Chunk ${chunkIndex + 1}/${totalChunks} Verification`,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-6",
       request_payload: requestBody as unknown as Record<string, unknown>,
       response_payload: aiResponse as Record<string, unknown>,
       input_tokens: tokens.input_tokens,

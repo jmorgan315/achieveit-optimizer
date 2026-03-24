@@ -283,7 +283,7 @@ serve(async (req) => {
     }
 
     const requestBody = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-6",
       max_tokens: 4096,
       system: CLASSIFICATION_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userContent }],
@@ -304,7 +304,7 @@ serve(async (req) => {
         session_id: sessionId,
         edge_function: "classify-document",
         step_label: "Step 0: Document Classification",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-6",
         request_payload: logPayload,
         response_payload: { status: response.status, error: errorText.slice(0, 2000) },
         duration_ms: durationMs,
@@ -348,7 +348,7 @@ serve(async (req) => {
         session_id: sessionId,
         edge_function: "classify-document",
         step_label: "Step 0: Document Classification",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-6",
         request_payload: logPayload,
         response_payload: { raw_response: responseText.slice(0, 5000), parse_error: String(parseError) },
         input_tokens: tokenUsage.input_tokens,
@@ -366,7 +366,7 @@ serve(async (req) => {
       session_id: sessionId,
       edge_function: "classify-document",
       step_label: "Step 0: Document Classification",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-6",
       request_payload: logPayload,
       response_payload: classification,
       input_tokens: tokenUsage.input_tokens,

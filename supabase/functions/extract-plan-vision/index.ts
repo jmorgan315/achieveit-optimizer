@@ -818,7 +818,7 @@ Extract all strategic plan items with their proper hierarchy.`
       const tableSystemPrompt = buildTableExtractionPrompt(tableStructure, hierarchyPattern);
 
       const tablePayload: Record<string, unknown> = {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-6",
         max_tokens: 16384,
         system: tableSystemPrompt,
         messages: [
@@ -844,7 +844,7 @@ Extract all strategic plan items with their proper hierarchy.`
           session_id: sessionId,
           edge_function: "extract-plan-vision",
           step_label: batchLabel || `Step 1: Table Extraction (${pageImages.length} pages)`,
-          model: "claude-sonnet-4-20250514",
+          model: "claude-opus-4-6",
           request_payload: truncateImagePayload(tablePayload),
           response_payload: aiResponse,
           input_tokens: tokens.input_tokens,
@@ -906,7 +906,7 @@ Extract all strategic plan items with their proper hierarchy.`
       const presentationSystemPrompt = buildPresentationExtractionPrompt(pageAnnotations, hierarchyPattern, nonPlanContent as Record<string, unknown> | null);
 
       const presentationPayload: Record<string, unknown> = {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-6",
         max_tokens: 16384,
         system: presentationSystemPrompt,
         messages: [
@@ -932,7 +932,7 @@ Extract all strategic plan items with their proper hierarchy.`
           session_id: sessionId,
           edge_function: "extract-plan-vision",
           step_label: batchLabel || `Step 1: Presentation Extraction (${pageImages.length} pages)`,
-          model: "claude-sonnet-4-20250514",
+          model: "claude-opus-4-6",
           request_payload: truncateImagePayload(presentationPayload),
           response_payload: aiResponse,
           input_tokens: tokens.input_tokens,
@@ -985,7 +985,7 @@ Extract all strategic plan items with their proper hierarchy.`
     // STANDARD EXTRACTION MODE
     // ========================
     const anthropicPayload: Record<string, unknown> = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-opus-4-6",
       max_tokens: 16384,
       system: VISION_EXTRACTION_PROMPT,
       messages: [
@@ -1022,7 +1022,7 @@ Extract all strategic plan items with their proper hierarchy.`
         session_id: sessionId,
         edge_function: "extract-plan-vision",
         step_label: batchLabel || `Step 1: Plan Extraction (${pageImages.length} pages)`,
-        model: "claude-sonnet-4-20250514",
+        model: "claude-opus-4-6",
         request_payload: truncateImagePayload(anthropicPayload),
         response_payload: aiResponse,
         input_tokens: tokens.input_tokens,
