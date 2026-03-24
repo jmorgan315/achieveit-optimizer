@@ -1021,7 +1021,7 @@ Extract all strategic plan items with their proper hierarchy.`
       logApiCall({
         session_id: sessionId,
         edge_function: "extract-plan-vision",
-        step_label: batchLabel || `Step 1: Document Scan (${pageImages.length} pages)`,
+        step_label: batchLabel || `Step 1: Plan Extraction (${pageImages.length} pages)`,
         model: "claude-sonnet-4-20250514",
         request_payload: truncateImagePayload(anthropicPayload),
         response_payload: aiResponse,

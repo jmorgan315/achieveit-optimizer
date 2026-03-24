@@ -731,10 +731,33 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // DEDUPLICATION (after merge/safety-net, before checkpoint)
     // ==============================
-    const pageAnnotationsForDedup = classification?.page_annotations as unknown[] | undefined;
-    agent1Data.items = deduplicateItems(agent1Data.items, pageAnnotationsForDedup);
+    const dedupStart = Date.now();
+    const beforeDedupCount = countAllItems(agent1Data.items);
+    const dedupResult = deduplicateItems(agent1Data.items);
+    agent1Data.items = dedupResult.items;
     agent1ItemCount = countAllItems(agent1Data.items);
     agent1NameSet = collectItemNameSet(agent1Data.items);
+    const dedupDuration = Date.now() - dedupStart;
+
+    // Log dedup results to admin timeline
+    await logApiCall({
+      session_id: sessionId,
+      edge_function: "dedup-merge",
+      step_label: "Step 1.5: Dedup & Merge",
+      status: "success",
+      input_tokens: 0,
+      output_tokens: 0,
+      duration_ms: dedupDuration,
+      request_payload: {
+        input_count: beforeDedupCount,
+        output_count: agent1ItemCount,
+        duplicates_removed: dedupResult.removedDetails.length,
+      },
+      response_payload: {
+        removed_items: dedupResult.removedDetails,
+        final_items: (agent1Data.items as { name?: string }[]).map(i => i.name || ""),
+      },
+    });
 
     // ==============================
     // PERSIST EXTRACTION before Agents 2+3 (resumability checkpoint)
