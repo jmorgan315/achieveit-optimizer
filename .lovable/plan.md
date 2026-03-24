@@ -1,41 +1,42 @@
 
 
-# Fix Dedup Preference, Add Dedup Admin Log, Clean Up Timeline Labels
+# Two UI/UX Fixes — Plan Structure Levels + Insight Box Layout Shift
 
-## Changes
+## Fix 1: Plan Structure Level Management UX
 
-### 1. Fix dedup preference logic + word overlap
-**File: `supabase/functions/process-plan/index.ts`**
+**File: `src/components/steps/OrgProfileStep.tsx`**
 
-**Simplify winner selection** (lines 329-342): Remove the `summaryPages` detection entirely. Replace with a simple rule: always prefer higher `source_page`, tie-break by longer name. Remove the `pageAnnotations` parameter from `deduplicateItems` since it's no longer needed for dedup preference.
+Replace the "Number of levels" counter with +/- buttons (lines 244-267) with inline delete buttons per row and an "Add Level" button below.
 
-**Fix word overlap false positives** (line 264): Change `wordSet` to filter out words with length ≤ 3 (currently filters ≤ 2). This excludes common short words like "and", "to", "for", "all" that inflate overlap scores between genuinely different items.
+- Remove `handleLevelCountChange` function (lines 76-84) and the `Minus`/`Plus` imports
+- Each level row gets a trash/X button on the right that removes that specific level and re-indexes remaining levels
+- Minimum 1 level — hide delete button when only 1 level remains
+- Below the level list, add an "+ Add Level" button that appends a new level with an empty name field
+- Keep "(highest)" on Level 1 and "(lowest)" on last level
+- Max 7 levels stays enforced (hide Add Level at 7)
+- Update `levelCount` state to stay in sync: `setLevelCount(newLength)` after add/remove
 
-### 2. Add dedup summary to admin log
-**File: `supabase/functions/process-plan/index.ts`** (after dedup call at ~line 727)
+**Lines to replace**: 244-283 (the counter UI + level name list)
 
-After `deduplicateItems` returns, call `logApiCall` with:
-- `edge_function: "dedup-merge"`
-- `step_label: "Step 1.5: Dedup & Merge"`
-- `status: "success"`
-- `request_payload`: `{ input_count, output_count, duplicates_removed }`
-- `response_payload`: `{ removed_items: [{ removed_name, removed_page, kept_name, kept_page, match_reason }], final_items: [...names] }`
-- `input_tokens: 0`, `output_tokens: 0`
-- `duration_ms`: measured around the dedup call
+## Fix 2: Insight Box Fixed Height
 
-To support this, modify `deduplicateItems` to return a structured result object (items + removal details) instead of just the filtered array.
+**File: `src/components/steps/ProcessingOverlay.tsx`**
 
-### 3. Fix timeline labels
-**File: `supabase/functions/process-plan/index.ts`** (line 590)
-- Change `Step 2: Document Scan` → `Step 1: Plan Extraction`
+Add `min-h-[4.5rem]` to the insight container div (line 176) to prevent layout shift when tips rotate between 1 and 2 lines.
 
-**File: `supabase/functions/extract-plan-vision/index.ts`** (line 1024)
-- Change fallback label from `Step 1: Document Scan` → `Step 1: Plan Extraction`
+Change line 176 from:
+```
+<div className="rounded-lg bg-muted/50 border border-border p-4">
+```
+to:
+```
+<div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[4.5rem]">
+```
 
-### Files Summary
+## Files Summary
 
 | File | Change |
 |------|--------|
-| `supabase/functions/process-plan/index.ts` | Simplify dedup preference to higher page wins; fix word filter to >3 chars; return dedup details for logging; add `logApiCall` for dedup; fix batch label to "Step 1: Plan Extraction" |
-| `supabase/functions/extract-plan-vision/index.ts` | Fix fallback label to "Step 1: Plan Extraction" |
+| `src/components/steps/OrgProfileStep.tsx` | Replace +/- counter with per-row delete buttons + "Add Level" button |
+| `src/components/steps/ProcessingOverlay.tsx` | Add `min-h-[4.5rem]` to insight container |
 
