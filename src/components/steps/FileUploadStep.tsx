@@ -382,6 +382,7 @@ export function FileUploadStep({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           pageImages: images.map(img => img.dataUrl),
+          documentText: documentText || "",
           organizationName: orgProfile?.organizationName,
           industry: orgProfile?.industry,
           documentHints: orgProfile?.documentHints,
