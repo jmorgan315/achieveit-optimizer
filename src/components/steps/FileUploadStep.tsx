@@ -640,7 +640,7 @@ export function FileUploadStep({
             if (!aiResult || aiResult.items.length === 0) {
               console.log('Text extraction found 0 items, falling back to vision');
               addMessage('Trying visual analysis...');
-              const visionResult = await extractWithVisionPipeline(file);
+              const visionResult = await extractWithVisionPipeline(file, undefined, textResult?.text);
               if (visionResult) {
                 setExtractedItems(visionResult.items);
                 setExtractedMappings(visionResult.personMappings);
