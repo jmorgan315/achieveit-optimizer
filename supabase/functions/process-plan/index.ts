@@ -825,7 +825,44 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
           ],
         };
       } else {
-        agent1Error = "Vision extraction produced no items across all batches";
+        // Vision produced 0 items — try text fallback if documentText available
+        const fallbackText = (body.documentText as string) || "";
+        if (fallbackText.trim().length > 50) {
+          console.warn("[process-plan] Vision extraction produced 0 items, falling back to text extraction...");
+
+          await logApiCall({
+            session_id: sessionId,
+            edge_function: "process-plan",
+            step_label: "Step 1: Vision extraction failed — falling back to text extraction results",
+            status: "success",
+            error_message: "Vision produced 0 items across all batches",
+          });
+
+          const textResult = await callEdgeFunction("extract-plan-items", {
+            documentText: fallbackText,
+            organizationName,
+            industry,
+            documentHints,
+            planLevels,
+            pageRange,
+            sessionId,
+          });
+
+          if (textResult.ok && (textResult.data as { success: boolean }).success) {
+            const d = (textResult.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
+            if (d.items?.length > 0) {
+              agent1Data = { items: d.items, detectedLevels: d.detectedLevels || [] };
+              extractionMethod = "text_fallback";
+              console.log(`[process-plan] Text fallback succeeded: ${d.items.length} items`);
+            } else {
+              agent1Error = "Both vision and text extraction produced no items";
+            }
+          } else {
+            agent1Error = "Vision produced 0 items and text extraction also failed";
+          }
+        } else {
+          agent1Error = "Vision extraction produced no items across all batches (no text available for fallback)";
+        }
       }
     } else {
       const result = await callEdgeFunction("extract-plan-items", {

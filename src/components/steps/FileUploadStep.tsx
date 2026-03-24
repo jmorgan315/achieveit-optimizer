@@ -661,7 +661,7 @@ export function FileUploadStep({
 
         // Vision path (text quality poor or text extraction failed)
         setIsProcessing(false);
-        const visionResult = await extractWithVisionPipeline(file);
+        const visionResult = await extractWithVisionPipeline(file, undefined, textResult?.text);
         if (visionResult) {
           setExtractedItems(visionResult.items);
           setExtractedMappings(visionResult.personMappings);

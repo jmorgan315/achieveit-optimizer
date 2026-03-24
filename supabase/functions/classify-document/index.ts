@@ -69,6 +69,19 @@ document_type:
 
 "mixed": Combination — e.g., presentation wrapper with tabular action item pages at the end.
 
+CRITICAL CLASSIFICATION DECISION — "tabular" vs "text_heavy":
+
+A document is "tabular" ONLY when the plan items themselves are organized as table rows — the tables ARE the plan structure, not supporting data. Examples: a strategic plan formatted as a spreadsheet where each row is a goal/strategy/action with columns for owner, timeline, KPIs.
+
+A document is "text_heavy" even if it contains tables, as long as the plan items (goals, strategies, actions) are primarily expressed in narrative text, headings, and bullet points. Tables for metrics, timelines, budgets, or outcome tracking are supporting data — they do NOT make the document tabular.
+
+Decision rule: If the document has both narrative text AND tables, ask: are the plan items primarily expressed in narrative text or primarily structured as table rows? If narrative text defines the plan and tables provide metrics/data, classify as "text_heavy."
+
+Examples:
+- "tabular": Strategic plan where each row is an action item with columns for goal, strategy, owner, timeline, KPI. The table IS the plan.
+- "text_heavy": 50-page grant application with narrative sections describing goals and strategies, plus tables showing outcome metrics and timelines. The narrative IS the plan; tables are supporting data.
+- "presentation": Slide deck with one goal per slide, visual layouts, large text.
+
 page_annotations classification values:
 
 "cover": Title page, organization branding, date
