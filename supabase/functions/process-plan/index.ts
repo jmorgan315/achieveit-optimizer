@@ -261,7 +261,7 @@ function normalizeItemName(name: string): string {
 }
 
 function wordSet(name: string): Set<string> {
-  return new Set(normalizeItemName(name).split(" ").filter(w => w.length > 2));
+  return new Set(normalizeItemName(name).split(" ").filter(w => w.length > 3));
 }
 
 function wordOverlap(a: Set<string>, b: Set<string>): number {
@@ -290,18 +290,12 @@ function isDuplicate(nameA: string, nameB: string, parentA?: string | null, pare
   return false;
 }
 
-function deduplicateItems(items: unknown[], pageAnnotations?: unknown[]): unknown[] {
-  // Build summary page set from page_annotations
-  const summaryPages = new Set<number>();
-  if (Array.isArray(pageAnnotations)) {
-    for (const ann of pageAnnotations) {
-      const a = ann as { page?: number; notes?: string };
-      if (a.notes && /overview|summary|at-a-glance|at a glance/i.test(a.notes)) {
-        if (a.page) summaryPages.add(a.page);
-      }
-    }
-  }
+interface DedupResult {
+  items: unknown[];
+  removedDetails: { removed_name: string; removed_page: number; kept_name: string; kept_page: number; match_reason: string }[];
+}
 
+function deduplicateItems(items: unknown[]): DedupResult {
   // Group by level
   const byLevel = new Map<string, unknown[]>();
   for (const item of items) {
@@ -312,6 +306,7 @@ function deduplicateItems(items: unknown[], pageAnnotations?: unknown[]): unknow
   }
 
   const removed = new Set<number>();
+  const removedDetails: DedupResult["removedDetails"] = [];
   const itemsArr = [...items];
 
   for (const [, group] of byLevel) {
@@ -326,18 +321,11 @@ function deduplicateItems(items: unknown[], pageAnnotations?: unknown[]): unknow
         const idxB = itemsArr.indexOf(group[b]);
         if (removed.has(idxA) || removed.has(idxB)) continue;
 
-        // Prefer non-summary page items
+        // Simple rule: prefer higher source_page (detail pages), tie-break by longer name
         let keepIdx = idxA, discardIdx = idxB;
         const pageA = itemA.source_page || 0;
         const pageB = itemB.source_page || 0;
-        const aIsSummary = summaryPages.has(pageA);
-        const bIsSummary = summaryPages.has(pageB);
-
-        if (aIsSummary && !bIsSummary) {
-          keepIdx = idxB; discardIdx = idxA;
-        } else if (bIsSummary && !aIsSummary) {
-          keepIdx = idxA; discardIdx = idxB;
-        } else if (pageB > pageA || (pageB === pageA && (itemB.name?.length || 0) > (itemA.name?.length || 0))) {
+        if (pageB > pageA || (pageB === pageA && (itemB.name?.length || 0) > (itemA.name?.length || 0))) {
           keepIdx = idxB; discardIdx = idxA;
         }
 
@@ -348,18 +336,38 @@ function deduplicateItems(items: unknown[], pageAnnotations?: unknown[]): unknow
           keeper.parent_name = discarded.parent_name;
         }
 
-        console.log(`[process-plan] Dedup: removed '${discarded.name}' (page ${discarded.source_page || '?'}), kept '${keeper.name}' (page ${keeper.source_page || '?'})`);
+        // Determine match reason
+        const normA = normalizeItemName(itemA.name);
+        const normB = normalizeItemName(itemB.name);
+        let matchReason = "word_overlap";
+        if (normA === normB) {
+          matchReason = "exact_match";
+        } else if (normA.length >= 40 && normB.length >= 40 && normA.substring(0, 40) === normB.substring(0, 40)) {
+          matchReason = "starts_with_40";
+        } else {
+          const overlap = wordOverlap(wordSet(itemA.name), wordSet(itemB.name));
+          matchReason = `word_overlap_${Math.round(overlap * 100)}%`;
+        }
+
+        removedDetails.push({
+          removed_name: discarded.name || "",
+          removed_page: discarded.source_page || 0,
+          kept_name: keeper.name || "",
+          kept_page: keeper.source_page || 0,
+          match_reason: matchReason,
+        });
+
+        console.log(`[process-plan] Dedup: removed '${discarded.name}' (page ${discarded.source_page || '?'}), kept '${keeper.name}' (page ${keeper.source_page || '?'}) [${matchReason}]`);
         removed.add(discardIdx);
       }
     }
   }
 
-  const before = items.length;
   const result = itemsArr.filter((_, idx) => !removed.has(idx));
   if (removed.size > 0) {
     console.log(`[process-plan] Dedup complete: ${removed.size} duplicates removed, ${result.length} items remaining`);
   }
-  return result;
+  return { items: result, removedDetails };
 }
 
 // ==============================
@@ -587,7 +595,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
           planLevels,
           pageRange,
           sessionId,
-          batchLabel: `Step 2: Document Scan (Batch ${batchIdx + 1} of ${batches.length})`,
+          batchLabel: `Step 1: Plan Extraction (Batch ${batchIdx + 1} of ${batches.length})`,
           extractionMode,
           tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
           hierarchyPattern: (extractionMode === "table" || extractionMode === "presentation") ? classification?.hierarchy_pattern : undefined,
@@ -723,10 +731,33 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // DEDUPLICATION (after merge/safety-net, before checkpoint)
     // ==============================
-    const pageAnnotationsForDedup = classification?.page_annotations as unknown[] | undefined;
-    agent1Data.items = deduplicateItems(agent1Data.items, pageAnnotationsForDedup);
+    const dedupStart = Date.now();
+    const beforeDedupCount = countAllItems(agent1Data.items);
+    const dedupResult = deduplicateItems(agent1Data.items);
+    agent1Data.items = dedupResult.items;
     agent1ItemCount = countAllItems(agent1Data.items);
     agent1NameSet = collectItemNameSet(agent1Data.items);
+    const dedupDuration = Date.now() - dedupStart;
+
+    // Log dedup results to admin timeline
+    await logApiCall({
+      session_id: sessionId,
+      edge_function: "dedup-merge",
+      step_label: "Step 1.5: Dedup & Merge",
+      status: "success",
+      input_tokens: 0,
+      output_tokens: 0,
+      duration_ms: dedupDuration,
+      request_payload: {
+        input_count: beforeDedupCount,
+        output_count: agent1ItemCount,
+        duplicates_removed: dedupResult.removedDetails.length,
+      },
+      response_payload: {
+        removed_items: dedupResult.removedDetails,
+        final_items: (agent1Data.items as { name?: string }[]).map(i => i.name || ""),
+      },
+    });
 
     // ==============================
     // PERSIST EXTRACTION before Agents 2+3 (resumability checkpoint)
