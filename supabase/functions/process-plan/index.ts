@@ -650,9 +650,45 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
           .sort((a, b) => a - b);
 
         if (planPages.length > 0) {
-          const filtered = planPages.map(p => images[p - 1]);
-          console.log(`[process-plan] Agent 0 recommended pages [${planPages.join(", ")}]. Sending ${filtered.length} of ${images.length} pages to extraction.`);
-          console.log(`[process-plan] Filtered pages for extraction: [${planPages.join(", ")}] (${planPages.length} pages)`);
+          // Apply page buffer for classification safety
+          const safeToSkip = new Set(['cover', 'toc', 'vision_mission', 'blank', 'appendix']);
+          const planPageSet = new Set(planPages);
+          const bufferedPages: number[] = [];
+
+          // Buffer 1: include the page immediately before the first plan page
+          const firstPlanPage = Math.min(...planPages);
+          if (firstPlanPage > 1) {
+            const prevAnnotation = pageAnnotationsArr.find(a => a.page === firstPlanPage - 1);
+            const prevClassification = (prevAnnotation as Record<string, unknown>)?.classification as string | undefined;
+            if (!prevClassification || !safeToSkip.has(prevClassification)) {
+              planPageSet.add(firstPlanPage - 1);
+              bufferedPages.push(firstPlanPage - 1);
+            }
+          }
+
+          // Buffer 2: fill gaps between consecutive plan pages
+          const sortedPlanPages = [...planPages].sort((a, b) => a - b);
+          for (let i = 0; i < sortedPlanPages.length - 1; i++) {
+            const current = sortedPlanPages[i];
+            const next = sortedPlanPages[i + 1];
+            for (let p = current + 1; p < next; p++) {
+              if (!planPageSet.has(p)) {
+                const annotation = pageAnnotationsArr.find(a => a.page === p);
+                const cls = (annotation as Record<string, unknown>)?.classification as string | undefined;
+                if (!cls || !safeToSkip.has(cls)) {
+                  planPageSet.add(p);
+                  bufferedPages.push(p);
+                }
+              }
+            }
+          }
+
+          const finalFilteredPages = [...planPageSet].filter(p => p >= 1 && p <= images.length).sort((a, b) => a - b);
+          if (bufferedPages.length > 0) {
+            console.log(`[process-plan] Page buffer: added pages [${bufferedPages.sort((a, b) => a - b).join(", ")}] to filtered set.`);
+          }
+          const filtered = finalFilteredPages.map(p => images[p - 1]);
+          console.log(`[process-plan] Agent 0 recommended pages [${planPages.join(", ")}]. Final extraction pages: [${finalFilteredPages.join(", ")}] (${filtered.length} of ${images.length} pages).`);
           images = filtered;
         } else {
           console.log(`[process-plan] Agent 0 page_annotations had no contains_plan_items pages, sending all ${images.length} pages`);
