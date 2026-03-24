@@ -261,7 +261,7 @@ function normalizeItemName(name: string): string {
 }
 
 function wordSet(name: string): Set<string> {
-  return new Set(normalizeItemName(name).split(" ").filter(w => w.length > 2));
+  return new Set(normalizeItemName(name).split(" ").filter(w => w.length > 3));
 }
 
 function wordOverlap(a: Set<string>, b: Set<string>): number {
