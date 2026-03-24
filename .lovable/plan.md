@@ -1,36 +1,44 @@
 
 
+# Upgrade Agents 0+1 to Opus, Add Page Buffer for Classification Safety
 
-# Per-Batch Persistence for Pipeline Resilience — IMPLEMENTED
+## Changes
 
-## What was done
+### 1. Upgrade model to Opus for Agents 0 and 1
 
-### 1. Created `page-images` storage bucket
-Migration creates the bucket with public read + insert + delete policies for resume capability.
+Replace all instances of `"claude-sonnet-4-20250514"` with `"claude-opus-4-6"` in:
 
-### 2. Per-batch persistence (`process-plan/index.ts`)
-- **Image persistence**: After classification/page filtering, all filtered page images are uploaded to `page-images/{sessionId}/{idx}.jpg` before extraction begins
-- **Incremental state saves**: After each extraction batch, the session row is updated with cumulative `items`, `batches_completed`, `batches_total`, `batch_pages`, and `total_filtered_images`
-- **`current_step: "extracting"`** during batches, `"extraction_complete"` after dedup
+- **`supabase/functions/classify-document/index.ts`** — 4 occurrences (request body + 3 log entries)
+- **`supabase/functions/extract-plan-vision/index.ts`** — 8 occurrences (3 extraction modes × request + log, plus standard path request + log)
+- **`supabase/functions/extract-plan-items/index.ts`** — 4 occurrences (extraction + verification, each with request + log)
 
-### 3. Expanded resume logic
-- **Path A (`extracting`, incomplete batches)**: Downloads images from storage, re-batches, continues from `batches_completed`, runs dedup → Agents 2+3
-- **Path B (`extracting`, all batches done)**: Runs dedup → Agents 2+3 directly
-- **Path C (`extraction_complete`)**: Existing behavior — runs Agents 2+3
-- Extracted shared Agents 2+3 logic into `runPostExtractionResume()` helper
+Do NOT change: `audit-completeness/index.ts`, `validate-hierarchy/index.ts`, `suggest-metrics/index.ts` — these stay on Sonnet.
 
-### 4. Frontend stall detection (`FileUploadStep.tsx`)
-- Tracks `batches_completed` changes during `extracting` phase
-- Fires resume after 30s stall (separate from existing 20s `extraction_complete` stall)
-- Shows batch progress percentage during extraction
-- Improved partial results fallback with batch-specific warning message
+### 2. Add page buffer after filtering in process-plan
 
-### 5. Cleanup
-- Fire-and-forget deletion of stored page images after pipeline completes (both normal and resume paths)
+**File: `supabase/functions/process-plan/index.ts`** (lines 652-656, after `planPages` is computed)
 
-## Files changed
+After computing `planPages` from `page_annotations`, add buffer logic before mapping to images:
+
+- **Buffer 1**: Include the page immediately before the first plan page, unless it's classified as `cover`, `toc`, `vision_mission`, `blank`, or `appendix`
+- **Buffer 2**: Fill gaps between consecutive plan pages — include intermediate pages unless they're in the safe-to-skip set
+
+Use the `pageAnnotationsArr` already in scope to look up classifications. Replace `planPages` with the buffered set before mapping to images.
+
+Add logging: `"Page buffer: added pages [X, Y] to filtered set. Final extraction pages: [...]"`
+
+### Files Summary
+
 | File | Change |
 |------|--------|
-| Migration (SQL) | Created `page-images` storage bucket |
-| `supabase/functions/process-plan/index.ts` | Image persistence, per-batch saves, expanded resume, cleanup |
-| `src/components/steps/FileUploadStep.tsx` | Extraction-phase stall detection, batch progress display |
+| `supabase/functions/classify-document/index.ts` | Model → `claude-opus-4-6` (4 spots) |
+| `supabase/functions/extract-plan-vision/index.ts` | Model → `claude-opus-4-6` (8 spots) |
+| `supabase/functions/extract-plan-items/index.ts` | Model → `claude-opus-4-6` (4 spots) |
+| `supabase/functions/process-plan/index.ts` | Add page buffer logic after line 650 |
+
+### What NOT to change
+- No prompt changes
+- No changes to audit-completeness or validate-hierarchy (stay on Sonnet)
+- No frontend changes
+- No dedup, polling, or resume logic changes
+
