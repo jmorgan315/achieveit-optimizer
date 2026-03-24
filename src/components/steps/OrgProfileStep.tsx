@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Building2, CheckCircle2, XCircle, Globe, Layers, FileText, Minus, Plus } from 'lucide-react';
+import { Loader2, Building2, CheckCircle2, XCircle, Globe, Layers, FileText, Plus, Trash2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { OrgProfile } from '@/types/plan';
 import { supabase } from '@/integrations/supabase/client';
