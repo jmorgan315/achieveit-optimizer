@@ -534,20 +534,26 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       extractionMethod = "vision";
       let images = pageImages as string[];
 
-      // Use Agent 0's page_range recommendations to filter pages (all modes)
-      const recPageRange = (classification?.extraction_recommendations as Record<string, unknown>)?.page_range as string | undefined;
-      if (recPageRange) {
-        const recommendedPages = parsePageRange(recPageRange, images.length);
-        if (recommendedPages.size > 0) {
-          const allPages = [...recommendedPages].sort((a, b) => a - b);
-          const filtered = allPages.map(p => images[p - 1]);
-          console.log(`[process-plan] Agent 0 recommended pages [${allPages.join(", ")}]. Sending ${filtered.length} of ${images.length} pages to extraction.`);
+      // Use Agent 0's page_annotations to filter pages (all modes)
+      const pageAnnotationsArr = classification?.page_annotations as Array<{ page?: number; contains_plan_items?: boolean; notes?: string }> | undefined;
+      if (Array.isArray(pageAnnotationsArr) && pageAnnotationsArr.length > 0) {
+        const planPages = pageAnnotationsArr
+          .filter(a => a.contains_plan_items === true && typeof a.page === 'number')
+          .map(a => a.page!)
+          .filter(p => p >= 1 && p <= images.length)
+          .sort((a, b) => a - b);
+
+        if (planPages.length > 0) {
+          const filtered = planPages.map(p => images[p - 1]);
+          console.log(`[process-plan] Agent 0 recommended pages [${planPages.join(", ")}]. Sending ${filtered.length} of ${images.length} pages to extraction.`);
+          // Verify no pages lost
+          console.log(`[process-plan] Filtered pages for extraction: [${planPages.join(", ")}] (${planPages.length} pages)`);
           images = filtered;
         } else {
-          console.log(`[process-plan] Agent 0 page_range parsed to empty set, sending all ${images.length} pages`);
+          console.log(`[process-plan] Agent 0 page_annotations had no contains_plan_items pages, sending all ${images.length} pages`);
         }
       } else {
-        console.log(`[process-plan] No Agent 0 page_range, sending all ${images.length} pages`);
+        console.log(`[process-plan] No Agent 0 page_annotations, sending all ${images.length} pages`);
       }
 
       const batches = batchImages(images, 5);

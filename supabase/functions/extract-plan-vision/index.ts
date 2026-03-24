@@ -1055,7 +1055,10 @@ Extract all strategic plan items with their proper hierarchy.`
 
     let contextSummary = "";
     if ((extractedData.items as unknown[])?.length > 0) {
-      const topLevelNames = (extractedData.items as Array<{ name: string }>).slice(0, 5).map((item) => item.name);
+      const allItems = extractedData.items as Array<{ name: string; level?: number | string; parent_name?: string }>;
+      const level1Items = allItems.filter(i => i.level === 1 || i.level === "1" || !i.parent_name);
+      const topLevelNames = (level1Items.length > 0 ? level1Items : allItems).slice(0, 10).map(i => i.name);
+      console.log(`[extract-plan-vision] Passing Level 1 context: [${topLevelNames.join(", ")}]`);
       contextSummary = `Previously found Level 1 items: ${topLevelNames.join(", ")}`;
       
       if (extractedData.documentTerminology) {
