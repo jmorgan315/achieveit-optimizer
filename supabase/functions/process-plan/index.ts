@@ -466,6 +466,104 @@ function mergeVisionBatchResults(
 }
 
 // ==============================
+// IMAGE PERSISTENCE TO STORAGE
+// ==============================
+
+/** Upload filtered page images to storage for resume capability */
+async function persistPageImages(
+  sessionId: string,
+  images: string[],
+  pageIndexMap: number[]
+): Promise<void> {
+  const client = getServiceClient();
+  console.log(`[process-plan] Persisting ${images.length} page images to storage for session ${sessionId}`);
+
+  const uploadPromises = images.map(async (dataUrl, idx) => {
+    try {
+      // Convert data URL to Uint8Array
+      const base64Data = dataUrl.split(",")[1];
+      if (!base64Data) return;
+      const binaryStr = atob(base64Data);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const filePath = `${sessionId}/${idx}.jpg`;
+      const { error } = await client.storage.from("page-images").upload(filePath, bytes, {
+        contentType: "image/jpeg",
+        upsert: true,
+      });
+      if (error) {
+        console.error(`[process-plan] Failed to upload page image ${idx}:`, error.message);
+      }
+    } catch (e) {
+      console.error(`[process-plan] Exception uploading page image ${idx}:`, e);
+    }
+  });
+
+  await Promise.all(uploadPromises);
+  console.log(`[process-plan] Persisted ${images.length} page images to storage for session ${sessionId}`);
+}
+
+/** Download page images from storage for resume */
+async function loadPageImages(sessionId: string, count: number): Promise<string[]> {
+  const client = getServiceClient();
+  const images: string[] = [];
+
+  console.log(`[process-plan] Loading ${count} page images from storage for session ${sessionId}`);
+
+  for (let idx = 0; idx < count; idx++) {
+    try {
+      const filePath = `${sessionId}/${idx}.jpg`;
+      const { data, error } = await client.storage.from("page-images").download(filePath);
+      if (error || !data) {
+        console.error(`[process-plan] Failed to download page image ${idx}:`, error?.message);
+        continue;
+      }
+      const arrayBuffer = await data.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+      images.push(`data:image/jpeg;base64,${base64}`);
+    } catch (e) {
+      console.error(`[process-plan] Exception downloading page image ${idx}:`, e);
+    }
+  }
+
+  console.log(`[process-plan] Loaded ${images.length} of ${count} page images from storage`);
+  return images;
+}
+
+/** Delete stored page images after pipeline completes */
+async function cleanupPageImages(sessionId: string): Promise<void> {
+  try {
+    const client = getServiceClient();
+    const { data: files, error: listError } = await client.storage
+      .from("page-images")
+      .list(sessionId);
+
+    if (listError || !files || files.length === 0) return;
+
+    const filePaths = files.map(f => `${sessionId}/${f.name}`);
+    const { error: removeError } = await client.storage
+      .from("page-images")
+      .remove(filePaths);
+
+    if (removeError) {
+      console.error("[process-plan] Cleanup page images error:", removeError.message);
+    } else {
+      console.log(`[process-plan] Cleaned up ${filePaths.length} stored page images for session ${sessionId}`);
+    }
+  } catch (e) {
+    console.error("[process-plan] Cleanup page images exception:", e);
+  }
+}
+
+// ==============================
 // The actual pipeline logic, runs in background after early return
 // ==============================
 async function runPipeline(sessionId: string, body: Record<string, unknown>): Promise<void> {
@@ -554,7 +652,6 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         if (planPages.length > 0) {
           const filtered = planPages.map(p => images[p - 1]);
           console.log(`[process-plan] Agent 0 recommended pages [${planPages.join(", ")}]. Sending ${filtered.length} of ${images.length} pages to extraction.`);
-          // Verify no pages lost
           console.log(`[process-plan] Filtered pages for extraction: [${planPages.join(", ")}] (${planPages.length} pages)`);
           images = filtered;
         } else {
@@ -564,13 +661,24 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         console.log(`[process-plan] No Agent 0 page_annotations, sending all ${images.length} pages`);
       }
 
+      // ==============================
+      // PERSIST PAGE IMAGES TO STORAGE (for resume capability)
+      // ==============================
+      const pageIndexMap = Array.from({ length: images.length }, (_, i) => i);
+      await persistPageImages(sessionId, images, pageIndexMap);
+
       const batches = batchImages(images, 5);
       let allItems: unknown[] = [];
       let detectedLevels: { depth: number; name: string }[] = [];
       let previousContext = "";
 
+      // Compute batch page mapping for resume
+      const batchPageMapping: number[][] = batches.map((batch, batchIdx) => {
+        const startIdx = batchIdx * 5;
+        return batch.map((_, i) => startIdx + i);
+      });
+
       console.log(`[process-plan] Step 1 vision: ${images.length} images in ${batches.length} batches`);
-      // Log each batch's page count for verification
       for (let bi = 0; bi < batches.length; bi++) {
         console.log(`[process-plan] Batch ${bi + 1}: ${batches[bi].length} pages`);
       }
@@ -623,6 +731,49 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         } else {
           console.warn(`[process-plan] Vision batch ${batchIdx + 1} failed:`, (result.data as { error?: string }).error);
         }
+
+        // ==============================
+        // PER-BATCH PERSISTENCE: save incremental state after each batch
+        // ==============================
+        const isLastBatch = batchIdx === batches.length - 1;
+        await updateSessionProgress(sessionId, {
+          current_step: isLastBatch ? "extracting" : "extracting",
+          step_results: {
+            extraction: {
+              items: allItems,
+              detectedLevels: detectedLevels.length > 0 ? detectedLevels : [
+                { depth: 1, name: "Strategic Priority" },
+                { depth: 2, name: "Objective" },
+                { depth: 3, name: "Goal" },
+                { depth: 4, name: "Strategy" },
+                { depth: 5, name: "KPI" },
+              ],
+              batches_completed: batchIdx + 1,
+              batches_total: batches.length,
+              batch_pages: batchPageMapping,
+              total_filtered_images: images.length,
+              completed_at: isLastBatch ? new Date().toISOString() : null,
+            },
+            classification: classification || null,
+            pipelineContext: {
+              organizationName,
+              industry,
+              planLevels,
+              documentText: (documentText as string) || "",
+              extractionMethod,
+              useVision,
+              previousContext,
+              extractionMode,
+              tableStructure: extractionMode === "table" ? classification?.table_structure : undefined,
+              hierarchyPattern: (extractionMode === "table" || extractionMode === "presentation") ? classification?.hierarchy_pattern : undefined,
+              pageAnnotations: extractionMode === "presentation" ? classification?.page_annotations : undefined,
+              nonPlanContent: extractionMode === "presentation" ? classification?.non_plan_content : undefined,
+              documentHints,
+              pageRange,
+            },
+          },
+        });
+        console.log(`[process-plan] Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
       }
 
       if (allItems.length > 0) {
@@ -952,6 +1103,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       total_items_extracted: finalItemCount,
     });
 
+    // Fire-and-forget cleanup of stored page images
+    cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Cleanup error:", e));
+
   } catch (error) {
     console.error("[process-plan] Pipeline error:", error);
     await updateSessionProgress(sessionId, {
@@ -963,7 +1117,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 }
 
 // ==============================
-// Resume function: runs only Agents 2+3 using persisted extraction data
+// Resume function: handles mid-extraction AND post-extraction resume
 // ==============================
 async function runResume(sessionId: string): Promise<void> {
   try {
@@ -985,12 +1139,219 @@ async function runResume(sessionId: string): Promise<void> {
       return;
     }
 
+    const stepResults = (session as Record<string, unknown>).step_results as Record<string, unknown>;
+
+    // ==============================
+    // PATH A: Resume mid-extraction (current_step === "extracting")
+    // ==============================
+    if (currentStep === "extracting") {
+      const extraction = stepResults?.extraction as Record<string, unknown> | undefined;
+      if (!extraction) {
+        console.error("[process-plan] Resume: no extraction data in step_results for extracting state");
+        return;
+      }
+
+      const batchesCompleted = (extraction.batches_completed || 0) as number;
+      const batchesTotal = (extraction.batches_total || 0) as number;
+      const batchPages = (extraction.batch_pages || []) as number[][];
+      const totalFilteredImages = (extraction.total_filtered_images || 0) as number;
+      const existingItems = (extraction.items || []) as unknown[];
+      let detectedLevels = (extraction.detectedLevels || []) as { depth: number; name: string }[];
+
+      const pipeCtx = (stepResults.pipelineContext || {}) as Record<string, unknown>;
+      const organizationName = pipeCtx.organizationName as string | undefined;
+      const industry = pipeCtx.industry as string | undefined;
+      const planLevels = pipeCtx.planLevels as unknown[] | undefined;
+      const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
+      const documentText = (pipeCtx.documentText || "") as string;
+      const useVision = pipeCtx.useVision as boolean;
+      const previousContextFromState = (pipeCtx.previousContext || "") as string;
+      const extractionMode = (pipeCtx.extractionMode || "standard") as string;
+      const documentHints = pipeCtx.documentHints as string | undefined;
+      const pageRange = pipeCtx.pageRange as unknown;
+      const classification = (stepResults.classification || null) as Record<string, unknown> | null;
+
+      if (batchesCompleted >= batchesTotal) {
+        // All batches done but dedup/agents never ran
+        console.log(`[process-plan] Resume: all ${batchesTotal} batches completed, running dedup + Agents 2+3`);
+
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "process-plan",
+          step_label: "Resume: all batches done, running dedup + Agents 2+3",
+          status: "success",
+        });
+
+        // Run dedup
+        const dedupStart = Date.now();
+        const beforeDedupCount = countAllItems(existingItems);
+        const dedupResult = deduplicateItems(existingItems);
+        const dedupDuration = Date.now() - dedupStart;
+        const dedupedItems = dedupResult.items;
+        const dedupedItemCount = countAllItems(dedupedItems);
+
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "dedup-merge",
+          step_label: "Step 1.5: Dedup & Merge (Resume)",
+          status: "success",
+          input_tokens: 0,
+          output_tokens: 0,
+          duration_ms: dedupDuration,
+          request_payload: { input_count: beforeDedupCount, output_count: dedupedItemCount, duplicates_removed: dedupResult.removedDetails.length },
+          response_payload: { removed_items: dedupResult.removedDetails },
+        });
+
+        // Persist extraction_complete checkpoint
+        await updateSessionProgress(sessionId, {
+          current_step: "extraction_complete",
+          step_results: {
+            extraction: { items: dedupedItems, detectedLevels, completed_at: new Date().toISOString() },
+            classification,
+            pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
+          },
+        });
+
+        // Now run Agents 2+3 via the existing post-extraction resume path
+        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
+        return;
+      }
+
+      // Some batches remain — download images from storage and continue extraction
+      console.log(`[process-plan] Resume: ${batchesCompleted} of ${batchesTotal} batches done, resuming extraction`);
+
+      await logApiCall({
+        session_id: sessionId,
+        edge_function: "process-plan",
+        step_label: `Resume: continuing extraction from batch ${batchesCompleted + 1}`,
+        status: "success",
+      });
+
+      // Download images from storage
+      const allImages = await loadPageImages(sessionId, totalFilteredImages);
+      if (allImages.length === 0) {
+        console.error("[process-plan] Resume: failed to load page images from storage");
+        await updateSessionProgress(sessionId, {
+          status: "error",
+          current_step: "error",
+          step_results: { error: "Resume failed: could not load stored page images" },
+        });
+        return;
+      }
+
+      // Re-batch images and continue from where we left off
+      const batches = batchImages(allImages, 5);
+      let allItems = [...existingItems];
+      let previousContext = previousContextFromState;
+
+      for (let batchIdx = batchesCompleted; batchIdx < batches.length; batchIdx++) {
+        const batch = batches[batchIdx];
+
+        if (batchIdx > batchesCompleted) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
+        const result = await callEdgeFunction("extract-plan-vision", {
+          pageImages: batch,
+          previousContext,
+          organizationName,
+          industry,
+          documentHints,
+          planLevels,
+          pageRange,
+          sessionId,
+          batchLabel: `Step 1: Plan Extraction (Batch ${batchIdx + 1} of ${batches.length}) [Resume]`,
+          extractionMode,
+          tableStructure: pipeCtx.tableStructure,
+          hierarchyPattern: pipeCtx.hierarchyPattern,
+          pageAnnotations: pipeCtx.pageAnnotations,
+          nonPlanContent: pipeCtx.nonPlanContent,
+        });
+
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const d = (result.data as { data: { items?: unknown[]; detectedLevels?: { depth: number; name: string }[]; documentTerminology?: { columnHierarchy?: string[] } }; contextSummary?: string }).data;
+
+          if (d.items?.length) {
+            allItems = mergeVisionBatchResults(allItems, d.items);
+          }
+
+          if (d.detectedLevels?.length && detectedLevels.length === 0) {
+            detectedLevels = d.detectedLevels;
+          }
+
+          const ctx = (result.data as { contextSummary?: string }).contextSummary;
+          if (ctx) previousContext = ctx;
+        } else {
+          console.warn(`[process-plan] Resume: Vision batch ${batchIdx + 1} failed:`, (result.data as { error?: string }).error);
+        }
+
+        // Per-batch persistence during resume too
+        const isLastBatch = batchIdx === batches.length - 1;
+        await updateSessionProgress(sessionId, {
+          current_step: "extracting",
+          step_results: {
+            extraction: {
+              items: allItems,
+              detectedLevels,
+              batches_completed: batchIdx + 1,
+              batches_total: batches.length,
+              batch_pages: batchPages,
+              total_filtered_images: totalFilteredImages,
+              completed_at: isLastBatch ? new Date().toISOString() : null,
+            },
+            classification,
+            pipelineContext: { ...pipeCtx, previousContext },
+          },
+        });
+        console.log(`[process-plan] Resume: Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
+      }
+
+      // Run dedup
+      const dedupStart = Date.now();
+      const beforeDedupCount = countAllItems(allItems);
+      const dedupResult = deduplicateItems(allItems);
+      const dedupDuration = Date.now() - dedupStart;
+      const dedupedItems = dedupResult.items;
+      const dedupedItemCount = countAllItems(dedupedItems);
+
+      await logApiCall({
+        session_id: sessionId,
+        edge_function: "dedup-merge",
+        step_label: "Step 1.5: Dedup & Merge (Resume)",
+        status: "success",
+        input_tokens: 0,
+        output_tokens: 0,
+        duration_ms: dedupDuration,
+        request_payload: { input_count: beforeDedupCount, output_count: dedupedItemCount, duplicates_removed: dedupResult.removedDetails.length },
+        response_payload: { removed_items: dedupResult.removedDetails },
+      });
+
+      // Persist extraction_complete checkpoint
+      await updateSessionProgress(sessionId, {
+        current_step: "extraction_complete",
+        step_results: {
+          extraction: { items: dedupedItems, detectedLevels, completed_at: new Date().toISOString() },
+          classification,
+          pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
+        },
+      });
+
+      // Run Agents 2+3
+      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
+
+      // Cleanup images
+      cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
+      return;
+    }
+
+    // ==============================
+    // PATH B: Resume post-extraction (current_step === "extraction_complete")
+    // ==============================
     if (currentStep !== "extraction_complete") {
       console.error("[process-plan] Resume: unexpected current_step:", currentStep);
       return;
     }
 
-    const stepResults = (session as Record<string, unknown>).step_results as Record<string, unknown>;
     const extraction = stepResults?.extraction as Record<string, unknown> | undefined;
     if (!extraction || !Array.isArray(extraction.items) || extraction.items.length === 0) {
       console.error("[process-plan] Resume: no extraction items in step_results");
@@ -1007,148 +1368,11 @@ async function runResume(sessionId: string): Promise<void> {
     const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
     const sourceText = (pipeCtx.documentText || "") as string;
 
-    const agent1NameSet = collectItemNameSet(agent1Items);
-    const agent1ItemCount = countAllItems(agent1Items);
+    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText);
 
-    console.log(`[process-plan] Resume: ${agent1ItemCount} items, running Agents 2+3`);
+    // Cleanup images (may or may not exist)
+    cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
 
-    await logApiCall({
-      session_id: sessionId,
-      edge_function: "process-plan",
-      step_label: "Resume: starting Agents 2+3",
-      status: "success",
-    });
-
-    await updateSessionProgress(sessionId, { current_step: "validating" });
-
-    // Run Agents 2+3 in parallel
-    const hasSourceText = sourceText.length > 100;
-    const auditPayload: Record<string, unknown> = {
-      extractedItems: agent1Items,
-      sessionId,
-      organizationName,
-      industry,
-      planLevels,
-      classification,
-    };
-    if (hasSourceText) {
-      auditPayload.sourceText = sourceText;
-    }
-
-    const [auditSettled, validateSettled] = await Promise.allSettled([
-      // Audit (only if we have source text — images aren't persisted)
-      (async (): Promise<AuditFindings | null> => {
-        if (!hasSourceText) {
-          console.log("[process-plan] Resume: audit skipped (no source text available)");
-          return null;
-        }
-        try {
-          const result = await callEdgeFunction("audit-completeness", auditPayload);
-          if (result.ok && (result.data as { success: boolean }).success) {
-            const findings = (result.data as { data: AuditFindings }).data;
-            console.log("[process-plan] Resume: audit complete:", JSON.stringify(findings?.auditSummary || {}));
-            return findings;
-          }
-          console.warn("[process-plan] Resume: audit failed (non-fatal)");
-          return null;
-        } catch (err) {
-          console.error("[process-plan] Resume: audit error:", err);
-          return null;
-        }
-      })(),
-      // Validation
-      (async (): Promise<ValidationResult | null> => {
-        try {
-          const result = await callEdgeFunction("validate-hierarchy", {
-            sourceText,
-            extractedItems: agent1Items,
-            auditFindings: null,
-            detectedLevels: agent1DetectedLevels,
-            sessionId,
-            organizationName,
-            industry,
-            planLevels,
-          });
-          if (result.ok && (result.data as { success: boolean }).success) {
-            const vr = (result.data as { data: ValidationResult }).data;
-            console.log("[process-plan] Resume: validation complete:", vr.corrections?.length || 0, "corrections");
-            return vr;
-          }
-          console.warn("[process-plan] Resume: validation failed (non-fatal)");
-          return null;
-        } catch (err) {
-          console.error("[process-plan] Resume: validation error:", err);
-          return null;
-        }
-      })(),
-    ]);
-
-    const auditFindings = auditSettled.status === "fulfilled" ? auditSettled.value : null;
-    const validationResult = validateSettled.status === "fulfilled" ? validateSettled.value : null;
-
-    // Merge & confidence scoring (same logic as normal path)
-    let finalItems: unknown[];
-    let finalLevels: { depth: number; name: string }[];
-    let corrections: { itemId: string; type: string; description: string }[] = [];
-
-    if (validationResult?.correctedItems?.length && validationResult.correctedItems.length > 0) {
-      finalItems = validationResult.correctedItems;
-      finalLevels = validationResult.detectedLevels?.length ? validationResult.detectedLevels : agent1DetectedLevels;
-      corrections = validationResult.corrections || [];
-    } else {
-      finalItems = agent1Items;
-      finalLevels = agent1DetectedLevels;
-    }
-
-    if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
-      enforceMaxDepth(finalItems, planLevels.length, planLevels as { depth: number; name: string }[]);
-    }
-
-    if (auditFindings?.rephrasedItems?.length) {
-      applyRephrasedCorrections(finalItems, auditFindings.rephrasedItems, corrections);
-    }
-
-    calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
-
-    const allConfidences: number[] = [];
-    function gatherConf(items: unknown[]) {
-      for (const item of items) {
-        const i = item as { confidence?: number; children?: unknown[] };
-        if (typeof i.confidence === "number") allConfidences.push(i.confidence);
-        if (i.children?.length) gatherConf(i.children);
-      }
-    }
-    gatherConf(finalItems);
-    const sessionConfidence = allConfidences.length > 0
-      ? Math.round(allConfidences.reduce((a, b) => a + b, 0) / allConfidences.length)
-      : 0;
-
-    const finalItemCount = countAllItems(finalItems);
-    console.log(`[process-plan] Resume complete: ${finalItemCount} items, confidence=${sessionConfidence}%`);
-
-    await updateSessionProgress(sessionId, {
-      status: "completed",
-      current_step: "complete",
-      step_results: {
-        success: true,
-        data: { items: finalItems, detectedLevels: finalLevels },
-        totalItems: finalItemCount,
-        corrections,
-        sessionConfidence,
-        auditSummary: auditFindings?.auditSummary || null,
-        extractionMethod,
-        pipelineComplete: true,
-        sessionId,
-      },
-      total_items_extracted: finalItemCount,
-    });
-
-    await logApiCall({
-      session_id: sessionId,
-      edge_function: "process-plan",
-      step_label: "Resume: completed successfully",
-      status: "success",
-    });
   } catch (error) {
     console.error("[process-plan] Resume error:", error);
     await updateSessionProgress(sessionId, {
@@ -1159,6 +1383,162 @@ async function runResume(sessionId: string): Promise<void> {
   }
 }
 
+/** Shared logic: run Agents 2+3 after extraction is complete */
+async function runPostExtractionResume(
+  sessionId: string,
+  agent1Items: unknown[],
+  agent1DetectedLevels: { depth: number; name: string }[],
+  classification: Record<string, unknown> | null,
+  organizationName: string | undefined,
+  industry: string | undefined,
+  planLevels: unknown[] | undefined,
+  extractionMethod: string,
+  sourceText: string
+): Promise<void> {
+  const agent1NameSet = collectItemNameSet(agent1Items);
+  const agent1ItemCount = countAllItems(agent1Items);
+
+  console.log(`[process-plan] Resume: ${agent1ItemCount} items, running Agents 2+3`);
+
+  await logApiCall({
+    session_id: sessionId,
+    edge_function: "process-plan",
+    step_label: "Resume: starting Agents 2+3",
+    status: "success",
+  });
+
+  await updateSessionProgress(sessionId, { current_step: "validating" });
+
+  // Run Agents 2+3 in parallel
+  const hasSourceText = sourceText.length > 100;
+  const auditPayload: Record<string, unknown> = {
+    extractedItems: agent1Items,
+    sessionId,
+    organizationName,
+    industry,
+    planLevels,
+    classification,
+  };
+  if (hasSourceText) {
+    auditPayload.sourceText = sourceText;
+  }
+
+  const [auditSettled, validateSettled] = await Promise.allSettled([
+    // Audit (only if we have source text — images aren't available in resume)
+    (async (): Promise<AuditFindings | null> => {
+      if (!hasSourceText) {
+        console.log("[process-plan] Resume: audit skipped (no source text available)");
+        return null;
+      }
+      try {
+        const result = await callEdgeFunction("audit-completeness", auditPayload);
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const findings = (result.data as { data: AuditFindings }).data;
+          console.log("[process-plan] Resume: audit complete:", JSON.stringify(findings?.auditSummary || {}));
+          return findings;
+        }
+        console.warn("[process-plan] Resume: audit failed (non-fatal)");
+        return null;
+      } catch (err) {
+        console.error("[process-plan] Resume: audit error:", err);
+        return null;
+      }
+    })(),
+    // Validation
+    (async (): Promise<ValidationResult | null> => {
+      try {
+        const result = await callEdgeFunction("validate-hierarchy", {
+          sourceText,
+          extractedItems: agent1Items,
+          auditFindings: null,
+          detectedLevels: agent1DetectedLevels,
+          sessionId,
+          organizationName,
+          industry,
+          planLevels,
+        });
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const vr = (result.data as { data: ValidationResult }).data;
+          console.log("[process-plan] Resume: validation complete:", vr.corrections?.length || 0, "corrections");
+          return vr;
+        }
+        console.warn("[process-plan] Resume: validation failed (non-fatal)");
+        return null;
+      } catch (err) {
+        console.error("[process-plan] Resume: validation error:", err);
+        return null;
+      }
+    })(),
+  ]);
+
+  const auditFindings = auditSettled.status === "fulfilled" ? auditSettled.value : null;
+  const validationResult = validateSettled.status === "fulfilled" ? validateSettled.value : null;
+
+  // Merge & confidence scoring (same logic as normal path)
+  let finalItems: unknown[];
+  let finalLevels: { depth: number; name: string }[];
+  let corrections: { itemId: string; type: string; description: string }[] = [];
+
+  if (validationResult?.correctedItems?.length && validationResult.correctedItems.length > 0) {
+    finalItems = validationResult.correctedItems;
+    finalLevels = validationResult.detectedLevels?.length ? validationResult.detectedLevels : agent1DetectedLevels;
+    corrections = validationResult.corrections || [];
+  } else {
+    finalItems = agent1Items;
+    finalLevels = agent1DetectedLevels;
+  }
+
+  if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
+    enforceMaxDepth(finalItems, planLevels.length, planLevels as { depth: number; name: string }[]);
+  }
+
+  if (auditFindings?.rephrasedItems?.length) {
+    applyRephrasedCorrections(finalItems, auditFindings.rephrasedItems, corrections);
+  }
+
+  calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
+
+  const allConfidences: number[] = [];
+  function gatherConf(items: unknown[]) {
+    for (const item of items) {
+      const i = item as { confidence?: number; children?: unknown[] };
+      if (typeof i.confidence === "number") allConfidences.push(i.confidence);
+      if (i.children?.length) gatherConf(i.children);
+    }
+  }
+  gatherConf(finalItems);
+  const sessionConfidence = allConfidences.length > 0
+    ? Math.round(allConfidences.reduce((a, b) => a + b, 0) / allConfidences.length)
+    : 0;
+
+  const finalItemCount = countAllItems(finalItems);
+  console.log(`[process-plan] Resume complete: ${finalItemCount} items, confidence=${sessionConfidence}%`);
+
+  await updateSessionProgress(sessionId, {
+    status: "completed",
+    current_step: "complete",
+    step_results: {
+      success: true,
+      data: { items: finalItems, detectedLevels: finalLevels },
+      totalItems: finalItemCount,
+      corrections,
+      sessionConfidence,
+      auditSummary: auditFindings?.auditSummary || null,
+      extractionMethod,
+      pipelineComplete: true,
+      sessionId,
+    },
+    total_items_extracted: finalItemCount,
+  });
+
+  await logApiCall({
+    session_id: sessionId,
+    edge_function: "process-plan",
+    step_label: "Resume: completed successfully",
+    status: "success",
+  });
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -1167,7 +1547,7 @@ serve(async (req) => {
   try {
     const body = await req.json();
 
-    // Resume mode: pick up from extraction_complete and run Agents 2+3 only
+    // Resume mode: pick up from extracting or extraction_complete
     if (body.resume_session_id) {
       const resumeSessionId = body.resume_session_id as string;
       console.log("[process-plan] Resume requested for session:", resumeSessionId);
