@@ -579,7 +579,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     } = body;
 
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
-    const useVision = !!pageImages && !hasDocumentText;
+    const useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
 
     // ==============================
     // AGENT 0: Document Classification
