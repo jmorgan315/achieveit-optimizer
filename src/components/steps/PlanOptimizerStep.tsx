@@ -439,6 +439,11 @@ export function PlanOptimizerStep({
       {showConfidence && <SessionSummaryCard sessionId={sessionId} items={items} />}
       {showConfidence && <ConfidenceBanner items={items} />}
 
+      {/* Dedup Summary — between confidence banner and stats */}
+      {dedupResults && dedupResults.length > 0 && onRestoreDedupItem && (
+        <DedupSummaryCard dedupResults={dedupResults} onRestore={onRestoreDedupItem} />
+      )}
+
       {/* View Mode Toggle + Stats Bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
