@@ -366,6 +366,7 @@ const Index = () => {
               levels={state.levels}
               orgProfile={state.orgProfile}
               sessionId={state.sessionId}
+              dedupResults={dedupResults}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}
@@ -375,6 +376,7 @@ const Index = () => {
               onDeleteItem={deleteItem}
               onBack={handleBack}
               onStartOver={handleStartOver}
+              onRestoreDedupItem={handleRestoreDedupItem}
             />
           )}
         </div>
