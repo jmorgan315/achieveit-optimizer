@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { DedupRemovedDetail } from '@/types/plan';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FileText, CheckCircle2, Loader2, AlertTriangle, ClipboardPaste } from 'lucide-react';
