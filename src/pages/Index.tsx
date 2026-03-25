@@ -64,6 +64,7 @@ const Index = () => {
   const [extractedMappings, setExtractedMappings] = useState<PersonMapping[] | null>(null);
   const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
   const [useVisionAI, setUseVisionAI] = useState(false);
+  const [dedupResults, setDedupResults] = useState<DedupRemovedDetail[]>([]);
 
   const {
     state,
