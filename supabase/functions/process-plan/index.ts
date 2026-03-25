@@ -274,25 +274,43 @@ function wordOverlap(a: Set<string>, b: Set<string>): number {
   return total > 0 ? shared / total : 0;
 }
 
-function isDuplicate(nameA: string, nameB: string, parentA?: string | null, parentB?: string | null): boolean {
+function isDuplicate(nameA: string, nameB: string, parentA?: string | null, parentB?: string | null): { match: boolean; reason: string } {
+  // ALL conditions require same parent (or both null/empty)
+  const sameParent = (parentA || null) === (parentB || null);
+  if (!sameParent) return { match: false, reason: "different_parent" };
+
   const normA = normalizeItemName(nameA);
   const normB = normalizeItemName(nameB);
-  if (normA === normB) return true;
+  if (normA === normB) return { match: true, reason: "exact_match" };
   // Prefix match (first 40 chars)
   const prefix = 40;
-  if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return true;
+  if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return { match: true, reason: "starts_with_40" };
   const overlap = wordOverlap(wordSet(nameA), wordSet(nameB));
-  // 70% overlap with same parent (or both null)
-  const sameParent = (parentA || null) === (parentB || null);
-  if (sameParent && overlap >= 0.70) return true;
-  // 85% overlap regardless of parent
-  if (overlap >= 0.85) return true;
-  return false;
+  if (overlap >= 0.70) return { match: true, reason: `word_overlap_${Math.round(overlap * 100)}%` };
+  return { match: false, reason: "" };
+}
+
+interface DedupRemovedDetail {
+  removed_name: string;
+  removed_page: number;
+  removed_parent: string;
+  removed_item: Record<string, unknown>;
+  kept_name: string;
+  kept_page: number;
+  kept_parent: string;
+  match_reason: string;
+}
+
+interface DedupSkippedDetail {
+  name: string;
+  parentA: string;
+  parentB: string;
 }
 
 interface DedupResult {
   items: unknown[];
-  removedDetails: { removed_name: string; removed_page: number; kept_name: string; kept_page: number; match_reason: string }[];
+  removedDetails: DedupRemovedDetail[];
+  skippedDetails: DedupSkippedDetail[];
 }
 
 function deduplicateItems(items: unknown[]): DedupResult {
