@@ -8,7 +8,7 @@ import { LevelVerificationModal } from '@/components/steps/LevelVerificationModa
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
 import { usePlanState } from '@/hooks/usePlanState';
-import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS } from '@/types/plan';
+import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
