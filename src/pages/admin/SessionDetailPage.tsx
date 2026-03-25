@@ -11,6 +11,7 @@ import { ChevronDown, Copy, ArrowLeft } from 'lucide-react';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import type { Json } from '@/integrations/supabase/types';
+import { ResultsPreviewTree } from '@/components/admin/ResultsPreviewTree';
 
 interface Session {
   id: string;
@@ -28,6 +29,7 @@ interface Session {
   status: string;
   document_type: string | null;
   classification_result: Json;
+  step_results: Json;
 }
 
 interface ApiLog {
@@ -293,6 +295,34 @@ export default function SessionDetailPage() {
         ))}
         {logs.length === 0 && <p className="text-sm text-muted-foreground">No API calls logged for this session.</p>}
       </div>
+
+      {/* Results Preview */}
+      {(() => {
+        const sr = session.step_results as Record<string, Json> | null;
+        const dataObj = sr?.data as Record<string, Json> | undefined;
+        const items = dataObj?.items as Array<Record<string, Json>> | undefined;
+        if (!items || items.length === 0) return null;
+        const totalItems = sr?.totalItems as number | undefined;
+        const sessionConfidence = sr?.sessionConfidence as number | undefined;
+        const count = totalItems ?? items.length;
+        return (
+          <Collapsible>
+            <Card>
+              <CollapsibleTrigger className="w-full">
+                <div className="flex items-center gap-3 p-4 text-sm hover:bg-muted/30 transition-colors">
+                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="font-semibold">Results Preview ({count} items)</span>
+                </div>
+              </CollapsibleTrigger>
+              <CollapsibleContent>
+                <div className="border-t border-border">
+                  <ResultsPreviewTree items={items as any} totalItems={totalItems} sessionConfidence={sessionConfidence} />
+                </div>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        );
+      })()}
     </div>
   );
 }
