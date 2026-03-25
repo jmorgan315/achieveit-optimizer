@@ -1007,9 +1007,11 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         input_count: beforeDedupCount,
         output_count: agent1ItemCount,
         duplicates_removed: dedupResult.removedDetails.length,
+        skipped_different_parents: dedupResult.skippedDetails.length,
       },
       response_payload: {
-        removed_items: dedupResult.removedDetails,
+        removed_items: dedupResult.removedDetails.map(d => ({ removed_name: d.removed_name, removed_parent: d.removed_parent, kept_name: d.kept_name, kept_parent: d.kept_parent, match_reason: d.match_reason })),
+        skipped_items: dedupResult.skippedDetails.map(s => `Skipped: '${s.name}' under '${s.parentA}' vs '${s.parentB}' — same name but different parents, kept both`),
         final_items: (agent1Data.items as { name?: string }[]).map(i => i.name || ""),
       },
     });
