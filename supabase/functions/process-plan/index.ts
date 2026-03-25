@@ -324,7 +324,8 @@ function deduplicateItems(items: unknown[]): DedupResult {
   }
 
   const removed = new Set<number>();
-  const removedDetails: DedupResult["removedDetails"] = [];
+  const removedDetails: DedupRemovedDetail[] = [];
+  const skippedDetails: DedupSkippedDetail[] = [];
   const itemsArr = [...items];
 
   for (const [, group] of byLevel) {
@@ -333,7 +334,28 @@ function deduplicateItems(items: unknown[]): DedupResult {
         const itemA = group[a] as { name?: string; source_page?: number; parent_name?: string };
         const itemB = group[b] as { name?: string; source_page?: number; parent_name?: string };
         if (!itemA.name || !itemB.name) continue;
-        if (!isDuplicate(itemA.name, itemB.name, itemA.parent_name, itemB.parent_name)) continue;
+
+        const dupCheck = isDuplicate(itemA.name, itemB.name, itemA.parent_name, itemB.parent_name);
+
+        // Track skipped: names match but different parents
+        if (!dupCheck.match && dupCheck.reason === "different_parent") {
+          const normA = normalizeItemName(itemA.name);
+          const normB = normalizeItemName(itemB.name);
+          const namesMatch = normA === normB ||
+            (normA.length >= 40 && normB.length >= 40 && normA.substring(0, 40) === normB.substring(0, 40)) ||
+            wordOverlap(wordSet(itemA.name), wordSet(itemB.name)) >= 0.70;
+          if (namesMatch) {
+            skippedDetails.push({
+              name: itemA.name,
+              parentA: itemA.parent_name || "(none)",
+              parentB: itemB.parent_name || "(none)",
+            });
+            console.log(`[process-plan] Dedup skipped: '${itemA.name}' under '${itemA.parent_name || "(none)"}' vs '${itemB.parent_name || "(none)"}' — same name but different parents, kept both`);
+          }
+          continue;
+        }
+
+        if (!dupCheck.match) continue;
 
         const idxA = itemsArr.indexOf(group[a]);
         const idxB = itemsArr.indexOf(group[b]);
@@ -354,28 +376,18 @@ function deduplicateItems(items: unknown[]): DedupResult {
           keeper.parent_name = discarded.parent_name;
         }
 
-        // Determine match reason
-        const normA = normalizeItemName(itemA.name);
-        const normB = normalizeItemName(itemB.name);
-        let matchReason = "word_overlap";
-        if (normA === normB) {
-          matchReason = "exact_match";
-        } else if (normA.length >= 40 && normB.length >= 40 && normA.substring(0, 40) === normB.substring(0, 40)) {
-          matchReason = "starts_with_40";
-        } else {
-          const overlap = wordOverlap(wordSet(itemA.name), wordSet(itemB.name));
-          matchReason = `word_overlap_${Math.round(overlap * 100)}%`;
-        }
-
         removedDetails.push({
           removed_name: discarded.name || "",
           removed_page: discarded.source_page || 0,
+          removed_parent: (discarded as Record<string, unknown>).parent_name as string || "",
+          removed_item: { ...(itemsArr[discardIdx] as Record<string, unknown>) },
           kept_name: keeper.name || "",
           kept_page: keeper.source_page || 0,
-          match_reason: matchReason,
+          kept_parent: (keeper as Record<string, unknown>).parent_name as string || "",
+          match_reason: dupCheck.reason,
         });
 
-        console.log(`[process-plan] Dedup: removed '${discarded.name}' (page ${discarded.source_page || '?'}), kept '${keeper.name}' (page ${keeper.source_page || '?'}) [${matchReason}]`);
+        console.log(`[process-plan] Dedup: removed '${discarded.name}' (page ${discarded.source_page || '?'}), kept '${keeper.name}' (page ${keeper.source_page || '?'}) [${dupCheck.reason}]`);
         removed.add(discardIdx);
       }
     }
@@ -383,9 +395,9 @@ function deduplicateItems(items: unknown[]): DedupResult {
 
   const result = itemsArr.filter((_, idx) => !removed.has(idx));
   if (removed.size > 0) {
-    console.log(`[process-plan] Dedup complete: ${removed.size} duplicates removed, ${result.length} items remaining`);
+    console.log(`[process-plan] Dedup complete: ${removed.size} duplicates removed, ${skippedDetails.length} skipped (different parents), ${result.length} items remaining`);
   }
-  return { items: result, removedDetails };
+  return { items: result, removedDetails, skippedDetails };
 }
 
 // ==============================
