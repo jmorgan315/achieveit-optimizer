@@ -35,7 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { PlanItem, PlanLevel, OrgProfile } from '@/types/plan';
+import { PlanItem, PlanLevel, OrgProfile, DedupRemovedDetail } from '@/types/plan';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
