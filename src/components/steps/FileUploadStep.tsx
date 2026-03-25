@@ -444,6 +444,9 @@ export function FileUploadStep({
         description: `Found ${totalItems} plan items`,
       });
 
+      const visionDedupData = result.dedupResults || [];
+      setDedupResults(visionDedupData);
+
       return { items, levels, personMappings, sessionConfidence };
 
     } catch (error: any) {
