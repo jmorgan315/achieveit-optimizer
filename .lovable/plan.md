@@ -1,30 +1,58 @@
 
-# Vision Fallback to Text + Improved Agent 0 Classification — IMPLEMENTED
 
-## What was done
+# Revised Plan: Capture Full Item Data for Dedup Restore
 
-### 1. Frontend: documentText sent alongside pageImages
-- `FileUploadStep.tsx`: `extractWithVisionPipeline` now accepts optional `documentText` parameter
-- When vision path is chosen, `textResult?.text` is included in the `process-plan` request body
-- Both the "text found 0 items → vision" and "poor text quality → vision" paths pass text
+This is an amendment to the approved plan, confirming the `removedDetails` structure must be expanded.
 
-### 2. Backend: Vision fallback to text extraction
-- `process-plan/index.ts`: When vision produces 0 items AND `documentText` exists (>50 chars):
-  - Logs warning: "Step 1: Vision extraction failed — falling back to text extraction results"
-  - Calls `extract-plan-items` with the document text
-  - Sets `extractionMethod = "text_fallback"` for admin visibility
-  - Only marks session as failed if BOTH vision AND text produce 0 items
-- `useVision` logic updated: vision is used when `pageImages` exist regardless of `documentText` presence
+## Current State
 
-### 3. Agent 0 classification prompt improved
-- `classify-document/index.ts`: Added "CRITICAL CLASSIFICATION DECISION" section after document_type definitions
-  - Clear rule: "tabular" = tables ARE the plan structure; "text_heavy" = narrative with supporting tables
-  - Decision rule for mixed documents
-  - Three concrete examples (tabular, text_heavy, presentation)
+The `removedDetails` interface only stores 5 fields:
+```typescript
+{ removed_name: string; removed_page: number; kept_name: string; kept_page: number; match_reason: string }
+```
 
-## Files changed
-| File | Change |
-|------|--------|
-| `src/components/steps/FileUploadStep.tsx` | Thread `textResult.text` into vision pipeline call |
-| `supabase/functions/process-plan/index.ts` | Text fallback when vision produces 0 items; fixed `useVision` logic |
-| `supabase/functions/classify-document/index.ts` | Classification decision rule and examples in system prompt |
+Missing for restore: `level`, `levelType`, `parent_name`, `description`, `owner`, `start_date`, `due_date`, `metrics`, and any other fields the AI extracted.
+
+## Required Change
+
+In `supabase/functions/process-plan/index.ts`, update the `DedupResult` interface and the `deduplicateItems` function:
+
+1. **Interface**: Add `removed_item: Record<string, unknown>` to capture the full discarded object, and `removed_parent: string`, `kept_parent: string` for display:
+
+```typescript
+interface DedupResult {
+  items: unknown[];
+  removedDetails: {
+    removed_name: string;
+    removed_page: number;
+    removed_parent: string;
+    removed_item: Record<string, unknown>;  // full item for restore
+    kept_name: string;
+    kept_page: number;
+    kept_parent: string;
+    match_reason: string;
+  }[];
+}
+```
+
+2. **In the dedup loop** (line 352-358): Capture the full discarded item via spread, plus parent names:
+
+```typescript
+removedDetails.push({
+  removed_name: discarded.name || "",
+  removed_page: discarded.source_page || 0,
+  removed_parent: discarded.parent_name || "",
+  removed_item: { ...(itemsArr[discardIdx] as Record<string, unknown>) },
+  kept_name: keeper.name || "",
+  kept_page: keeper.source_page || 0,
+  kept_parent: keeper.parent_name || "",
+  match_reason: matchReason,
+});
+```
+
+3. **In `finalResult`**: Include `dedupResults: dedupResult.removedDetails` so the frontend receives the full removed items via `step_results`.
+
+This ensures the frontend `DedupSummaryCard` can reconstruct a complete `PlanItem` (with correct `levelName`, `levelDepth`, `parentId`, `description`, etc.) when the user clicks Restore.
+
+All other aspects of the approved plan remain unchanged.
+
