@@ -8,7 +8,7 @@ import { LevelVerificationModal } from '@/components/steps/LevelVerificationModa
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
 import { usePlanState } from '@/hooks/usePlanState';
-import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS } from '@/types/plan';
+import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -64,6 +64,7 @@ const Index = () => {
   const [extractedMappings, setExtractedMappings] = useState<PersonMapping[] | null>(null);
   const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
   const [useVisionAI, setUseVisionAI] = useState(false);
+  const [dedupResults, setDedupResults] = useState<DedupRemovedDetail[]>([]);
 
   const {
     state,
@@ -127,6 +128,7 @@ const Index = () => {
     setExtractedMappings(null);
     setDetectedLevels(null);
     setUseVisionAI(false);
+    setDedupResults([]);
     setHighestCompletedStep(-1);
     setCurrentStep(0);
   };
@@ -202,6 +204,65 @@ const Index = () => {
 
   const handleUpdateLevels = (levels: PlanLevel[]) => {
     updateLevelsAndRecalculate(levels);
+  };
+
+  const handleRestoreDedupItem = (detail: DedupRemovedDetail) => {
+    const raw = detail.removed_item;
+    const parentName = (raw.parent_name as string) || detail.removed_parent || '';
+    
+    // Find parent by name
+    let parentId: string | null = null;
+    let parentDepth = 0;
+    if (parentName) {
+      const parent = state.items.find(i => i.name.toLowerCase().trim() === parentName.toLowerCase().trim());
+      if (parent) {
+        parentId = parent.id;
+        parentDepth = parent.levelDepth;
+      }
+    }
+
+    const levelDepth = parentDepth + 1;
+    const levelName = state.levels.find(l => l.depth === levelDepth)?.name || (raw.level_name as string) || (raw.levelType as string) || `Level ${levelDepth}`;
+
+    const newItem: PlanItem = {
+      id: crypto.randomUUID(),
+      order: '',
+      levelName,
+      levelDepth,
+      name: (raw.name as string) || detail.removed_name,
+      description: (raw.description as string) || '',
+      status: '' as PlanItem['status'],
+      startDate: (raw.start_date as string) || '',
+      dueDate: (raw.due_date as string) || '',
+      assignedTo: (raw.owner as string) || '',
+      members: [],
+      administrators: [],
+      updateFrequency: '',
+      metricDescription: '',
+      metricUnit: '',
+      metricRollup: '',
+      metricBaseline: '',
+      metricTarget: '',
+      currentValue: '',
+      tags: [],
+      parentId,
+      children: [],
+      issues: [],
+      confidence: 80,
+    };
+
+    // Add to items
+    const updatedItems = [...state.items, newItem];
+    setItems(updatedItems, state.personMappings);
+    updateLevelsAndRecalculate(state.levels);
+
+    // Remove from dedup results
+    setDedupResults(prev => prev.filter(d => d !== detail));
+
+    toast({
+      title: 'Item Restored',
+      description: `"${newItem.name}" has been added back to the plan.`,
+    });
   };
 
   const startOverButton = (
@@ -286,6 +347,7 @@ const Index = () => {
               extractedMappings={extractedMappings} setExtractedMappings={setExtractedMappings}
               detectedLevels={detectedLevels} setDetectedLevels={setDetectedLevels}
               useVisionAI={useVisionAI} setUseVisionAI={setUseVisionAI}
+              dedupResults={dedupResults} setDedupResults={setDedupResults}
             />
           )}
 
@@ -304,6 +366,7 @@ const Index = () => {
               levels={state.levels}
               orgProfile={state.orgProfile}
               sessionId={state.sessionId}
+              dedupResults={dedupResults}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}
@@ -313,6 +376,7 @@ const Index = () => {
               onDeleteItem={deleteItem}
               onBack={handleBack}
               onStartOver={handleStartOver}
+              onRestoreDedupItem={handleRestoreDedupItem}
             />
           )}
         </div>

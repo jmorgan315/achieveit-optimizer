@@ -274,25 +274,43 @@ function wordOverlap(a: Set<string>, b: Set<string>): number {
   return total > 0 ? shared / total : 0;
 }
 
-function isDuplicate(nameA: string, nameB: string, parentA?: string | null, parentB?: string | null): boolean {
+function isDuplicate(nameA: string, nameB: string, parentA?: string | null, parentB?: string | null): { match: boolean; reason: string } {
+  // ALL conditions require same parent (or both null/empty)
+  const sameParent = (parentA || null) === (parentB || null);
+  if (!sameParent) return { match: false, reason: "different_parent" };
+
   const normA = normalizeItemName(nameA);
   const normB = normalizeItemName(nameB);
-  if (normA === normB) return true;
+  if (normA === normB) return { match: true, reason: "exact_match" };
   // Prefix match (first 40 chars)
   const prefix = 40;
-  if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return true;
+  if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return { match: true, reason: "starts_with_40" };
   const overlap = wordOverlap(wordSet(nameA), wordSet(nameB));
-  // 70% overlap with same parent (or both null)
-  const sameParent = (parentA || null) === (parentB || null);
-  if (sameParent && overlap >= 0.70) return true;
-  // 85% overlap regardless of parent
-  if (overlap >= 0.85) return true;
-  return false;
+  if (overlap >= 0.70) return { match: true, reason: `word_overlap_${Math.round(overlap * 100)}%` };
+  return { match: false, reason: "" };
+}
+
+interface DedupRemovedDetail {
+  removed_name: string;
+  removed_page: number;
+  removed_parent: string;
+  removed_item: Record<string, unknown>;
+  kept_name: string;
+  kept_page: number;
+  kept_parent: string;
+  match_reason: string;
+}
+
+interface DedupSkippedDetail {
+  name: string;
+  parentA: string;
+  parentB: string;
 }
 
 interface DedupResult {
   items: unknown[];
-  removedDetails: { removed_name: string; removed_page: number; kept_name: string; kept_page: number; match_reason: string }[];
+  removedDetails: DedupRemovedDetail[];
+  skippedDetails: DedupSkippedDetail[];
 }
 
 function deduplicateItems(items: unknown[]): DedupResult {
@@ -306,7 +324,8 @@ function deduplicateItems(items: unknown[]): DedupResult {
   }
 
   const removed = new Set<number>();
-  const removedDetails: DedupResult["removedDetails"] = [];
+  const removedDetails: DedupRemovedDetail[] = [];
+  const skippedDetails: DedupSkippedDetail[] = [];
   const itemsArr = [...items];
 
   for (const [, group] of byLevel) {
@@ -315,7 +334,28 @@ function deduplicateItems(items: unknown[]): DedupResult {
         const itemA = group[a] as { name?: string; source_page?: number; parent_name?: string };
         const itemB = group[b] as { name?: string; source_page?: number; parent_name?: string };
         if (!itemA.name || !itemB.name) continue;
-        if (!isDuplicate(itemA.name, itemB.name, itemA.parent_name, itemB.parent_name)) continue;
+
+        const dupCheck = isDuplicate(itemA.name, itemB.name, itemA.parent_name, itemB.parent_name);
+
+        // Track skipped: names match but different parents
+        if (!dupCheck.match && dupCheck.reason === "different_parent") {
+          const normA = normalizeItemName(itemA.name);
+          const normB = normalizeItemName(itemB.name);
+          const namesMatch = normA === normB ||
+            (normA.length >= 40 && normB.length >= 40 && normA.substring(0, 40) === normB.substring(0, 40)) ||
+            wordOverlap(wordSet(itemA.name), wordSet(itemB.name)) >= 0.70;
+          if (namesMatch) {
+            skippedDetails.push({
+              name: itemA.name,
+              parentA: itemA.parent_name || "(none)",
+              parentB: itemB.parent_name || "(none)",
+            });
+            console.log(`[process-plan] Dedup skipped: '${itemA.name}' under '${itemA.parent_name || "(none)"}' vs '${itemB.parent_name || "(none)"}' — same name but different parents, kept both`);
+          }
+          continue;
+        }
+
+        if (!dupCheck.match) continue;
 
         const idxA = itemsArr.indexOf(group[a]);
         const idxB = itemsArr.indexOf(group[b]);
@@ -336,28 +376,18 @@ function deduplicateItems(items: unknown[]): DedupResult {
           keeper.parent_name = discarded.parent_name;
         }
 
-        // Determine match reason
-        const normA = normalizeItemName(itemA.name);
-        const normB = normalizeItemName(itemB.name);
-        let matchReason = "word_overlap";
-        if (normA === normB) {
-          matchReason = "exact_match";
-        } else if (normA.length >= 40 && normB.length >= 40 && normA.substring(0, 40) === normB.substring(0, 40)) {
-          matchReason = "starts_with_40";
-        } else {
-          const overlap = wordOverlap(wordSet(itemA.name), wordSet(itemB.name));
-          matchReason = `word_overlap_${Math.round(overlap * 100)}%`;
-        }
-
         removedDetails.push({
           removed_name: discarded.name || "",
           removed_page: discarded.source_page || 0,
+          removed_parent: (discarded as Record<string, unknown>).parent_name as string || "",
+          removed_item: { ...(itemsArr[discardIdx] as Record<string, unknown>) },
           kept_name: keeper.name || "",
           kept_page: keeper.source_page || 0,
-          match_reason: matchReason,
+          kept_parent: (keeper as Record<string, unknown>).parent_name as string || "",
+          match_reason: dupCheck.reason,
         });
 
-        console.log(`[process-plan] Dedup: removed '${discarded.name}' (page ${discarded.source_page || '?'}), kept '${keeper.name}' (page ${keeper.source_page || '?'}) [${matchReason}]`);
+        console.log(`[process-plan] Dedup: removed '${discarded.name}' (page ${discarded.source_page || '?'}), kept '${keeper.name}' (page ${keeper.source_page || '?'}) [${dupCheck.reason}]`);
         removed.add(discardIdx);
       }
     }
@@ -365,9 +395,9 @@ function deduplicateItems(items: unknown[]): DedupResult {
 
   const result = itemsArr.filter((_, idx) => !removed.has(idx));
   if (removed.size > 0) {
-    console.log(`[process-plan] Dedup complete: ${removed.size} duplicates removed, ${result.length} items remaining`);
+    console.log(`[process-plan] Dedup complete: ${removed.size} duplicates removed, ${skippedDetails.length} skipped (different parents), ${result.length} items remaining`);
   }
-  return { items: result, removedDetails };
+  return { items: result, removedDetails, skippedDetails };
 }
 
 // ==============================
@@ -977,9 +1007,11 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         input_count: beforeDedupCount,
         output_count: agent1ItemCount,
         duplicates_removed: dedupResult.removedDetails.length,
+        skipped_different_parents: dedupResult.skippedDetails.length,
       },
       response_payload: {
-        removed_items: dedupResult.removedDetails,
+        removed_items: dedupResult.removedDetails.map(d => ({ removed_name: d.removed_name, removed_parent: d.removed_parent, kept_name: d.kept_name, kept_parent: d.kept_parent, match_reason: d.match_reason })),
+        skipped_items: dedupResult.skippedDetails.map(s => `Skipped: '${s.name}' under '${s.parentA}' vs '${s.parentB}' — same name but different parents, kept both`),
         final_items: (agent1Data.items as { name?: string }[]).map(i => i.name || ""),
       },
     });
@@ -1167,6 +1199,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       extractionMethod,
       pipelineComplete: true,
       sessionId,
+      dedupResults: dedupResult.removedDetails,
     };
 
     await updateSessionProgress(sessionId, {

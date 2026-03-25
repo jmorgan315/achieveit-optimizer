@@ -79,6 +79,17 @@ export interface PlanState {
   sessionId?: string;
 }
 
+export interface DedupRemovedDetail {
+  removed_name: string;
+  removed_page: number;
+  removed_parent: string;
+  removed_item: Record<string, unknown>;
+  kept_name: string;
+  kept_page: number;
+  kept_parent: string;
+  match_reason: string;
+}
+
 export const DEFAULT_LEVELS: PlanLevel[] = [
   { id: '1', name: 'Strategic Priority', depth: 1 },
   { id: '2', name: 'Objective', depth: 2 },

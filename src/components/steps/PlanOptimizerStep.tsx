@@ -35,13 +35,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { PlanItem, PlanLevel, OrgProfile } from '@/types/plan';
+import { PlanItem, PlanLevel, OrgProfile, DedupRemovedDetail } from '@/types/plan';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
 import { ConfidenceBanner } from '@/components/plan-optimizer/ConfidenceBanner';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, LayoutList, TreePine, Eye } from 'lucide-react';
+import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -56,6 +57,7 @@ interface PlanOptimizerStepProps {
   levels: PlanLevel[];
   orgProfile?: OrgProfile;
   sessionId?: string;
+  dedupResults?: DedupRemovedDetail[];
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
@@ -65,6 +67,7 @@ interface PlanOptimizerStepProps {
   onDeleteItem?: (id: string) => void;
   onBack?: () => void;
   onStartOver?: () => void;
+  onRestoreDedupItem?: (detail: DedupRemovedDetail) => void;
 }
 
 interface MetricSuggestion {
@@ -83,6 +86,7 @@ export function PlanOptimizerStep({
   levels,
   orgProfile,
   sessionId,
+  dedupResults,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
@@ -92,6 +96,7 @@ export function PlanOptimizerStep({
   onDeleteItem,
   onBack,
   onStartOver,
+  onRestoreDedupItem,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(items.map((i) => i.id)));
   const [selectedItem, setSelectedItem] = useState<PlanItem | null>(null);
@@ -433,6 +438,11 @@ export function PlanOptimizerStep({
       {/* Session Summary + Confidence Banner — only when toggle is on */}
       {showConfidence && <SessionSummaryCard sessionId={sessionId} items={items} />}
       {showConfidence && <ConfidenceBanner items={items} />}
+
+      {/* Dedup Summary — between confidence banner and stats */}
+      {dedupResults && dedupResults.length > 0 && onRestoreDedupItem && (
+        <DedupSummaryCard dedupResults={dedupResults} onRestore={onRestoreDedupItem} />
+      )}
 
       {/* View Mode Toggle + Stats Bar */}
       <div className="flex items-center justify-between">

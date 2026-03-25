@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { DedupRemovedDetail } from '@/types/plan';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, FileText, CheckCircle2, Loader2, AlertTriangle, ClipboardPaste } from 'lucide-react';
@@ -26,6 +27,7 @@ interface FileUploadStepProps {
   extractedMappings: PersonMapping[] | null; setExtractedMappings: (v: PersonMapping[] | null) => void;
   detectedLevels: PlanLevel[] | null; setDetectedLevels: (v: PlanLevel[] | null) => void;
   useVisionAI: boolean; setUseVisionAI: (v: boolean) => void;
+  dedupResults: DedupRemovedDetail[]; setDedupResults: (v: DedupRemovedDetail[]) => void;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -52,6 +54,7 @@ export function FileUploadStep({
   extractedMappings, setExtractedMappings,
   detectedLevels, setDetectedLevels,
   useVisionAI, setUseVisionAI,
+  dedupResults, setDedupResults,
 }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -187,6 +190,7 @@ export function FileUploadStep({
     auditSummary?: any;
     extractionMethod?: string;
     pipelineComplete?: boolean;
+    dedupResults?: DedupRemovedDetail[];
     error?: string;
   }> => {
     const POLL_INTERVAL = 3000;
@@ -441,6 +445,9 @@ export function FileUploadStep({
         description: `Found ${totalItems} plan items`,
       });
 
+      const visionDedupData = result.dedupResults || [];
+      setDedupResults(visionDedupData);
+
       return { items, levels, personMappings, sessionConfidence };
 
     } catch (error: any) {
@@ -546,6 +553,9 @@ export function FileUploadStep({
         title: "Extraction Complete",
         description: `Found ${totalItems} plan items`,
       });
+
+      const dedupData = result.dedupResults || [];
+      setDedupResults(dedupData);
 
       return { items, levels, personMappings, sessionConfidence };
 
