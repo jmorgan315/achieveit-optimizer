@@ -42,6 +42,7 @@ import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCa
 import { ConfidenceBanner } from '@/components/plan-optimizer/ConfidenceBanner';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, LayoutList, TreePine, Eye } from 'lucide-react';
+import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
