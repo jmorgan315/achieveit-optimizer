@@ -27,6 +27,7 @@ interface FileUploadStepProps {
   extractedMappings: PersonMapping[] | null; setExtractedMappings: (v: PersonMapping[] | null) => void;
   detectedLevels: PlanLevel[] | null; setDetectedLevels: (v: PlanLevel[] | null) => void;
   useVisionAI: boolean; setUseVisionAI: (v: boolean) => void;
+  dedupResults: DedupRemovedDetail[]; setDedupResults: (v: DedupRemovedDetail[]) => void;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
