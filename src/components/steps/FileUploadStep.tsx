@@ -190,6 +190,7 @@ export function FileUploadStep({
     auditSummary?: any;
     extractionMethod?: string;
     pipelineComplete?: boolean;
+    dedupResults?: DedupRemovedDetail[];
     error?: string;
   }> => {
     const POLL_INTERVAL = 3000;
