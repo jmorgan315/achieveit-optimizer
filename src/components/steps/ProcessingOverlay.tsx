@@ -173,7 +173,7 @@ export function ProcessingOverlay({
         </div>
 
         {/* Contextual tip / status card */}
-        <div className="rounded-lg bg-muted/50 border border-border p-4 min-h-[4.5rem]">
+        <div className="rounded-lg bg-muted/50 border border-border p-4 h-[5.5rem] overflow-hidden">
           {tips ? (
             <div className="flex items-start gap-3">
               <div className="h-8 w-8 rounded-full bg-accent/10 flex items-center justify-center shrink-0 mt-0.5">
@@ -183,7 +183,7 @@ export function ProcessingOverlay({
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                   {industry} Insight
                 </p>
-                <p className="text-sm text-foreground leading-relaxed transition-opacity duration-500">
+                <p className="text-sm text-foreground leading-relaxed transition-opacity duration-500 line-clamp-2">
                   {tips[activeTipIndex]}
                 </p>
               </div>
