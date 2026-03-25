@@ -28,6 +28,7 @@ interface Session {
   status: string;
   document_type: string | null;
   classification_result: Json;
+  step_results: Json;
 }
 
 interface ApiLog {
