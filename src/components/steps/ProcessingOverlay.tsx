@@ -183,7 +183,7 @@ export function ProcessingOverlay({
                 <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                   {industry} Insight
                 </p>
-                <p className="text-sm text-foreground leading-relaxed transition-opacity duration-500">
+                <p className="text-sm text-foreground leading-relaxed transition-opacity duration-500 line-clamp-2">
                   {tips[activeTipIndex]}
                 </p>
               </div>
