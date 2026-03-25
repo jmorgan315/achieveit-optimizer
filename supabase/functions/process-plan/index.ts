@@ -1199,6 +1199,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       extractionMethod,
       pipelineComplete: true,
       sessionId,
+      dedupResults: dedupResult.removedDetails,
     };
 
     await updateSessionProgress(sessionId, {
