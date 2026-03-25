@@ -206,6 +206,65 @@ const Index = () => {
     updateLevelsAndRecalculate(levels);
   };
 
+  const handleRestoreDedupItem = (detail: DedupRemovedDetail) => {
+    const raw = detail.removed_item;
+    const parentName = (raw.parent_name as string) || detail.removed_parent || '';
+    
+    // Find parent by name
+    let parentId: string | null = null;
+    let parentDepth = 0;
+    if (parentName) {
+      const parent = state.items.find(i => i.name.toLowerCase().trim() === parentName.toLowerCase().trim());
+      if (parent) {
+        parentId = parent.id;
+        parentDepth = parent.levelDepth;
+      }
+    }
+
+    const levelDepth = parentDepth + 1;
+    const levelName = state.levels.find(l => l.depth === levelDepth)?.name || (raw.level_name as string) || (raw.levelType as string) || `Level ${levelDepth}`;
+
+    const newItem: PlanItem = {
+      id: crypto.randomUUID(),
+      order: '',
+      levelName,
+      levelDepth,
+      name: (raw.name as string) || detail.removed_name,
+      description: (raw.description as string) || '',
+      status: '' as PlanItem['status'],
+      startDate: (raw.start_date as string) || '',
+      dueDate: (raw.due_date as string) || '',
+      assignedTo: (raw.owner as string) || '',
+      members: [],
+      administrators: [],
+      updateFrequency: '',
+      metricDescription: '',
+      metricUnit: '',
+      metricRollup: '',
+      metricBaseline: '',
+      metricTarget: '',
+      currentValue: '',
+      tags: [],
+      parentId,
+      children: [],
+      issues: [],
+      confidence: 80,
+    };
+
+    // Add to items
+    const updatedItems = [...state.items, newItem];
+    setItems(updatedItems, state.personMappings);
+    updateLevelsAndRecalculate(state.levels);
+
+    // Remove from dedup results
+    setDedupResults(prev => prev.filter(d => d !== detail));
+
+    toast({
+      title: 'Item Restored',
+      description: `"${newItem.name}" has been added back to the plan.`,
+    });
+  };
+
   const startOverButton = (
     <AlertDialog>
       <AlertDialogTrigger asChild>
