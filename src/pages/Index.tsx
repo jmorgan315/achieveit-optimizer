@@ -288,6 +288,7 @@ const Index = () => {
               extractedMappings={extractedMappings} setExtractedMappings={setExtractedMappings}
               detectedLevels={detectedLevels} setDetectedLevels={setDetectedLevels}
               useVisionAI={useVisionAI} setUseVisionAI={setUseVisionAI}
+              dedupResults={dedupResults} setDedupResults={setDedupResults}
             />
           )}
 
