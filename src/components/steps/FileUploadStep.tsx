@@ -54,6 +54,7 @@ export function FileUploadStep({
   extractedMappings, setExtractedMappings,
   detectedLevels, setDetectedLevels,
   useVisionAI, setUseVisionAI,
+  dedupResults, setDedupResults,
 }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
