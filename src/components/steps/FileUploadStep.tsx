@@ -550,9 +550,11 @@ export function FileUploadStep({
         description: `Found ${totalItems} plan items`,
       });
 
+      const dedupData = result.dedupResults || [];
+      setDedupResults(dedupData);
+
       return { items, levels, personMappings, sessionConfidence };
 
-    } catch (error) {
       console.error('AI pipeline error:', error);
       toast({
         title: "Extraction Failed",
