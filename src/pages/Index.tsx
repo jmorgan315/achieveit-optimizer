@@ -128,6 +128,7 @@ const Index = () => {
     setExtractedMappings(null);
     setDetectedLevels(null);
     setUseVisionAI(false);
+    setDedupResults([]);
     setHighestCompletedStep(-1);
     setCurrentStep(0);
   };
