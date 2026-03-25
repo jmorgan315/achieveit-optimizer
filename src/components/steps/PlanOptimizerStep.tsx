@@ -57,6 +57,7 @@ interface PlanOptimizerStepProps {
   levels: PlanLevel[];
   orgProfile?: OrgProfile;
   sessionId?: string;
+  dedupResults?: DedupRemovedDetail[];
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
@@ -66,6 +67,7 @@ interface PlanOptimizerStepProps {
   onDeleteItem?: (id: string) => void;
   onBack?: () => void;
   onStartOver?: () => void;
+  onRestoreDedupItem?: (detail: DedupRemovedDetail) => void;
 }
 
 interface MetricSuggestion {
