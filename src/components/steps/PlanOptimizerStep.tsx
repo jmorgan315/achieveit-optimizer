@@ -86,6 +86,7 @@ export function PlanOptimizerStep({
   levels,
   orgProfile,
   sessionId,
+  dedupResults,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
@@ -95,6 +96,7 @@ export function PlanOptimizerStep({
   onDeleteItem,
   onBack,
   onStartOver,
+  onRestoreDedupItem,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(items.map((i) => i.id)));
   const [selectedItem, setSelectedItem] = useState<PlanItem | null>(null);
