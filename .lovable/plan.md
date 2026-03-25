@@ -1,58 +1,51 @@
 
 
-# Revised Plan: Capture Full Item Data for Dedup Restore
+# Add Read-Only Results Preview to Admin Session Detail Page
 
-This is an amendment to the approved plan, confirming the `removedDetails` structure must be expanded.
+## Overview
+Add a collapsible "Results Preview" section below the API Call Timeline on the admin session detail page. Renders the pipeline output as a read-only hierarchical tree with confidence indicators.
 
-## Current State
+## Data Shape (Verified)
 
-The `removedDetails` interface only stores 5 fields:
-```typescript
-{ removed_name: string; removed_page: number; kept_name: string; kept_page: number; match_reason: string }
+Both pipeline paths (normal + resume) write the same structure to `step_results`:
+
+```
+step_results.success: boolean
+step_results.data.items: nested tree array (each item has name, levelType, confidence, children)
+step_results.data.detectedLevels: string[]
+step_results.totalItems: number
+step_results.sessionConfidence: number
+step_results.corrections: array
+step_results.dedupResults: array
 ```
 
-Missing for restore: `level`, `levelType`, `parent_name`, `description`, `owner`, `start_date`, `due_date`, `metrics`, and any other fields the AI extracted.
+Path `step_results.data.items` is confirmed correct from lines 1191-1193 and 1629 of `process-plan/index.ts`.
 
-## Required Change
+## Changes
 
-In `supabase/functions/process-plan/index.ts`, update the `DedupResult` interface and the `deduplicateItems` function:
+### 1. New: `src/components/admin/ResultsPreviewTree.tsx`
 
-1. **Interface**: Add `removed_item: Record<string, unknown>` to capture the full discarded object, and `removed_parent: string`, `kept_parent: string` for display:
+Lightweight read-only recursive tree renderer:
+- Accepts raw items array (from `step_results.data.items`) and total count / confidence
+- Confidence summary line at top: "X of Y items high confidence. Z need review."
+- Recursive rendering with depth-based indentation (depth × 24px left padding)
+- Each row: level badge, confidence dot (green ≥80 / yellow ≥60 / orange ≥40 / red <40), full item name
+- Alternating row backgrounds, compact `text-sm` styling
+- No interactivity beyond the parent collapsible
 
-```typescript
-interface DedupResult {
-  items: unknown[];
-  removedDetails: {
-    removed_name: string;
-    removed_page: number;
-    removed_parent: string;
-    removed_item: Record<string, unknown>;  // full item for restore
-    kept_name: string;
-    kept_page: number;
-    kept_parent: string;
-    match_reason: string;
-  }[];
-}
-```
+### 2. Update: `src/pages/admin/SessionDetailPage.tsx`
 
-2. **In the dedup loop** (line 352-358): Capture the full discarded item via spread, plus parent names:
+- Add `step_results: Json` to `Session` interface
+- After API Call Timeline section, add collapsible card:
+  - Only renders when `step_results?.data?.items` exists
+  - Header: "Results Preview (X items)" with chevron toggle, default collapsed
+  - Same pattern as existing `ClassificationCard`
+  - Renders `<ResultsPreviewTree>` inside
 
-```typescript
-removedDetails.push({
-  removed_name: discarded.name || "",
-  removed_page: discarded.source_page || 0,
-  removed_parent: discarded.parent_name || "",
-  removed_item: { ...(itemsArr[discardIdx] as Record<string, unknown>) },
-  kept_name: keeper.name || "",
-  kept_page: keeper.source_page || 0,
-  kept_parent: keeper.parent_name || "",
-  match_reason: matchReason,
-});
-```
+## Files
 
-3. **In `finalResult`**: Include `dedupResults: dedupResult.removedDetails` so the frontend receives the full removed items via `step_results`.
-
-This ensures the frontend `DedupSummaryCard` can reconstruct a complete `PlanItem` (with correct `levelName`, `levelDepth`, `parentId`, `description`, etc.) when the user clicks Restore.
-
-All other aspects of the approved plan remain unchanged.
+| File | Change |
+|------|--------|
+| `src/components/admin/ResultsPreviewTree.tsx` | New — read-only tree with confidence summary |
+| `src/pages/admin/SessionDetailPage.tsx` | Add step_results to interface; add Results Preview section |
 
