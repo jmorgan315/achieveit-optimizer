@@ -351,6 +351,7 @@ const Index = () => {
             <FileUploadStep
               onTextSubmit={handleTextSubmit}
               onAIExtraction={handleAIExtraction}
+              onSpreadsheetComplete={handleSpreadsheetComplete}
               orgProfile={state.orgProfile}
               sessionId={state.sessionId || ensureSessionId()}
               uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
