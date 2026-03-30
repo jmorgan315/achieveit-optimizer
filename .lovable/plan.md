@@ -1,51 +1,75 @@
 
 
-# Add Read-Only Results Preview to Admin Session Detail Page
+# Excel/CSV Import Path — Revised Plan
 
 ## Overview
-Add a collapsible "Results Preview" section below the API Call Timeline on the admin session detail page. Renders the pipeline output as a read-only hierarchical tree with confidence indicators.
+Parallel client-side import path for spreadsheets. PDF pipeline is untouched. Shares only the final Review & Export step.
 
-## Data Shape (Verified)
+## Key Callouts from User Feedback
 
-Both pipeline paths (normal + resume) write the same structure to `step_results`:
+1. **Level Verification Modal**: The `showLevelModal` is triggered by `handleAIExtraction` (line 175) which sets `setPendingAIData` then `setShowLevelModal(true)`. For spreadsheet imports, we'll add a separate handler (`handleSpreadsheetComplete`) that calls `setLevels` + `setItems` + `advanceToStep(2)` directly — never touching `showLevelModal`. The modal's `open` prop stays wired to `showLevelModal` which only PDF sets. No risk of hiding it for PDF runs.
 
-```
-step_results.success: boolean
-step_results.data.items: nested tree array (each item has name, levelType, confidence, children)
-step_results.data.detectedLevels: string[]
-step_results.totalItems: number
-step_results.sessionConfidence: number
-step_results.corrections: array
-step_results.dedupResults: array
-```
-
-Path `step_results.data.items` is confirmed correct from lines 1191-1193 and 1629 of `process-plan/index.ts`.
+2. **Multi-sheet**: v1 defaults to the largest/first sheet with a selector to pick one. Note in the UI that multi-sheet merge is planned. Not a blocker.
 
 ## Changes
 
-### 1. New: `src/components/admin/ResultsPreviewTree.tsx`
+### 1. Install `xlsx` (SheetJS)
+Add to `package.json`.
 
-Lightweight read-only recursive tree renderer:
-- Accepts raw items array (from `step_results.data.items`) and total count / confidence
-- Confidence summary line at top: "X of Y items high confidence. Z need review."
-- Recursive rendering with depth-based indentation (depth × 24px left padding)
-- Each row: level badge, confidence dot (green ≥80 / yellow ≥60 / orange ≥40 / red <40), full item name
-- Alternating row backgrounds, compact `text-sm` styling
-- No interactivity beyond the parent collapsible
+### 2. New: `src/utils/spreadsheet-parser.ts`
+- `parseSpreadsheetFile(file)` — reads all sheets via SheetJS, returns sheet names + raw row arrays
+- `detectStructure(sheets)` — identifies section headers (rows spanning columns or preceding data blocks), column headers, data rows, repeating sections
+- Smart column defaults: "Action"/"Description" → Item Name, "Owner"/"Sponsor" → Owner, "Deadline"/"Date" → Date, "Metric"/"Measurement" → Metric, "Department" → prompt user
+- `generatePlanItems(sheets, mapping, levels)` — walks rows per mapping config, builds `PlanItem[]` with hierarchy, confidence 100, source "spreadsheet"
+- Simple name+parent dedup
 
-### 2. Update: `src/pages/admin/SessionDetailPage.tsx`
+### 3. New: `src/components/spreadsheet/DetectionSummary.tsx`
+- "Found X sheets with Y items across Z sections"
+- Sheet selector (defaults to largest), shows item counts per sheet
+- Note: "Multi-sheet merge coming in a future update"
+- "Continue to Mapping" button
 
-- Add `step_results: Json` to `Session` interface
-- After API Call Timeline section, add collapsible card:
-  - Only renders when `step_results?.data?.items` exists
-  - Header: "Results Preview (X items)" with chevron toggle, default collapsed
-  - Same pattern as existing `ClassificationCard`
-  - Renders `<ResultsPreviewTree>` inside
+### 4. New: `src/components/spreadsheet/MappingInterface.tsx`
+- Left panel: detected elements (section headers, columns) with dropdowns (Level 1/2/3/etc., Item Name, Owner, Date, Metric, Tag, Skip)
+- Right panel: live preview tree of first 10-15 items with current mapping
+- Smart defaults pre-filled
+- "Apply Mapping" button
 
-## Files
+### 5. New: `src/components/steps/SpreadsheetImportStep.tsx`
+Orchestrator with internal phases: Detection → Mapping → Generation. On completion, calls parent callback with generated `PlanItem[]`, `PersonMapping[]`, and `PlanLevel[]`.
+
+### 6. Modify: `src/components/steps/FileUploadStep.tsx`
+Lines 684-691 only — replace Excel demo fallback:
+- Parse file with SheetJS, set `spreadsheetData` state
+- When set, render `SpreadsheetImportStep` instead of extraction UI
+- On completion, call a new `onSpreadsheetComplete` prop (separate from `onAIExtraction`)
+
+### 7. Modify: `src/pages/Index.tsx`
+- Add `handleSpreadsheetComplete(items, personMappings, levels)` handler that:
+  - Calls `setLevels(levels)`, `setItems(items, personMappings)` directly
+  - Skips `showLevelModal` entirely (never sets it to true)
+  - Advances to step 2 (People Mapper) or step 3 (Review) depending on whether mappings exist
+- Pass `onSpreadsheetComplete` as prop to `FileUploadStep`
+- Add `spreadsheetImportMode` reset in `handleStartOver`
+- **No changes to `handleAIExtraction` or `showLevelModal` logic** — PDF path untouched
+
+### 8. Session tracking
+In `SpreadsheetImportStep`, upsert `processing_sessions` with `extraction_method: 'spreadsheet'`, `total_items_extracted`, `status: 'completed'`, mapping config in `step_results`.
+
+## Files Summary
 
 | File | Change |
 |------|--------|
-| `src/components/admin/ResultsPreviewTree.tsx` | New — read-only tree with confidence summary |
-| `src/pages/admin/SessionDetailPage.tsx` | Add step_results to interface; add Results Preview section |
+| `package.json` | Add `xlsx` |
+| `src/utils/spreadsheet-parser.ts` | New — parse, detect, generate |
+| `src/components/spreadsheet/DetectionSummary.tsx` | New — detection results UI |
+| `src/components/spreadsheet/MappingInterface.tsx` | New — mapping UI with live preview |
+| `src/components/steps/SpreadsheetImportStep.tsx` | New — orchestrator |
+| `src/components/steps/FileUploadStep.tsx` | Replace Excel demo fallback with spreadsheet path |
+| `src/pages/Index.tsx` | Add `handleSpreadsheetComplete` handler (separate from PDF's `handleAIExtraction`) |
+
+## What does NOT change
+- No edge functions, no PDF pipeline, no polling/resume logic
+- No changes to `PlanOptimizerStep`, `LevelVerificationModal`, or admin panel
+- `showLevelModal` only triggered by PDF path — spreadsheet path uses a separate handler
 
