@@ -49,21 +49,23 @@ export async function parseSpreadsheetFile(file: File): Promise<ParsedSheet[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
 
-  return workbook.SheetNames.map(name => {
-    const sheet = workbook.Sheets[name];
-    const json: (string | number | null)[][] = XLSX.utils.sheet_to_json(sheet, {
+  return workbook.SheetNames.flatMap(name => {
+    const ws = workbook.Sheets[name];
+    if (!ws?.['!ref']) return [];
+    const json = (XLSX.utils.sheet_to_json(ws, {
       header: 1,
       defval: null,
       blankrows: false,
-    });
-    const columnCount = json.reduce((max, row) => Math.max(max, row.length), 0);
-    return { name, rows: json, columnCount, rowCount: json.length };
+    }) as (string | number | null)[][]).filter((row): row is (string | number | null)[] => Array.isArray(row));
+    const columnCount = json.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+    return [{ name, rows: json, columnCount, rowCount: json.length }];
   });
 }
 
 // ─── Structure Detection ────────────────────────────────────────
 
 function isLikelyColumnHeaderRow(row: (string | number | null)[]): boolean {
+  if (!Array.isArray(row)) return false;
   const filled = row.filter(c => c != null && String(c).trim().length > 0);
   if (filled.length < 2) return false;
   const allShort = filled.every(c => String(c).trim().length < 40);
@@ -71,6 +73,7 @@ function isLikelyColumnHeaderRow(row: (string | number | null)[]): boolean {
 }
 
 function isLikelySectionHeader(row: (string | number | null)[], avgCols: number): boolean {
+  if (!Array.isArray(row)) return false;
   const filled = row.filter(c => c != null && String(c).trim().length > 0);
   if (filled.length !== 1 && filled.length !== 2) return false;
   const text = String(filled[0]).trim();
@@ -89,6 +92,7 @@ export function detectStructure(sheets: ParsedSheet[]): StructureDetection {
     let i = 0;
 
     while (i < rows.length) {
+      if (!Array.isArray(rows[i])) { i++; continue; }
       // Look for section header
       if (isLikelySectionHeader(rows[i], avgCols)) {
         const headerText = String(rows[i].find(c => c != null && String(c).trim() !== '') || '').trim();
