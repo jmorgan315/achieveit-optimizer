@@ -49,15 +49,16 @@ export async function parseSpreadsheetFile(file: File): Promise<ParsedSheet[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: 'array' });
 
-  return workbook.SheetNames.map(name => {
-    const sheet = workbook.Sheets[name];
-    const json: (string | number | null)[][] = XLSX.utils.sheet_to_json(sheet, {
+  return workbook.SheetNames.flatMap(name => {
+    const ws = workbook.Sheets[name];
+    if (!ws?.['!ref']) return [];
+    const json = (XLSX.utils.sheet_to_json(ws, {
       header: 1,
       defval: null,
       blankrows: false,
-    });
-    const columnCount = json.reduce((max, row) => Math.max(max, row.length), 0);
-    return { name, rows: json, columnCount, rowCount: json.length };
+    }) as (string | number | null)[][]).filter((row): row is (string | number | null)[] => Array.isArray(row));
+    const columnCount = json.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+    return [{ name, rows: json, columnCount, rowCount: json.length }];
   });
 }
 
