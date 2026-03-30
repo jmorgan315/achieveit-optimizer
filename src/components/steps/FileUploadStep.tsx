@@ -14,10 +14,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { Textarea } from '@/components/ui/textarea';
 
 import { OrgProfile } from '@/types/plan';
+import { SpreadsheetImportStep } from './SpreadsheetImportStep';
 
 interface FileUploadStepProps {
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
+  onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
   sessionId?: string;
   // Lifted state
