@@ -73,6 +73,7 @@ function isLikelyColumnHeaderRow(row: (string | number | null)[]): boolean {
 }
 
 function isLikelySectionHeader(row: (string | number | null)[], avgCols: number): boolean {
+  if (!Array.isArray(row)) return false;
   const filled = row.filter(c => c != null && String(c).trim().length > 0);
   if (filled.length !== 1 && filled.length !== 2) return false;
   const text = String(filled[0]).trim();
