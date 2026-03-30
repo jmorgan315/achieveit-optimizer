@@ -92,6 +92,7 @@ export function detectStructure(sheets: ParsedSheet[]): StructureDetection {
     let i = 0;
 
     while (i < rows.length) {
+      if (!Array.isArray(rows[i])) { i++; continue; }
       // Look for section header
       if (isLikelySectionHeader(rows[i], avgCols)) {
         const headerText = String(rows[i].find(c => c != null && String(c).trim() !== '') || '').trim();
