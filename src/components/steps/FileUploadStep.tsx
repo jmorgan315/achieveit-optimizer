@@ -49,7 +49,7 @@ const INITIAL_PROGRESS: ProgressState = {
 const CHARS_PER_PAGE_THRESHOLD = 200;
 
 export function FileUploadStep({
-  onTextSubmit, onAIExtraction, orgProfile, sessionId,
+  onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
   uploadedFile, setUploadedFile,
   fileContent, setFileContent,
   extractedItems, setExtractedItems,
