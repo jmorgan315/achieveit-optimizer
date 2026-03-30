@@ -194,6 +194,18 @@ const Index = () => {
     advanceToStep(3);
   };
 
+  const handleSpreadsheetComplete = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
+    setLevels(levels);
+    setItems(items, personMappings);
+    // Skip level verification modal — levels come from user mapping
+    // Go to People Mapper if there are person mappings, otherwise straight to Review
+    if (personMappings.length > 0) {
+      advanceToStep(2);
+    } else {
+      advanceToStep(3);
+    }
+  };
+
   const handleExport = () => {
     exportToExcel(state.items, state.levels);
     toast({
