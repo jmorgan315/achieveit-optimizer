@@ -14,10 +14,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { Textarea } from '@/components/ui/textarea';
 
 import { OrgProfile } from '@/types/plan';
+import { SpreadsheetImportStep } from './SpreadsheetImportStep';
 
 interface FileUploadStepProps {
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
+  onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
   sessionId?: string;
   // Lifted state
@@ -47,7 +49,7 @@ const INITIAL_PROGRESS: ProgressState = {
 const CHARS_PER_PAGE_THRESHOLD = 200;
 
 export function FileUploadStep({
-  onTextSubmit, onAIExtraction, orgProfile, sessionId,
+  onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
   uploadedFile, setUploadedFile,
   fileContent, setFileContent,
   extractedItems, setExtractedItems,
@@ -58,6 +60,7 @@ export function FileUploadStep({
 }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [spreadsheetFile, setSpreadsheetFile] = useState<File | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [visionError, setVisionError] = useState<string | null>(null);
@@ -681,13 +684,18 @@ export function FileUploadStep({
         }
         return;
         
-      } else if (isWord || isExcel) {
+      } else if (isExcel || fileName.endsWith('.csv')) {
+        // Route to spreadsheet import path
+        setIsProcessing(false);
+        setSpreadsheetFile(file);
+        return;
+      } else if (isWord) {
         addMessage('Processing document...');
         await new Promise(resolve => setTimeout(resolve, 1000));
         extractedText = SAMPLE_RAW_TEXT;
         toast({
           title: "Document loaded",
-          description: "Using sample data for demo. Full Office support coming soon.",
+          description: "Using sample data for demo. Full Word support coming soon.",
         });
       } else if (isTextFile) {
         addMessage('Reading file...');
@@ -799,6 +807,19 @@ export function FileUploadStep({
   };
 
   const isLoading = isProcessing || isExtracting;
+
+  // Spreadsheet import path — render SpreadsheetImportStep instead of main UI
+  if (spreadsheetFile && sessionId && onSpreadsheetComplete) {
+    return (
+      <div className="w-full max-w-4xl mx-auto space-y-6">
+        <SpreadsheetImportStep
+          file={spreadsheetFile}
+          sessionId={sessionId}
+          onComplete={onSpreadsheetComplete}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
