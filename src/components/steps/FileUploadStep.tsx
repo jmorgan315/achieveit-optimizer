@@ -684,13 +684,18 @@ export function FileUploadStep({
         }
         return;
         
-      } else if (isWord || isExcel) {
+      } else if (isExcel || fileName.endsWith('.csv')) {
+        // Route to spreadsheet import path
+        setIsProcessing(false);
+        setSpreadsheetFile(file);
+        return;
+      } else if (isWord) {
         addMessage('Processing document...');
         await new Promise(resolve => setTimeout(resolve, 1000));
         extractedText = SAMPLE_RAW_TEXT;
         toast({
           title: "Document loaded",
-          description: "Using sample data for demo. Full Office support coming soon.",
+          description: "Using sample data for demo. Full Word support coming soon.",
         });
       } else if (isTextFile) {
         addMessage('Reading file...');
