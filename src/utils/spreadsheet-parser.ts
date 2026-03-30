@@ -65,6 +65,7 @@ export async function parseSpreadsheetFile(file: File): Promise<ParsedSheet[]> {
 // ─── Structure Detection ────────────────────────────────────────
 
 function isLikelyColumnHeaderRow(row: (string | number | null)[]): boolean {
+  if (!Array.isArray(row)) return false;
   const filled = row.filter(c => c != null && String(c).trim().length > 0);
   if (filled.length < 2) return false;
   const allShort = filled.every(c => String(c).trim().length < 40);
