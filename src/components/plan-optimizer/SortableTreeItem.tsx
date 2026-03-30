@@ -116,9 +116,17 @@ export function SortableTreeItem({
 
   const formatDateRange = () => {
     if (!item.startDate && !item.dueDate) return null;
-    const start = item.startDate ? format(new Date(item.startDate), 'MMM d') : '?';
-    const due = item.dueDate ? format(new Date(item.dueDate), 'MMM d, yyyy') : '?';
-    return `${start} - ${due}`;
+    const toValid = (v: string | undefined) => {
+      if (!v) return null;
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? null : d;
+    };
+    const s = toValid(item.startDate);
+    const e = toValid(item.dueDate);
+    if (s && e) return `${format(s, 'MMM d')} - ${format(e, 'MMM d, yyyy')}`;
+    if (s) return format(s, 'MMM d, yyyy');
+    if (e) return format(e, 'MMM d, yyyy');
+    return null;
   };
 
   const dateRange = formatDateRange();
