@@ -60,6 +60,7 @@ export function FileUploadStep({
 }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [spreadsheetFile, setSpreadsheetFile] = useState<File | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [visionError, setVisionError] = useState<string | null>(null);
