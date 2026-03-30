@@ -808,6 +808,19 @@ export function FileUploadStep({
 
   const isLoading = isProcessing || isExtracting;
 
+  // Spreadsheet import path — render SpreadsheetImportStep instead of main UI
+  if (spreadsheetFile && sessionId && onSpreadsheetComplete) {
+    return (
+      <div className="w-full max-w-4xl mx-auto space-y-6">
+        <SpreadsheetImportStep
+          file={spreadsheetFile}
+          sessionId={sessionId}
+          onComplete={onSpreadsheetComplete}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="w-full max-w-4xl mx-auto space-y-6">
       <Card className="border-border/50 shadow-sm">
