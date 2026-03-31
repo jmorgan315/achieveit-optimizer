@@ -146,6 +146,8 @@ export function EditItemDialog({
       startDate: formData.startDate ? format(formData.startDate, 'yyyy-MM-dd') : '',
       dueDate: formData.dueDate ? format(formData.dueDate, 'yyyy-MM-dd') : '',
       assignedTo: formData.assignedTo,
+      members: formData.members,
+      tags: formData.tags,
       metricDescription: formData.metricDescription,
       metricUnit: formData.metricUnit,
       metricRollup: formData.metricRollup,
