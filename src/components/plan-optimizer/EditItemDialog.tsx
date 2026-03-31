@@ -64,6 +64,8 @@ interface EditFormData {
   startDate: Date | undefined;
   dueDate: Date | undefined;
   assignedTo: string;
+  members: string[];
+  tags: string[];
   metricDescription: MetricDescription;
   metricUnit: MetricUnit;
   metricRollup: MetricRollup;
