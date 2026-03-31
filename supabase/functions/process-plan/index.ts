@@ -937,7 +937,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
         // ==============================
         const isLastBatch = batchIdx === batches.length - 1;
         await updateSessionProgress(sessionId, {
-          current_step: isLastBatch ? "extracting" : "extracting",
+          current_step: "extracting",
           step_results: {
             extraction: {
               items: allItems,
@@ -972,7 +972,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
               pageRange,
             },
           },
-        });
+        }, runId);
         console.log(`[process-plan] Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
       }
 
