@@ -623,7 +623,7 @@ async function cleanupPageImages(sessionId: string): Promise<void> {
 // ==============================
 // The actual pipeline logic, runs in background after early return
 // ==============================
-async function runPipeline(sessionId: string, body: Record<string, unknown>): Promise<void> {
+async function runPipeline(sessionId: string, body: Record<string, unknown>, runId: string): Promise<void> {
   try {
     const {
       documentText,
