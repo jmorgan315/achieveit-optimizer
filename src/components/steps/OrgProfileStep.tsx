@@ -47,6 +47,7 @@ interface OrgProfileStepProps {
   onComplete: (profile: OrgProfile) => void;
   onSkip: () => void;
   sessionId?: string;
+  ensureSessionId: () => Promise<string>;
   // Lifted state
   orgName: string; setOrgName: (v: string) => void;
   industry: string; setIndustry: (v: string) => void;
