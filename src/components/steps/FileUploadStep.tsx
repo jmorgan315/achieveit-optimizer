@@ -1023,7 +1023,7 @@ export function FileUploadStep({
 
           <Button
             onClick={handleContinue}
-            disabled={(!fileContent.trim() && !extractedItems) || isLoading}
+            disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading}
             className="w-full h-12 text-base font-medium"
           >
             {isLoading ? (
@@ -1033,6 +1033,8 @@ export function FileUploadStep({
               </>
             ) : extractedItems ? (
               `Continue with ${extractedItems.length} Items`
+            ) : hasExistingItems ? (
+              'Continue with Existing Data'
             ) : (
               'Continue to Level Verification'
             )}
