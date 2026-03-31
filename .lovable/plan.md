@@ -1,41 +1,40 @@
 
-Goal: stop the persistent duplicate `processing_sessions` rows (one completed + one `in_progress` with null fields).
 
-Do I know what the issue is? Yes.
+# Fix: Re-advancing from Upload Plan step after Back navigation
 
-Root cause (from code + data):
-- The orphan row is created by `lookup-organization` when `OrgProfileStep` calls it with `sessionId` undefined.
-- In that edge function, `ensureSession(undefined)` generates a new UUID and inserts an `in_progress` session.
-- Later, the main import flow creates/uses a different session ID in `Index.tsx`, producing the second row.
-- The current `useRef` fix only dedupes calls inside one `Index` instance; it does not unify the org-lookup session with the import session.
+## Root Cause
 
-Implementation plan
+Two separate issues depending on import path:
 
-1) `src/pages/Index.tsx` — harden session creation and remove render-time side effects
-- Add `sessionPromiseRef` and convert `ensureSessionId` to async promise-guarded logic:
-  - return `sessionIdRef.current` if set
-  - return `sessionPromiseRef.current` if creation is in-flight
-  - otherwise create one ID, set ref immediately, set state, insert/upsert row once
-- Reset both refs in Start Over (`sessionIdRef.current = null`, `sessionPromiseRef.current = null`).
-- Remove side-effect call from JSX: replace `sessionId={state.sessionId || ensureSessionId()}` with a pure value (`state.sessionId ?? sessionIdRef.current`).
-- In `handleOrgProfileComplete` / `handleOrgProfileSkip`, `await ensureSessionId()` before advancing so step 1 always has a stable ID.
+**PDF path**: `extractedItems`, `fileContent`, and `detectedLevels` are all lifted state and persist across navigation. The Continue button (`disabled={(!fileContent.trim() && !extractedItems) || isLoading}`) should remain enabled. However, `handleContinue` calls `onAIExtraction` which re-opens the Level Verification modal — this works but is slightly redundant.
 
-2) `src/components/steps/OrgProfileStep.tsx` — force lookup to use the same session
-- Add prop `ensureSessionId: () => Promise<string>` (from parent).
-- In `handleLookup`, resolve `const sid = sessionId ?? await ensureSessionId()` before invoking `lookup-organization`.
-- Send that `sid` in request body.
-- If response returns `data.sessionId`, surface it back to parent (optional callback) to keep parent ref/state synced as a safety net.
+**Spreadsheet path** (likely the actual bug): `spreadsheetFile` is **local state** (line 63), not lifted. When the user navigates away and back, it resets to `null`. The component then renders the main upload UI instead of `SpreadsheetImportStep`. The file status shows "Document processed" (because `uploadedFile` is lifted), but `extractedItems` is `null` and `fileContent` is empty (spreadsheet flow never sets these) → **Continue button is disabled**.
 
-3) Wire props from `Index` to `OrgProfileStep`
-- Pass `ensureSessionId` into `OrgProfileStep`.
-- Add optional `onSessionIdResolved` handler in `Index` to sync `sessionIdRef` + state if backend returns an ID.
+## Fix — `src/components/steps/FileUploadStep.tsx`
 
-4) Verify behavior
-- Run one spreadsheet import and one PDF import:
-  - expected: exactly one new session row per import
-  - no extra `in_progress` row with null org/document/method
-  - org lookup log entries and import updates attach to the same session ID.
+1. **Add an `alreadyProcessed` prop** (or similar boolean) passed from Index.tsx indicating that `state.items.length > 0` — meaning this step was already completed.
 
-Files to update
-- `src/pages/Index.tsx`
-- `src/components/steps/OrgProfileStep.tsx`
+2. **Alternative simpler approach**: Add a `onContinueWithExisting` callback prop. In `FileUploadStep`, if `uploadedFile` is set and `extractedItems` is null and the parent already has items, show a "Continue with existing data" button that skips re-processing.
+
+**Simplest approach (preferred)**: Lift `spreadsheetFile` to Index.tsx like all other file state, so the spreadsheet UI re-renders correctly on Back navigation. But this still won't help since the spreadsheet `onComplete` flow skips `extractedItems` entirely.
+
+**Actual simplest fix**: Change the Continue button logic to also accept a new prop `hasExistingItems: boolean`. When true and `uploadedFile` is set, the button is enabled and calls a simple advance callback instead of re-triggering extraction.
+
+## Changes
+
+### `src/components/steps/FileUploadStep.tsx`
+- Add prop `hasExistingItems?: boolean` and `onAdvanceExisting?: () => void`
+- Update button disabled logic: `disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading}`
+- In `handleContinue`, if `hasExistingItems` and no `extractedItems`, call `onAdvanceExisting()` to skip re-extraction and advance directly
+
+### `src/pages/Index.tsx`
+- Pass `hasExistingItems={state.items.length > 0}` to `FileUploadStep`
+- Pass `onAdvanceExisting` callback that advances to step 2 or 3 (depending on whether people mappings exist), skipping the level modal since levels are already confirmed
+
+## Files
+
+| File | Change |
+|------|--------|
+| `src/components/steps/FileUploadStep.tsx` | Add `hasExistingItems` prop, update disabled logic and handleContinue |
+| `src/pages/Index.tsx` | Pass `hasExistingItems` and `onAdvanceExisting` props |
+
