@@ -15,25 +15,30 @@ function getServiceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
-async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
+async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>, runId?: string): Promise<void> {
   try {
     const client = getServiceClient();
 
-    // Guard: don't overwrite a completed session unless this update is also completing
-    const completing =
-      updates.status === "completed" || updates.status === "complete" ||
-      updates.current_step === "completed" || updates.current_step === "complete";
-
-    if (!completing) {
+    // Ownership check: if a runId is provided, verify it still owns the session
+    if (runId) {
       const { data: current } = await client
         .from("processing_sessions")
-        .select("status, current_step")
+        .select("pipeline_run_id, status, current_step")
         .eq("id", sessionId)
         .single();
 
+      // If another run has taken ownership, silently skip this write
+      if (current?.pipeline_run_id && current.pipeline_run_id !== runId) {
+        console.log(`[process-plan] Stale run ${runId.slice(0, 8)}… skipping update (owner is ${(current.pipeline_run_id as string).slice(0, 8)}…)`);
+        return;
+      }
+
+      // Also guard against overwriting completed sessions
       if (
-        current?.status === "completed" || current?.status === "complete" ||
-        current?.current_step === "completed" || current?.current_step === "complete"
+        (current?.status === "completed" || current?.status === "complete" ||
+         current?.current_step === "completed" || current?.current_step === "complete") &&
+        updates.status !== "completed" && updates.status !== "complete" &&
+        updates.current_step !== "completed" && updates.current_step !== "complete"
       ) {
         console.log(`[process-plan] Skipping update — session ${sessionId} already completed`);
         return;
