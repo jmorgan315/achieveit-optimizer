@@ -1,49 +1,69 @@
 
 
-# Fix: Cross-Sheet Dedup, Department Tagging, Tree Rendering
+# Fix: Tags/Members Editing, Admin Spreadsheet Preview, Duplicate Sessions
 
-## Problem Summary
-1. Strategy/Outcome items duplicated per sheet (4 outcomes × 20 sheets = 80)
-2. Sheet name should map to Member field as fallback
-3. Tree renders all 700+ items expanded on mount — appears blank/frozen
+## Overview
+Three fixes: (1) add editable Members and Tags fields to the item edit dialog, (2) populate `step_results` with a nested tree for spreadsheet imports so the admin preview works, (3) add `useRef` to prevent duplicate session rows.
 
 ## Changes
 
-### 1. `src/utils/spreadsheet-parser.ts` — Smart cross-sheet dedup
+### 1. `src/components/plan-optimizer/EditItemDialog.tsx` — Add Members and Tags fields
 
-**Replace the current `generatePlanItems` strategy pattern loop (lines 495-635)** with a two-pass approach:
+**Add to form state** (line 59-72): Add `members: string[]` and `tags: string[]` to `EditFormData`. Initialize from `item.members` and `item.tags` in the `useEffect` (line 99-117).
 
-- **Pass 1**: Before iterating sections, build lookup maps for Strategy and Outcome dedup:
-  - `strategyMap: Map<normalizedName, PlanItem>` — reuse existing Strategy item if name matches (case-insensitive, trimmed)
-  - `outcomeMap: Map<normalizedName + strategyId, PlanItem>` — reuse existing Outcome if same name under same Strategy
-- When processing a section: find-or-create Strategy, find-or-create Outcome. Always create new Actions and Measurements.
+**Add to `handleSave`** (line 132-144): Include `members` and `tags` in the `onSave` partial.
 
-**Replace the blanket dedup at lines 718-727**: Remove it entirely. The find-or-create logic handles Level 1/2 dedup during generation. Level 3+ items are always unique.
+**Add UI** between the Owner field (line 283) and the Metrics section (line 286):
 
-**Department/Member tagging (lines 580-590)**: After collecting member values from mapped columns, if `members` array is empty, fall back to using the source sheet name as the member value. Keep the `Source: [SheetName]` tag separately for traceability.
+- **Members field**: Label "Members". Render existing members as removable Badge chips. Below them, a small Input with an "Add" button — on Enter or click, push the trimmed value to the `members` array.
+- **Tags field**: Same pattern. Render existing tags as removable Badge chips with an Input to add new ones.
 
-### 2. `src/components/steps/PlanOptimizerStep.tsx` — Lazy tree rendering
+Both use the same chip+input pattern: `Badge` with an "×" button to remove, `Input` + key handler to add.
 
-**Line 101**: Change initial `expandedItems` state. Instead of expanding all items, only expand if item count is small:
+### 2. `src/components/steps/SpreadsheetImportStep.tsx` — Write nested tree to step_results
+
+In `handleApplyMapping` (line 103-139), after generating items, build a nested tree structure from the flat items array and include it in `step_results.data.items`. This matches the format `ResultsPreviewTree` expects.
+
+Helper function `buildTree(items: PlanItem[])`:
+- Group items by parentId
+- Recursively build `{ name, levelType, confidence: 100, children: [...] }`
+- Return root items (parentId === null)
+
+Update the `step_results` object to include:
 ```typescript
-const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
-  if (items.length <= 80) return new Set(items.map(i => i.id));
-  // Large imports: only expand root items
-  return new Set<string>();
-});
+step_results: {
+  data: { items: buildTree(items) },
+  totalItems: items.length,
+  sessionConfidence: 100,
+  extractionMethod: 'spreadsheet',
+  mappingConfig: { ... },
+  sheetsProcessed: sheetNames,
+}
 ```
 
-This means for 700+ item imports, only the ~4 Strategy root items render initially. Children mount only when expanded (already handled by `buildFlatList` checking `expandedItems.has(item.id)` at line 403).
+### 3. `src/pages/admin/SessionDetailPage.tsx` — Show spreadsheet session info
 
-No other tree component changes needed — `buildFlatList` already skips children of collapsed items. The `SortableTreeItem` already only renders what's in `flatList`. dnd-kit's `SortableContext` already only tracks visible items.
+Between the Classification card and the API Call Timeline heading (lines 240-241), add a conditional block for spreadsheet sessions:
 
-### Files
+If `session.extraction_method === 'spreadsheet'` and `step_results` exists, render a Card showing:
+- **Sheets processed**: list of sheet names from `step_results.sheetsProcessed`
+- **Mapping config**: column mappings from `step_results.mappingConfig`
+- **Total items**: from `step_results.totalItems`
+
+Replace the "No API calls logged" message (line 296) with a friendlier message for spreadsheet sessions: "Spreadsheet imports are processed client-side without API calls."
+
+The Results Preview section (lines 300-325) should work as-is once `step_results.data.items` is populated.
+
+### 4. `src/pages/Index.tsx` — useRef to prevent duplicate sessions
+
+Add `useRef<string | null>(null)` for session ID tracking. Update `ensureSessionId` (lines 88-101) to check the ref first, set it synchronously, then call `setSessionId`. Reset `sessionIdRef.current = null` in `handleStartOver` (line 111).
+
+## Files
 
 | File | Change |
 |------|--------|
-| `src/utils/spreadsheet-parser.ts` | Find-or-create dedup for L1/L2; remove blanket dedup; sheet name as Member fallback |
-| `src/components/steps/PlanOptimizerStep.tsx` | Default collapsed state for large imports (line 101) |
-
-### What does NOT change
-- No PDF pipeline, edge functions, detection, mapping UI, DetectionSummary, FileUploadStep, Index.tsx, export logic, or admin panel changes
+| `src/components/plan-optimizer/EditItemDialog.tsx` | Add Members and Tags chip+input fields |
+| `src/components/steps/SpreadsheetImportStep.tsx` | Build nested tree in step_results for admin preview |
+| `src/pages/admin/SessionDetailPage.tsx` | Show spreadsheet config card; friendlier no-API-calls message |
+| `src/pages/Index.tsx` | useRef for sessionId dedup |
 
