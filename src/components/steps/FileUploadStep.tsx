@@ -212,6 +212,11 @@ export function FileUploadStep({
     let batchStallStart: number | null = null;
     let hasAttemptedExtractionResume = false;
 
+    // Transient error grace: if progress was made, allow a few extra polls before giving up
+    let hadProgress = false;
+    let errorGracePolls = 0;
+    const MAX_ERROR_GRACE = 3;
+
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
 
