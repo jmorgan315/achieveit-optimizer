@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Header } from '@/components/Header';
 import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
@@ -85,19 +85,21 @@ const Index = () => {
     resetState,
   } = usePlanState();
 
+  const sessionIdRef = useRef<string | null>(null);
+
   const ensureSessionId = () => {
-    if (!state.sessionId) {
-      const id = crypto.randomUUID();
-      console.log('[Session] Creating new session:', id);
-      setSessionId(id);
-      supabase.from('processing_sessions').insert({ id, status: 'in_progress' })
-        .then(({ error }) => {
-          if (error) console.error('[Session] Failed to create session row:', error);
-          else console.log('[Session] Row created successfully:', id);
-        });
-      return id;
-    }
-    return state.sessionId;
+    if (sessionIdRef.current) return sessionIdRef.current;
+    if (state.sessionId) { sessionIdRef.current = state.sessionId; return state.sessionId; }
+    const id = crypto.randomUUID();
+    sessionIdRef.current = id;
+    console.log('[Session] Creating new session:', id);
+    setSessionId(id);
+    supabase.from('processing_sessions').insert({ id, status: 'in_progress' })
+      .then(({ error }) => {
+        if (error) console.error('[Session] Failed to create session row:', error);
+        else console.log('[Session] Row created successfully:', id);
+      });
+    return id;
   };
 
   const goToStep = (step: number) => {
@@ -109,6 +111,7 @@ const Index = () => {
   };
 
   const handleStartOver = () => {
+    sessionIdRef.current = null;
     resetState();
     setPendingAIData(null);
     // Reset lifted OrgProfileStep state

@@ -112,6 +112,25 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
       levels,
     });
 
+    // Build nested tree for admin preview
+    const buildTree = (flatItems: PlanItem[]) => {
+      const childrenMap = new Map<string | null, PlanItem[]>();
+      for (const it of flatItems) {
+        const pid = it.parentId ?? null;
+        if (!childrenMap.has(pid)) childrenMap.set(pid, []);
+        childrenMap.get(pid)!.push(it);
+      }
+      const toNode = (it: PlanItem): any => ({
+        name: it.name,
+        levelType: it.levelName,
+        confidence: it.confidence ?? 100,
+        children: (childrenMap.get(it.id) || []).map(toNode),
+      });
+      return (childrenMap.get(null) || []).map(toNode);
+    };
+
+    const sheetNames = selectedSheetIndices.map(i => detection.sheets[i]?.sheet.name).filter(Boolean);
+
     // Update session
     supabase.from('processing_sessions').upsert({
       id: sessionId,
@@ -122,14 +141,16 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
       step_results: {
         success: true,
         method: 'spreadsheet',
+        data: { items: buildTree(items) },
+        totalItems: items.length,
+        sessionConfidence: 100,
+        extractionMethod: 'spreadsheet',
         mappingConfig: {
           columnMappings: config.columnMappings,
           sectionMapping: config.sectionMapping,
           measurementMode: config.measurementMode,
         },
-        sheetsProcessed: selectedSheetIndices.length,
-        sheetNames: selectedSheetIndices.map(i => detection.sheets[i]?.sheet.name).filter(Boolean),
-        totalItems: items.length,
+        sheetsProcessed: sheetNames,
         hasStrategyPattern: detection.hasStrategyPattern,
       } as any,
     }, { onConflict: 'id' }).then(({ error }) => {

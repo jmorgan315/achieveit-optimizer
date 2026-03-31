@@ -238,6 +238,44 @@ export default function SessionDetailPage() {
         <ClassificationCard classification={session.classification_result as Record<string, Json>} />
       )}
 
+      {/* Spreadsheet Import Details */}
+      {session.extraction_method === 'spreadsheet' && session.step_results && (() => {
+        const sr = session.step_results as Record<string, any>;
+        const mappingConfig = sr.mappingConfig as Record<string, any> | undefined;
+        const sheetsProcessed = sr.sheetsProcessed as string[] | undefined;
+        const totalItems = sr.totalItems as number | undefined;
+        return (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Spreadsheet Import Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              {totalItems != null && (
+                <div><span className="text-muted-foreground">Total items:</span> {totalItems}</div>
+              )}
+              {sheetsProcessed && sheetsProcessed.length > 0 && (
+                <div>
+                  <span className="text-muted-foreground">Sheets processed:</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {sheetsProcessed.map((s, i) => <Badge key={i} variant="secondary" className="text-xs">{s}</Badge>)}
+                  </div>
+                </div>
+              )}
+              {mappingConfig?.columnMappings && (
+                <div>
+                  <span className="text-muted-foreground">Column mappings:</span>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {Object.entries(mappingConfig.columnMappings as Record<string, string>).filter(([, v]) => v !== 'skip').map(([col, role], i) => (
+                      <Badge key={i} variant="outline" className="text-xs">{col} → {role}</Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       <h2 className="text-lg font-semibold">API Call Timeline ({logs.length})</h2>
 
       <div className="space-y-2">
@@ -293,7 +331,13 @@ export default function SessionDetailPage() {
             </Card>
           </Collapsible>
         ))}
-        {logs.length === 0 && <p className="text-sm text-muted-foreground">No API calls logged for this session.</p>}
+        {logs.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {session.extraction_method === 'spreadsheet'
+              ? 'Spreadsheet imports are processed client-side without API calls.'
+              : 'No API calls logged for this session.'}
+          </p>
+        )}
       </div>
 
       {/* Results Preview */}
