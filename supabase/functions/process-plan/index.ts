@@ -1381,6 +1381,19 @@ async function runResume(sessionId: string): Promise<void> {
       return;
     }
 
+    // Claim ownership: generate a new run ID and write it to the session
+    // This invalidates any still-running original pipeline's run ID
+    const runId = crypto.randomUUID();
+    const { error: claimError } = await client
+      .from("processing_sessions")
+      .update({ pipeline_run_id: runId })
+      .eq("id", sessionId);
+    if (claimError) {
+      console.error("[process-plan] Resume: failed to claim ownership:", claimError.message);
+      return;
+    }
+    console.log(`[process-plan] Resume: claimed ownership with runId ${runId.slice(0, 8)}…`);
+
     const stepResults = (session as Record<string, unknown>).step_results as Record<string, unknown>;
 
     // ==============================
