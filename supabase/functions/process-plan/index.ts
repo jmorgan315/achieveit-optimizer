@@ -1352,7 +1352,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
       status: "error",
       current_step: "error",
       step_results: { error: "Pipeline processing failed. Please try again." },
-    });
+    }, runId);
   }
 }
 
