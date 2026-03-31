@@ -1673,7 +1673,8 @@ async function runPostExtractionResume(
   industry: string | undefined,
   planLevels: unknown[] | undefined,
   extractionMethod: string,
-  sourceText: string
+  sourceText: string,
+  runId?: string
 ): Promise<void> {
   const agent1NameSet = collectItemNameSet(agent1Items);
   const agent1ItemCount = countAllItems(agent1Items);
