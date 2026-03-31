@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { Header } from '@/components/Header';
 import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
@@ -86,21 +86,30 @@ const Index = () => {
   } = usePlanState();
 
   const sessionIdRef = useRef<string | null>(null);
+  const sessionPromiseRef = useRef<Promise<string> | null>(null);
 
-  const ensureSessionId = () => {
+  const ensureSessionId = useCallback(async (): Promise<string> => {
     if (sessionIdRef.current) return sessionIdRef.current;
     if (state.sessionId) { sessionIdRef.current = state.sessionId; return state.sessionId; }
-    const id = crypto.randomUUID();
-    sessionIdRef.current = id;
-    console.log('[Session] Creating new session:', id);
-    setSessionId(id);
-    supabase.from('processing_sessions').insert({ id, status: 'in_progress' })
-      .then(({ error }) => {
-        if (error) console.error('[Session] Failed to create session row:', error);
-        else console.log('[Session] Row created successfully:', id);
-      });
-    return id;
-  };
+    if (sessionPromiseRef.current) return sessionPromiseRef.current;
+
+    sessionPromiseRef.current = (async () => {
+      const id = crypto.randomUUID();
+      sessionIdRef.current = id;
+      console.log('[Session] Creating new session:', id);
+      setSessionId(id);
+      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress' }, { onConflict: 'id' });
+      if (error) console.error('[Session] Failed to create session row:', error);
+      else console.log('[Session] Row created successfully:', id);
+      return id;
+    })();
+
+    try {
+      return await sessionPromiseRef.current;
+    } finally {
+      sessionPromiseRef.current = null;
+    }
+  }, [state.sessionId, setSessionId]);
 
   const goToStep = (step: number) => {
     setCurrentStep(step);
@@ -112,6 +121,7 @@ const Index = () => {
 
   const handleStartOver = () => {
     sessionIdRef.current = null;
+    sessionPromiseRef.current = null;
     resetState();
     setPendingAIData(null);
     // Reset lifted OrgProfileStep state
@@ -145,10 +155,9 @@ const Index = () => {
     goToStep(step);
   };
 
-  const handleOrgProfileComplete = (profile: OrgProfile) => {
+  const handleOrgProfileComplete = async (profile: OrgProfile) => {
     setOrgProfile(profile);
-    const sid = ensureSessionId();
-    // Use upsert to handle race condition — the INSERT from ensureSessionId may not have completed yet
+    const sid = await ensureSessionId();
     supabase.from('processing_sessions').upsert({
       id: sid,
       org_name: profile.organizationName,
@@ -160,9 +169,9 @@ const Index = () => {
     advanceToStep(1);
   };
 
-  const handleOrgProfileSkip = () => {
+  const handleOrgProfileSkip = async () => {
     setOrgProfile(undefined);
-    ensureSessionId();
+    await ensureSessionId();
     advanceToStep(1);
   };
 
@@ -337,7 +346,8 @@ const Index = () => {
             <OrgProfileStep
               onComplete={handleOrgProfileComplete}
               onSkip={handleOrgProfileSkip}
-              sessionId={state.sessionId}
+              sessionId={state.sessionId ?? sessionIdRef.current ?? undefined}
+              ensureSessionId={ensureSessionId}
               orgName={orgName} setOrgName={setOrgName}
               industry={industry} setIndustry={setIndustry}
               documentHints={documentHints} setDocumentHints={setDocumentHints}
@@ -356,7 +366,7 @@ const Index = () => {
               onAIExtraction={handleAIExtraction}
               onSpreadsheetComplete={handleSpreadsheetComplete}
               orgProfile={state.orgProfile}
-              sessionId={state.sessionId || ensureSessionId()}
+              sessionId={state.sessionId ?? sessionIdRef.current ?? ''}
               uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
               fileContent={fileContent} setFileContent={setFileContent}
               extractedItems={extractedItems} setExtractedItems={setExtractedItems}

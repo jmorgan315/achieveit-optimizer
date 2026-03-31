@@ -47,6 +47,7 @@ interface OrgProfileStepProps {
   onComplete: (profile: OrgProfile) => void;
   onSkip: () => void;
   sessionId?: string;
+  ensureSessionId: () => Promise<string>;
   // Lifted state
   orgName: string; setOrgName: (v: string) => void;
   industry: string; setIndustry: (v: string) => void;
@@ -60,7 +61,7 @@ interface OrgProfileStepProps {
 }
 
 export function OrgProfileStep({
-  onComplete, onSkip, sessionId,
+  onComplete, onSkip, sessionId, ensureSessionId,
   orgName, setOrgName,
   industry, setIndustry,
   documentHints, setDocumentHints,
@@ -124,8 +125,9 @@ export function OrgProfileStep({
     setLookupResult(null);
 
     try {
+      const sid = sessionId ?? await ensureSessionId();
       const { data, error } = await supabase.functions.invoke('lookup-organization', {
-        body: { organizationName: orgName.trim(), industry, sessionId },
+        body: { organizationName: orgName.trim(), industry, sessionId: sid },
       });
 
       if (error) throw error;
