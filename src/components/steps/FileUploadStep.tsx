@@ -52,6 +52,7 @@ const CHARS_PER_PAGE_THRESHOLD = 200;
 
 export function FileUploadStep({
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
+  hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
   fileContent, setFileContent,
   extractedItems, setExtractedItems,
