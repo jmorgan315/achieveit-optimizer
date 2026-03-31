@@ -1,40 +1,110 @@
 
 
-# Fix: Re-advancing from Upload Plan step after Back navigation
+# Phase 1: Large Document Support + Multi-Entity Extraction
 
-## Root Cause
+Backend-only changes. No UX restructure. Ship, test, then tackle Part 4 separately.
 
-Two separate issues depending on import path:
+---
 
-**PDF path**: `extractedItems`, `fileContent`, and `detectedLevels` are all lifted state and persist across navigation. The Continue button (`disabled={(!fileContent.trim() && !extractedItems) || isLoading}`) should remain enabled. However, `handleContinue` calls `onAIExtraction` which re-opens the Level Verification modal — this works but is slightly redundant.
+## Part 1: Raise Page Limits to 250
 
-**Spreadsheet path** (likely the actual bug): `spreadsheetFile` is **local state** (line 63), not lifted. When the user navigates away and back, it resets to `null`. The component then renders the main upload UI instead of `SpreadsheetImportStep`. The file status shows "Document processed" (because `uploadedFile` is lifted), but `extractedItems` is `null` and `fileContent` is empty (spreadsheet flow never sets these) → **Continue button is disabled**.
-
-## Fix — `src/components/steps/FileUploadStep.tsx`
-
-1. **Add an `alreadyProcessed` prop** (or similar boolean) passed from Index.tsx indicating that `state.items.length > 0` — meaning this step was already completed.
-
-2. **Alternative simpler approach**: Add a `onContinueWithExisting` callback prop. In `FileUploadStep`, if `uploadedFile` is set and `extractedItems` is null and the parent already has items, show a "Continue with existing data" button that skips re-processing.
-
-**Simplest approach (preferred)**: Lift `spreadsheetFile` to Index.tsx like all other file state, so the spreadsheet UI re-renders correctly on Back navigation. But this still won't help since the spreadsheet `onComplete` flow skips `extractedItems` entirely.
-
-**Actual simplest fix**: Change the Continue button logic to also accept a new prop `hasExistingItems: boolean`. When true and `uploadedFile` is set, the button is enabled and calls a simple advance callback instead of re-triggering extraction.
-
-## Changes
-
-### `src/components/steps/FileUploadStep.tsx`
-- Add prop `hasExistingItems?: boolean` and `onAdvanceExisting?: () => void`
-- Update button disabled logic: `disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading}`
-- In `handleContinue`, if `hasExistingItems` and no `extractedItems`, call `onAdvanceExisting()` to skip re-extraction and advance directly
-
-### `src/pages/Index.tsx`
-- Pass `hasExistingItems={state.items.length > 0}` to `FileUploadStep`
-- Pass `onAdvanceExisting` callback that advances to step 2 or 3 (depending on whether people mappings exist), skipping the level modal since levels are already confirmed
-
-## Files
+Three files, one shared constant where possible.
 
 | File | Change |
 |------|--------|
-| `src/components/steps/FileUploadStep.tsx` | Add `hasExistingItems` prop, update disabled logic and handleContinue |
-| `src/pages/Index.tsx` | Pass `hasExistingItems` and `onAdvanceExisting` props |
+| `supabase/functions/parse-pdf/index.ts` | Change `MAX_PAGES = 100` → `250` (line 8) |
+| `src/utils/pdfToImages.ts` | Change default `maxPages = 100` → `250` in function signature (line 29) |
+| `src/components/steps/FileUploadStep.tsx` | Change hardcoded `100` → `250` in `renderPDFToImages(file, 100, ...)` call (line 375) |
+
+A shared constant isn't practical across edge function + client code, so each is updated independently but documented together.
+
+---
+
+## Part 2: Chunk Agent 0 Classification for 50+ Pages
+
+**Where**: `supabase/functions/process-plan/index.ts`, inside `runPipeline()`, the Agent 0 block (lines 614-659).
+
+**Current behavior**: Sends ALL `pageImages` to `classify-document` in a single call.
+
+**New behavior**:
+- If `pageImages.length <= 50`: existing single-call behavior (no change)
+- If `pageImages.length > 50`: chunk into groups of 25 pages
+- Call `classify-document` once per chunk
+- Each chunk call logged as `"Step 0: Document Classification (Chunk N/M)"`
+- Merge results across chunks:
+  - **page_annotations**: concatenate all arrays, adjusting page numbers per chunk offset
+  - **document_type**: majority vote across chunks
+  - **confidence**: average across chunks
+  - **hierarchy_pattern**: use the one with highest confidence or from the first chunk
+  - **table_structure**: use the first non-null result
+  - **plan_content_pages / skip_pages**: union across chunks
+- The merged classification object replaces the single-call result — downstream pipeline (page filtering, buffer, extraction) works unchanged
+
+**No changes to `classify-document/index.ts` itself** — it processes whatever images it receives.
+
+---
+
+## Part 3: Multi-Entity Document Extraction
+
+Prompt-only changes to two edge functions. No logic changes.
+
+### `supabase/functions/extract-plan-vision/index.ts`
+
+Append to `VISION_EXTRACTION_PROMPT` (after the existing "DUPLICATE DETECTION" section, before "STEP 5: OUTPUT STRUCTURE" or at the end of rules):
+
+```
+=== MULTI-SECTION / MULTI-ENTITY DOCUMENTS ===
+
+Some documents contain plans from multiple organizations, states, departments,
+or entities — each with their own section. When you detect this pattern:
+
+- Each entity name (e.g., state name, department, division) → Level 1 (top-level item)
+- Programs, goals, or focus areas within each entity → Level 2 (children of entity)
+- Initiatives, strategies, action items → Level 3+ (children of programs)
+
+Look for repeating structural patterns across entity sections. If "Alabama" has
+"Program Title → Initiatives", expect the same for "Alaska", "Arizona", etc.
+
+If the document is a single organization's plan (not multi-entity), ignore this
+guidance and extract normally.
+```
+
+### `supabase/functions/extract-plan-items/index.ts`
+
+Append similar multi-entity guidance to `EXTRACTION_SYSTEM_PROMPT` (after the "SELF-CHECK BEFORE RESPONDING" section).
+
+### `supabase/functions/validate-hierarchy/index.ts`
+
+Append to `VALIDATION_SYSTEM_PROMPT` (after "HANDLING AUDIT FINDINGS"):
+
+```
+=== MULTI-ENTITY DOCUMENTS ===
+
+If the extracted items appear to come from multiple organizations, states, or
+entities (e.g., many items named "[State] Rural Health Transformation Program"):
+
+- Entity-level items should be at Level 1
+- Programs/goals within each entity at Level 2, parented to their entity
+- Initiatives/actions at Level 3+, parented to their program
+
+If items are flat (all at the same level) but clearly belong to different entity
+sections, restructure them into the correct hierarchy using entity name patterns
+as signals for Level 1 grouping.
+```
+
+---
+
+## Summary of All Files
+
+| File | Part | Change |
+|------|------|--------|
+| `supabase/functions/parse-pdf/index.ts` | 1 | `MAX_PAGES` 100 → 250 |
+| `src/utils/pdfToImages.ts` | 1 | Default `maxPages` 100 → 250 |
+| `src/components/steps/FileUploadStep.tsx` | 1 | Hardcoded 100 → 250 |
+| `supabase/functions/process-plan/index.ts` | 2 | Chunk classification for 50+ pages |
+| `supabase/functions/extract-plan-vision/index.ts` | 3 | Multi-entity prompt addition |
+| `supabase/functions/extract-plan-items/index.ts` | 3 | Multi-entity prompt addition |
+| `supabase/functions/validate-hierarchy/index.ts` | 3 | Multi-entity prompt addition |
+
+No database migrations needed. No new edge functions. No UX changes.
 
