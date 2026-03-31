@@ -22,6 +22,8 @@ interface FileUploadStepProps {
   onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
   sessionId?: string;
+  hasExistingItems?: boolean;
+  onAdvanceExisting?: () => void;
   // Lifted state
   uploadedFile: File | null; setUploadedFile: (v: File | null) => void;
   fileContent: string; setFileContent: (v: string) => void;
@@ -50,6 +52,7 @@ const CHARS_PER_PAGE_THRESHOLD = 200;
 
 export function FileUploadStep({
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
+  hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
   fileContent, setFileContent,
   extractedItems, setExtractedItems,
@@ -770,6 +773,8 @@ export function FileUploadStep({
   const handleContinue = () => {
     if (extractedItems && extractedMappings && detectedLevels && onAIExtraction) {
       onAIExtraction(extractedItems, extractedMappings, detectedLevels);
+    } else if (hasExistingItems && onAdvanceExisting) {
+      onAdvanceExisting();
     } else if (fileContent.trim() && fileContent !== '__VISION_EXTRACTED__') {
       onTextSubmit(fileContent);
     }
@@ -1018,7 +1023,7 @@ export function FileUploadStep({
 
           <Button
             onClick={handleContinue}
-            disabled={(!fileContent.trim() && !extractedItems) || isLoading}
+            disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading}
             className="w-full h-12 text-base font-medium"
           >
             {isLoading ? (
@@ -1028,6 +1033,8 @@ export function FileUploadStep({
               </>
             ) : extractedItems ? (
               `Continue with ${extractedItems.length} Items`
+            ) : hasExistingItems ? (
+              'Continue with Existing Data'
             ) : (
               'Continue to Level Verification'
             )}

@@ -367,6 +367,14 @@ const Index = () => {
               onSpreadsheetComplete={handleSpreadsheetComplete}
               orgProfile={state.orgProfile}
               sessionId={state.sessionId ?? sessionIdRef.current ?? ''}
+              hasExistingItems={state.items.length > 0}
+              onAdvanceExisting={() => {
+                if (state.personMappings.length > 0) {
+                  advanceToStep(2);
+                } else {
+                  advanceToStep(3);
+                }
+              }}
               uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
               fileContent={fileContent} setFileContent={setFileContent}
               extractedItems={extractedItems} setExtractedItems={setExtractedItems}
