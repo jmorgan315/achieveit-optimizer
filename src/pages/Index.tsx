@@ -365,7 +365,7 @@ const Index = () => {
               onAIExtraction={handleAIExtraction}
               onSpreadsheetComplete={handleSpreadsheetComplete}
               orgProfile={state.orgProfile}
-              sessionId={state.sessionId || ensureSessionId()}
+              sessionId={state.sessionId ?? sessionIdRef.current ?? ''}
               uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
               fileContent={fileContent} setFileContent={setFileContent}
               extractedItems={extractedItems} setExtractedItems={setExtractedItems}
