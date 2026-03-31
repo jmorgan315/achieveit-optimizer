@@ -1810,7 +1810,7 @@ async function runPostExtractionResume(
       sessionId,
     },
     total_items_extracted: finalItemCount,
-  });
+  }, runId);
 
   await logApiCall({
     session_id: sessionId,
