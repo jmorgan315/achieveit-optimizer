@@ -22,6 +22,8 @@ interface FileUploadStepProps {
   onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
   sessionId?: string;
+  hasExistingItems?: boolean;
+  onAdvanceExisting?: () => void;
   // Lifted state
   uploadedFile: File | null; setUploadedFile: (v: File | null) => void;
   fileContent: string; setFileContent: (v: string) => void;
