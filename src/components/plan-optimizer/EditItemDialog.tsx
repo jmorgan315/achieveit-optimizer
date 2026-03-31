@@ -43,8 +43,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
 import { PlanItem, PlanLevel, MetricDescription, MetricUnit, MetricRollup } from '@/types/plan';
-import { Trash2, Target } from 'lucide-react';
+import { Trash2, Target, X } from 'lucide-react';
 
 interface EditItemDialogProps {
   open: boolean;
