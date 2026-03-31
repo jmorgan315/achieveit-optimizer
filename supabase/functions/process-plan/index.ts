@@ -1179,7 +1179,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
     // ==============================
     // STEPS 2 & 3: Audit + Validation (PARALLEL)
     // ==============================
-    await updateSessionProgress(sessionId, { current_step: "validating" });
+    await updateSessionProgress(sessionId, { current_step: "validating" }, runId);
     console.log("[process-plan] Starting Steps 2 & 3 in parallel (audit + validation)");
 
     const sourceForAudit = (documentText as string) || "";
