@@ -684,59 +684,113 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
             const chunkLabel = `Step 0: Document Classification (Chunk ${chunkIdx + 1}/${totalChunks})`;
             console.log(`[process-plan] ${chunkLabel}, pages ${startIdx + 1}-${startIdx + chunkImages.length}`);
 
-            const chunkResult = await callEdgeFunction("classify-document", {
-              pageImages: chunkImages,
-              orgName: organizationName || "",
-              industry: industry || "",
-              userPlanLevels: planLevels || null,
-              pageRange: pageRange || null,
-              additionalNotes: documentHints || null,
-              sessionId,
-              stepLabel: chunkLabel,
-            });
+            // Retry the edge function call itself up to 2 times (transport-level failures)
+            let chunkSuccess = false;
+            for (let edgeAttempt = 0; edgeAttempt < 3; edgeAttempt++) {
+              const chunkResult = await callEdgeFunction("classify-document", {
+                pageImages: chunkImages,
+                orgName: organizationName || "",
+                industry: industry || "",
+                userPlanLevels: planLevels || null,
+                pageRange: pageRange || null,
+                additionalNotes: documentHints || null,
+                sessionId,
+                stepLabel: chunkLabel,
+              });
 
-            if (chunkResult.ok && (chunkResult.data as { success: boolean }).success) {
-              const chunkClassification = (chunkResult.data as { classification: Record<string, unknown> }).classification;
+              if (chunkResult.ok && (chunkResult.data as { success: boolean }).success) {
+                const chunkClassification = (chunkResult.data as { classification: Record<string, unknown> }).classification;
 
-              // Adjust page numbers in page_annotations to reflect actual page positions
-              if (Array.isArray(chunkClassification?.page_annotations)) {
-                chunkClassification.page_annotations = (chunkClassification.page_annotations as Array<Record<string, unknown>>).map(
-                  (ann: Record<string, unknown>) => ({
-                    ...ann,
-                    page_number: (ann.page_number as number) + startIdx,
-                  })
-                );
-              }
-              // Adjust plan_content_pages
-              if (Array.isArray(chunkClassification?.plan_content_pages)) {
-                chunkClassification.plan_content_pages = (chunkClassification.plan_content_pages as number[]).map(
-                  (p: number) => p + startIdx
-                );
-              }
-              // Adjust skip_pages
-              if (Array.isArray(chunkClassification?.skip_pages)) {
-                chunkClassification.skip_pages = (chunkClassification.skip_pages as number[]).map(
-                  (p: number) => p + startIdx
-                );
-              }
+                // Adjust page numbers in page_annotations to reflect actual page positions
+                if (Array.isArray(chunkClassification?.page_annotations)) {
+                  chunkClassification.page_annotations = (chunkClassification.page_annotations as Array<Record<string, unknown>>).map(
+                    (ann: Record<string, unknown>) => ({
+                      ...ann,
+                      page_number: (ann.page_number as number) + startIdx,
+                    })
+                  );
+                }
+                // Adjust plan_content_pages
+                if (Array.isArray(chunkClassification?.plan_content_pages)) {
+                  chunkClassification.plan_content_pages = (chunkClassification.plan_content_pages as number[]).map(
+                    (p: number) => p + startIdx
+                  );
+                }
+                // Adjust skip_pages
+                if (Array.isArray(chunkClassification?.skip_pages)) {
+                  chunkClassification.skip_pages = (chunkClassification.skip_pages as number[]).map(
+                    (p: number) => p + startIdx
+                  );
+                }
 
-              chunkResults.push(chunkClassification);
-            } else {
-              console.warn(`[process-plan] ${chunkLabel} failed (non-fatal):`, JSON.stringify(chunkResult.data));
+                chunkResults.push(chunkClassification);
+                chunkSuccess = true;
+                break; // success, no more retries
+              } else {
+                const errDetail = JSON.stringify(chunkResult.data).slice(0, 500);
+                if (edgeAttempt < 2) {
+                  const retryDelay = edgeAttempt === 0 ? 5000 : 15000;
+                  console.warn(`[process-plan] ${chunkLabel} attempt ${edgeAttempt + 1} failed, retrying in ${retryDelay}ms: ${errDetail}`);
+                  await new Promise(r => setTimeout(r, retryDelay));
+                } else {
+                  console.error(`[process-plan] ${chunkLabel} failed after 3 attempts: ${errDetail}`);
+                }
+              }
+            }
+
+            // Graceful chunk skip: if all retries failed, mark pages as unclassified
+            if (!chunkSuccess) {
+              const chunkPageNumbers = Array.from({ length: chunkImages.length }, (_, i) => startIdx + i + 1);
+              console.warn(`[process-plan] ${chunkLabel} SKIPPED — marking pages ${chunkPageNumbers[0]}-${chunkPageNumbers[chunkPageNumbers.length - 1]} as unclassified (will be sent to extraction)`);
+
+              // Log the failure to api_call_logs for admin visibility
+              logApiCall({
+                session_id: sessionId,
+                edge_function: "process-plan",
+                step_label: `${chunkLabel} — SKIPPED`,
+                status: "error",
+                error_message: `Classification chunk ${chunkIdx + 1}/${totalChunks} failed after 3 attempts. Pages ${chunkPageNumbers[0]}-${chunkPageNumbers[chunkPageNumbers.length - 1]} marked as unclassified and sent to extraction.`,
+              });
+
+              // Generate synthetic unclassified annotations — mark all pages as containing plan items
+              const syntheticAnnotations = chunkPageNumbers.map(pageNum => ({
+                page_number: pageNum,
+                contains_plan_items: true,
+                classification: "unclassified",
+                notes: "Classification chunk failed — page included in extraction as safety measure",
+              }));
+
+              chunkResults.push({
+                document_type: "unknown",
+                confidence: 0,
+                page_annotations: syntheticAnnotations,
+                plan_content_pages: chunkPageNumbers,
+                skip_pages: [],
+                hierarchy_pattern: null,
+                table_structure: null,
+                chunk_skipped: true,
+              });
             }
           }
 
+          // ── Classification gate: all chunks have completed or been gracefully skipped ──
+          console.log(`[process-plan] Step 0: All ${totalChunks} chunks processed (${chunkResults.length} results). Classification gate passed.`);
+
           // Merge chunk results
           if (chunkResults.length > 0) {
-            // Majority vote for document_type
+            // Majority vote for document_type (exclude "unknown" from skipped chunks if possible)
             const typeCounts: Record<string, number> = {};
             for (const cr of chunkResults) {
               const dt = (cr.document_type as string) || "unknown";
-              typeCounts[dt] = (typeCounts[dt] || 0) + 1;
+              if (dt !== "unknown" || chunkResults.every(c => (c.document_type as string || "unknown") === "unknown")) {
+                typeCounts[dt] = (typeCounts[dt] || 0) + 1;
+              }
             }
-            const majorityType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0][0];
+            const majorityType = Object.keys(typeCounts).length > 0
+              ? Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0][0]
+              : "unknown";
 
-            // Average confidence
+            // Average confidence (exclude 0 from skipped chunks)
             const confidences = chunkResults.map(cr => (cr.confidence as number) || 0).filter(c => c > 0);
             const avgConfidence = confidences.length > 0 ? confidences.reduce((s, c) => s + c, 0) / confidences.length : 0;
 
@@ -751,6 +805,8 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
             const hierarchyPattern = chunkResults.find(cr => cr.hierarchy_pattern)?.hierarchy_pattern || null;
             const tableStructure = chunkResults.find(cr => cr.table_structure)?.table_structure || null;
 
+            const skippedChunks = chunkResults.filter(cr => cr.chunk_skipped).length;
+
             classification = {
               document_type: majorityType,
               confidence: avgConfidence,
@@ -761,11 +817,39 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
               table_structure: tableStructure,
               chunked: true,
               total_chunks: totalChunks,
+              skipped_chunks: skippedChunks,
             };
 
-            console.log(`[process-plan] Step 0 merged from ${chunkResults.length}/${totalChunks} chunks, document_type: ${majorityType}, confidence: ${avgConfidence.toFixed(2)}`);
+            console.log(`[process-plan] Step 0 merged from ${chunkResults.length}/${totalChunks} chunks (${skippedChunks} skipped), document_type: ${majorityType}, confidence: ${avgConfidence.toFixed(2)}`);
           } else {
-            console.warn("[process-plan] Step 0: All chunks failed (non-fatal)");
+            // All chunks failed AND no synthetic results (should not happen with new logic, but safety net)
+            console.warn("[process-plan] Step 0: All chunks failed — building fallback classification marking all pages for extraction");
+            const allPageNumbers = Array.from({ length: allPageImages.length }, (_, i) => i + 1);
+            classification = {
+              document_type: "unknown",
+              confidence: 0,
+              page_annotations: allPageNumbers.map(p => ({
+                page_number: p,
+                contains_plan_items: true,
+                classification: "unclassified",
+                notes: "All classification chunks failed — page included in extraction as safety measure",
+              })),
+              plan_content_pages: allPageNumbers,
+              skip_pages: [],
+              hierarchy_pattern: null,
+              table_structure: null,
+              chunked: true,
+              total_chunks: totalChunks,
+              all_chunks_failed: true,
+            };
+
+            logApiCall({
+              session_id: sessionId,
+              edge_function: "process-plan",
+              step_label: "Step 0: Classification — FULL FALLBACK",
+              status: "error",
+              error_message: `All ${totalChunks} classification chunks failed. All ${allPageImages.length} pages marked for extraction as safety fallback.`,
+            });
           }
         }
 
