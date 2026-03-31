@@ -705,7 +705,8 @@ export function generatePlanItems(
 
         orderCounter++;
         const owner = ownerCol ? getColumnValue(row, ownerCol) : '';
-        const dueDate = dateCol ? getColumnValue(row, dateCol) : '';
+        const rawDate2 = dateCol ? getColumnValue(row, dateCol) : '';
+        const dueDate = parseSpreadsheetDate(rawDate2) || '';
         const metric = metricCol ? getColumnValue(row, metricCol) : '';
         const desc = descCol ? getColumnValue(row, descCol) : '';
         const tag = tagCol ? getColumnValue(row, tagCol) : '';
