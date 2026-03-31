@@ -621,23 +621,131 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       console.log("[process-plan] Starting Step 0 (document classification)");
       await updateSessionProgress(sessionId, { current_step: "classifying" });
 
+      const allPageImages = pageImages as string[];
+      const CHUNK_THRESHOLD = 50;
+      const CHUNK_SIZE = 25;
+
       try {
-        const classifyResult = await callEdgeFunction("classify-document", {
-          pageImages,
-          orgName: organizationName || "",
-          industry: industry || "",
-          userPlanLevels: planLevels || null,
-          pageRange: pageRange || null,
-          additionalNotes: documentHints || null,
-          sessionId,
-        });
+        if (allPageImages.length <= CHUNK_THRESHOLD) {
+          // Single call for small documents
+          const classifyResult = await callEdgeFunction("classify-document", {
+            pageImages,
+            orgName: organizationName || "",
+            industry: industry || "",
+            userPlanLevels: planLevels || null,
+            pageRange: pageRange || null,
+            additionalNotes: documentHints || null,
+            sessionId,
+          });
 
-        if (classifyResult.ok && (classifyResult.data as { success: boolean }).success) {
-          classification = (classifyResult.data as { classification: Record<string, unknown> }).classification;
-          console.log("[process-plan] Step 0 complete, document_type:", classification?.document_type);
+          if (classifyResult.ok && (classifyResult.data as { success: boolean }).success) {
+            classification = (classifyResult.data as { classification: Record<string, unknown> }).classification;
+            console.log("[process-plan] Step 0 complete, document_type:", classification?.document_type);
+          } else {
+            console.warn("[process-plan] Step 0 failed (non-fatal):", JSON.stringify(classifyResult.data));
+          }
+        } else {
+          // Chunked classification for large documents
+          const totalChunks = Math.ceil(allPageImages.length / CHUNK_SIZE);
+          console.log(`[process-plan] Step 0: Chunking ${allPageImages.length} pages into ${totalChunks} chunks of ${CHUNK_SIZE}`);
 
-          const docType = classification?.document_type as string;
-          const tableStructure = classification?.table_structure;
+          const chunkResults: Array<Record<string, unknown>> = [];
+
+          for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+            const startIdx = chunkIdx * CHUNK_SIZE;
+            const chunkImages = allPageImages.slice(startIdx, startIdx + CHUNK_SIZE);
+            const chunkLabel = `Step 0: Document Classification (Chunk ${chunkIdx + 1}/${totalChunks})`;
+            console.log(`[process-plan] ${chunkLabel}, pages ${startIdx + 1}-${startIdx + chunkImages.length}`);
+
+            const chunkResult = await callEdgeFunction("classify-document", {
+              pageImages: chunkImages,
+              orgName: organizationName || "",
+              industry: industry || "",
+              userPlanLevels: planLevels || null,
+              pageRange: pageRange || null,
+              additionalNotes: documentHints || null,
+              sessionId,
+              stepLabel: chunkLabel,
+            });
+
+            if (chunkResult.ok && (chunkResult.data as { success: boolean }).success) {
+              const chunkClassification = (chunkResult.data as { classification: Record<string, unknown> }).classification;
+
+              // Adjust page numbers in page_annotations to reflect actual page positions
+              if (Array.isArray(chunkClassification?.page_annotations)) {
+                chunkClassification.page_annotations = (chunkClassification.page_annotations as Array<Record<string, unknown>>).map(
+                  (ann: Record<string, unknown>) => ({
+                    ...ann,
+                    page_number: (ann.page_number as number) + startIdx,
+                  })
+                );
+              }
+              // Adjust plan_content_pages
+              if (Array.isArray(chunkClassification?.plan_content_pages)) {
+                chunkClassification.plan_content_pages = (chunkClassification.plan_content_pages as number[]).map(
+                  (p: number) => p + startIdx
+                );
+              }
+              // Adjust skip_pages
+              if (Array.isArray(chunkClassification?.skip_pages)) {
+                chunkClassification.skip_pages = (chunkClassification.skip_pages as number[]).map(
+                  (p: number) => p + startIdx
+                );
+              }
+
+              chunkResults.push(chunkClassification);
+            } else {
+              console.warn(`[process-plan] ${chunkLabel} failed (non-fatal):`, JSON.stringify(chunkResult.data));
+            }
+          }
+
+          // Merge chunk results
+          if (chunkResults.length > 0) {
+            // Majority vote for document_type
+            const typeCounts: Record<string, number> = {};
+            for (const cr of chunkResults) {
+              const dt = (cr.document_type as string) || "unknown";
+              typeCounts[dt] = (typeCounts[dt] || 0) + 1;
+            }
+            const majorityType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0][0];
+
+            // Average confidence
+            const confidences = chunkResults.map(cr => (cr.confidence as number) || 0).filter(c => c > 0);
+            const avgConfidence = confidences.length > 0 ? confidences.reduce((s, c) => s + c, 0) / confidences.length : 0;
+
+            // Concatenate page_annotations
+            const allAnnotations = chunkResults.flatMap(cr => (cr.page_annotations as unknown[]) || []);
+
+            // Union plan_content_pages and skip_pages
+            const allPlanPages = [...new Set(chunkResults.flatMap(cr => (cr.plan_content_pages as number[]) || []))].sort((a, b) => a - b);
+            const allSkipPages = [...new Set(chunkResults.flatMap(cr => (cr.skip_pages as number[]) || []))].sort((a, b) => a - b);
+
+            // Use first non-null for hierarchy_pattern and table_structure
+            const hierarchyPattern = chunkResults.find(cr => cr.hierarchy_pattern)?.hierarchy_pattern || null;
+            const tableStructure = chunkResults.find(cr => cr.table_structure)?.table_structure || null;
+
+            classification = {
+              document_type: majorityType,
+              confidence: avgConfidence,
+              page_annotations: allAnnotations,
+              plan_content_pages: allPlanPages,
+              skip_pages: allSkipPages,
+              hierarchy_pattern: hierarchyPattern,
+              table_structure: tableStructure,
+              chunked: true,
+              total_chunks: totalChunks,
+            };
+
+            console.log(`[process-plan] Step 0 merged from ${chunkResults.length}/${totalChunks} chunks, document_type: ${majorityType}, confidence: ${avgConfidence.toFixed(2)}`);
+          } else {
+            console.warn("[process-plan] Step 0: All chunks failed (non-fatal)");
+          }
+        }
+
+        // Determine extraction mode from classification
+        if (classification) {
+          const docType = classification.document_type as string;
+          const tableStructure = classification.table_structure;
           if (docType === "tabular" && tableStructure) {
             extractionMode = "table";
           } else if (docType === "presentation" || docType === "mixed") {
@@ -647,11 +755,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
           // Save classification to session
           await updateSessionProgress(sessionId, {
-            document_type: classification?.document_type || null,
+            document_type: classification.document_type || null,
             classification_result: classification,
           });
-        } else {
-          console.warn("[process-plan] Step 0 failed (non-fatal):", JSON.stringify(classifyResult.data));
         }
       } catch (err) {
         console.error("[process-plan] Step 0 exception (non-fatal):", err);
