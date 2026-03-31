@@ -1659,7 +1659,7 @@ async function runResume(sessionId: string): Promise<void> {
       status: "error",
       current_step: "error",
       step_results: { error: "Resume pipeline failed. Please try again." },
-    });
+    }, runId);
   }
 }
 
