@@ -1584,6 +1584,30 @@ async function runResume(sessionId: string): Promise<void> {
     // ==============================
     // PATH B: Resume post-extraction (current_step === "extraction_complete")
     // ==============================
+    // PATH B.5: Resume from stuck "validating" state (agent 2/3 timed out)
+    if (currentStep === "validating" || currentStep === "auditing") {
+      const extraction = stepResults?.extraction as Record<string, unknown> | undefined;
+      if (extraction?.items && Array.isArray(extraction.items) && extraction.items.length > 0) {
+        console.log(`[process-plan] Resume: stuck at ${currentStep}, re-running post-extraction agents`);
+        const pipeCtx = (stepResults.pipelineContext || {}) as Record<string, unknown>;
+        const classification = (stepResults.classification || null) as Record<string, unknown> | null;
+        await runPostExtractionResume(
+          sessionId,
+          extraction.items as unknown[],
+          (extraction.detectedLevels || []) as { depth: number; name: string }[],
+          classification,
+          (pipeCtx.organizationName || (session as Record<string, unknown>).org_name) as string | undefined,
+          (pipeCtx.industry || (session as Record<string, unknown>).org_industry) as string | undefined,
+          pipeCtx.planLevels as unknown[] | undefined,
+          (pipeCtx.extractionMethod || "vision") as string,
+          (pipeCtx.documentText || "") as string,
+        );
+        return;
+      }
+      console.error("[process-plan] Resume: stuck at", currentStep, "but no extraction items found");
+      return;
+    }
+
     if (currentStep !== "extraction_complete") {
       console.error("[process-plan] Resume: unexpected current_step:", currentStep);
       return;
