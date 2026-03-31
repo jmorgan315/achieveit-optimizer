@@ -1,75 +1,93 @@
 
 
-# Excel/CSV Import Path — Revised Plan
+# Fix Spreadsheet Import: Levels, Hierarchy, Member, Multi-Sheet
 
 ## Overview
-Parallel client-side import path for spreadsheets. PDF pipeline is untouched. Shares only the final Review & Export step.
-
-## Key Callouts from User Feedback
-
-1. **Level Verification Modal**: The `showLevelModal` is triggered by `handleAIExtraction` (line 175) which sets `setPendingAIData` then `setShowLevelModal(true)`. For spreadsheet imports, we'll add a separate handler (`handleSpreadsheetComplete`) that calls `setLevels` + `setItems` + `advanceToStep(2)` directly — never touching `showLevelModal`. The modal's `open` prop stays wired to `showLevelModal` which only PDF sets. No risk of hiding it for PDF runs.
-
-2. **Multi-sheet**: v1 defaults to the largest/first sheet with a selector to pick one. Note in the UI that multi-sheet merge is planned. Not a blocker.
+Three changes to the spreadsheet import: (1) detect Strategy/Outcome/Action/Measurement hierarchy pattern, (2) add "Member" column mapping, (3) multi-sheet selection with merge and dedup.
 
 ## Changes
 
-### 1. Install `xlsx` (SheetJS)
-Add to `package.json`.
+### 1. `src/utils/spreadsheet-parser.ts` — Major rewrite of detection + generation
 
-### 2. New: `src/utils/spreadsheet-parser.ts`
-- `parseSpreadsheetFile(file)` — reads all sheets via SheetJS, returns sheet names + raw row arrays
-- `detectStructure(sheets)` — identifies section headers (rows spanning columns or preceding data blocks), column headers, data rows, repeating sections
-- Smart column defaults: "Action"/"Description" → Item Name, "Owner"/"Sponsor" → Owner, "Deadline"/"Date" → Date, "Metric"/"Measurement" → Metric, "Department" → prompt user
-- `generatePlanItems(sheets, mapping, levels)` — walks rows per mapping config, builds `PlanItem[]` with hierarchy, confidence 100, source "spreadsheet"
-- Simple name+parent dedup
+**Types**:
+- Add `ColumnRole` value `'member'`
+- Add `OutcomeRow` type to `DetectedSection`: `{ rowIndex: number; text: string }`
+- Add `sectionType: 'strategy' | 'outcome' | 'generic'` to `DetectedSection`
+- Add `MappingConfig.measurementMode: 'level4' | 'metric_on_parent'` to control how Outcome/Measurement column is handled
+- Update `MappingConfig` to accept `selectedSheetIndices: number[]` (array) instead of single index
 
-### 3. New: `src/components/spreadsheet/DetectionSummary.tsx`
-- "Found X sheets with Y items across Z sections"
-- Sheet selector (defaults to largest), shows item counts per sheet
-- Note: "Multi-sheet merge coming in a future update"
-- "Continue to Mapping" button
+**Detection (`detectStructure`)**:
+- New helper `isStrategyRow(row)`: checks if cell A starts with "Strategy:" (case-insensitive)
+- New helper `isOutcomeRow(row)`: checks if cell A starts with "Outcomes" (case-insensitive)
+- Detection loop: when a Strategy row is found, look for an Outcome row immediately after, then a column header row, then data rows. Store the outcome text and strategy text on the `DetectedSection`.
+- Fallback: if no "Strategy:" rows found, use existing generic detection (backwards compatible with other spreadsheets)
 
-### 4. New: `src/components/spreadsheet/MappingInterface.tsx`
-- Left panel: detected elements (section headers, columns) with dropdowns (Level 1/2/3/etc., Item Name, Owner, Date, Metric, Tag, Skip)
-- Right panel: live preview tree of first 10-15 items with current mapping
-- Smart defaults pre-filled
-- "Apply Mapping" button
+**Column defaults (`getDefaultColumnRole`)**:
+- Add pattern: `/department|member|team/i` → `'member'` (instead of `'tag'`)
+- Keep existing patterns, just change department from `'tag'` to `'member'`
 
-### 5. New: `src/components/steps/SpreadsheetImportStep.tsx`
-Orchestrator with internal phases: Detection → Mapping → Generation. On completion, calls parent callback with generated `PlanItem[]`, `PersonMapping[]`, and `PlanLevel[]`.
+**Generation (`generatePlanItems`)**:
+- Accept `SheetDetection[]` (array) instead of single `SheetDetection` for multi-sheet
+- For each section with `sectionType === 'strategy'`:
+  - Create Level 1 item (Strategy) — name from "Strategy:" text
+  - Create Level 2 item (Outcome) — name from outcome row text, parent = strategy
+  - Each data row → Level 3 item (Action), parent = outcome
+  - If `measurementMode === 'level4'` and the Outcome/Measurement column has content → create Level 4 item (Measurement), parent = action
+  - If `measurementMode === 'metric_on_parent'` → store as `metricTarget` on the action instead
+- Store source sheet name as a tag on each item: `"Source: [SheetName]"`
+- Cross-sheet dedup: name+parent key, keep first occurrence
+- Add `findColumnByRole('member')` → store value in `item.members` array
+- New export: `mergeSheetDetections(detections: SheetDetection[]): SheetDetection` that concatenates sections from multiple sheets, used when multiple sheets selected
 
-### 6. Modify: `src/components/steps/FileUploadStep.tsx`
-Lines 684-691 only — replace Excel demo fallback:
-- Parse file with SheetJS, set `spreadsheetData` state
-- When set, render `SpreadsheetImportStep` instead of extraction UI
-- On completion, call a new `onSpreadsheetComplete` prop (separate from `onAIExtraction`)
+**Default levels**: When strategy pattern detected, set levels to:
+```
+Level 1: Strategy, Level 2: Outcome, Level 3: Action, Level 4: Measurement
+```
 
-### 7. Modify: `src/pages/Index.tsx`
-- Add `handleSpreadsheetComplete(items, personMappings, levels)` handler that:
-  - Calls `setLevels(levels)`, `setItems(items, personMappings)` directly
-  - Skips `showLevelModal` entirely (never sets it to true)
-  - Advances to step 2 (People Mapper) or step 3 (Review) depending on whether mappings exist
-- Pass `onSpreadsheetComplete` as prop to `FileUploadStep`
-- Add `spreadsheetImportMode` reset in `handleStartOver`
-- **No changes to `handleAIExtraction` or `showLevelModal` logic** — PDF path untouched
+### 2. `src/components/spreadsheet/DetectionSummary.tsx` — Multi-sheet checklist
 
-### 8. Session tracking
-In `SpreadsheetImportStep`, upsert `processing_sessions` with `extraction_method: 'spreadsheet'`, `total_items_extracted`, `status: 'completed'`, mapping config in `step_results`.
+- Replace `selectedSheetIndex: number` / `onSelectSheet` with `selectedSheetIndices: number[]` / `onSelectSheets`
+- Replace the single `<Select>` dropdown with a list of checkboxes (one per sheet): checkbox + sheet name + "(N items)"
+- Add "Select All" / "Deselect All" buttons
+- Default selection logic:
+  - If any sheet name matches `/enterprise|all\s|summary|consolidated/i` → select only that sheet
+  - Otherwise → select all sheets
+- Summary text: "Importing X sheet(s) with Y total items across Z sections"
+- "Continue to Mapping" disabled if no sheets selected
+
+### 3. `src/components/spreadsheet/MappingInterface.tsx` — Member + Measurement mode
+
+- Add `'member'` to `COLUMN_ROLE_OPTIONS`: `{ value: 'member', label: 'Member' }`
+- Add `measurementMode` state: `'level4' | 'metric_on_parent'`, default `'level4'`
+- When a column is mapped to `'metric'` and strategy pattern is detected, show a sub-option: "Create as Level 4 (Measurement)" vs "Store as metric on parent Action"
+- Pass `measurementMode` through `MappingConfig` to `onApply`
+- Update level names in dropdowns to show Strategy/Outcome/Action/Measurement when that pattern is detected
+- Accept `SheetDetection[]` (merged from selected sheets) instead of single `SheetDetection`
+
+### 4. `src/components/steps/SpreadsheetImportStep.tsx` — Thread multi-sheet
+
+- Replace `selectedSheetIndex` state with `selectedSheetIndices: number[]`
+- On parse complete, apply default selection logic (enterprise sheet or all)
+- Set default column mappings from the first selected sheet
+- When strategy pattern detected, set `levels` to 4-level Strategy/Outcome/Action/Measurement
+- On "Apply Mapping": merge selected `SheetDetection`s, call `generatePlanItems` with the merged detection
+- Update session tracking: `sheetsProcessed: selectedSheetIndices.length`
+
+### 5. `src/types/plan.ts` — No changes needed
+`PlanItem.members` already exists as `string[]`.
 
 ## Files Summary
 
 | File | Change |
 |------|--------|
-| `package.json` | Add `xlsx` |
-| `src/utils/spreadsheet-parser.ts` | New — parse, detect, generate |
-| `src/components/spreadsheet/DetectionSummary.tsx` | New — detection results UI |
-| `src/components/spreadsheet/MappingInterface.tsx` | New — mapping UI with live preview |
-| `src/components/steps/SpreadsheetImportStep.tsx` | New — orchestrator |
-| `src/components/steps/FileUploadStep.tsx` | Replace Excel demo fallback with spreadsheet path |
-| `src/pages/Index.tsx` | Add `handleSpreadsheetComplete` handler (separate from PDF's `handleAIExtraction`) |
+| `src/utils/spreadsheet-parser.ts` | Strategy/Outcome detection, multi-sheet merge, member role, measurement mode |
+| `src/components/spreadsheet/DetectionSummary.tsx` | Multi-sheet checklist with Select All/Deselect All |
+| `src/components/spreadsheet/MappingInterface.tsx` | Add Member option, measurement mode toggle |
+| `src/components/steps/SpreadsheetImportStep.tsx` | Multi-sheet selection state, 4-level defaults |
 
 ## What does NOT change
-- No edge functions, no PDF pipeline, no polling/resume logic
-- No changes to `PlanOptimizerStep`, `LevelVerificationModal`, or admin panel
-- `showLevelModal` only triggered by PDF path — spreadsheet path uses a separate handler
+- No PDF pipeline, edge functions, or agents
+- No FileUploadStep routing or Index.tsx handlers
+- No PlanOptimizerStep or admin panel
+- No export logic (members column already exported via `item.members.join(', ')`)
 
