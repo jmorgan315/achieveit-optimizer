@@ -61,7 +61,7 @@ interface OrgProfileStepProps {
 }
 
 export function OrgProfileStep({
-  onComplete, onSkip, sessionId,
+  onComplete, onSkip, sessionId, ensureSessionId,
   orgName, setOrgName,
   industry, setIndustry,
   documentHints, setDocumentHints,
