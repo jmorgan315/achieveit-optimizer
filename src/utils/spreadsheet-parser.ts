@@ -715,17 +715,6 @@ export function generatePlanItems(
     }
   }
 
-  // Cross-sheet dedup: name+parent key, keep first occurrence
-  const seen = new Map<string, number>();
-  const deduped: PlanItem[] = [];
-  for (const item of items) {
-    const key = `${item.name.toLowerCase().trim()}|${item.parentId || ''}`;
-    if (!seen.has(key)) {
-      seen.set(key, deduped.length);
-      deduped.push(item);
-    }
-  }
-
   const personMappings: PersonMapping[] = Array.from(personNames).map((name, i) => ({
     id: String(i + 1),
     foundName: name,
@@ -733,7 +722,7 @@ export function generatePlanItems(
     isResolved: false,
   }));
 
-  return { items: deduped, personMappings };
+  return { items, personMappings };
 }
 
 function createEmptyPlanItem(overrides: Partial<PlanItem>): PlanItem {

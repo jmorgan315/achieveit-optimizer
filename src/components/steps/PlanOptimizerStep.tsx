@@ -98,7 +98,11 @@ export function PlanOptimizerStep({
   onStartOver,
   onRestoreDedupItem,
 }: PlanOptimizerStepProps) {
-  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(items.map((i) => i.id)));
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
+    if (items.length <= 80) return new Set(items.map((i) => i.id));
+    // Large imports: start fully collapsed so only root items render
+    return new Set<string>();
+  });
   const [selectedItem, setSelectedItem] = useState<PlanItem | null>(null);
   const [showMetricDialog, setShowMetricDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
