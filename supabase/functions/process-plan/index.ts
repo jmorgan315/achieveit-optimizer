@@ -1173,7 +1173,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
     await updateSessionProgress(sessionId, {
       current_step: "extraction_complete",
       step_results: extractionSnapshot,
-    });
+    }, runId);
     console.log(`[process-plan] Extraction checkpoint persisted (${agent1ItemCount} items), proceeding to Agents 2+3`);
 
     // ==============================
