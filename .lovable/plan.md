@@ -1,110 +1,63 @@
 
 
-# Phase 1: Large Document Support + Multi-Entity Extraction
+# Fix: Polling Race Condition + Page Range State
 
-Backend-only changes. No UX restructure. Ship, test, then tackle Part 4 separately.
+Two targeted fixes to prevent the issues seen in the last run.
 
 ---
 
-## Part 1: Raise Page Limits to 250
+## Fix 1: Polling resilience for transient error status
 
-Three files, one shared constant where possible.
+**File**: `src/components/steps/FileUploadStep.tsx` — `pollForResults` function (lines 322-325)
+
+**Problem**: When the poller sees `status === 'error'`, it immediately throws. But during a resume cycle, the server briefly writes `error` before overwriting with a successful result. The client catches that transient state and abandons the run.
+
+**Fix**: Track whether the session has made progress (items extracted or step advanced past `classifying`). If progress was observed and the status is `error`, allow up to 3 additional grace polls (9 seconds) before giving up. This gives the resume mechanism time to overwrite the error.
+
+```
+Add tracking variables at the top of pollForResults:
+  let hadProgress = false;
+  let errorGracePolls = 0;
+  const MAX_ERROR_GRACE = 3;
+
+In the polling loop, after reading session:
+  - If step is 'extracting'/'extraction_complete'/'validating' or stepResults has items → set hadProgress = true
+  
+At the existing error check (line 322-325):
+  - If hadProgress && errorGracePolls < MAX_ERROR_GRACE:
+    - Increment errorGracePolls
+    - Log: "[Polling] Transient error detected, grace poll N/3..."
+    - continue (don't throw)
+  - Otherwise: throw as before
+```
+
+---
+
+## Fix 2: Clear page range on new file upload
+
+**Problem**: The `startPage` and `endPage` state is lifted to `Index.tsx` and reset in `handleStartOver`. However, if a user sets page range values in Step 0, goes through the pipeline, navigates back, and uploads a new file *without* clicking Start Over, the old page range persists and gets applied to the new document.
+
+**File**: `src/pages/Index.tsx`
+
+**Fix**: In the `setUploadedFile` setter or wherever a new file is set, also clear `startPage` and `endPage`. Specifically:
+- When `uploadedFile` changes to a new file (not null), reset `startPage` to `''` and `endPage` to `''`
+- The simplest approach: create a wrapper `handleNewFileUpload` that sets the file AND clears page range, then pass that to `FileUploadStep` instead of the raw setter
+
+Alternatively, since `OrgProfileStep` owns the Document Scope UI: add an `onFileChange` callback or clear page range inside `FileUploadStep` when a new file is selected.
+
+**File**: `src/components/steps/FileUploadStep.tsx`
+
+In the file selection handler (where `setUploadedFile` is called with a new file), also call the parent's page range reset. Since `setStartPage` and `setEndPage` aren't currently passed to `FileUploadStep`, the cleanest approach is:
+- Add an `onNewFileSelected?: () => void` prop to `FileUploadStep`
+- Call it when a new file is picked
+- In `Index.tsx`, pass `onNewFileSelected={() => { setStartPage(''); setEndPage(''); }}`
+
+---
+
+## Files to modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/parse-pdf/index.ts` | Change `MAX_PAGES = 100` → `250` (line 8) |
-| `src/utils/pdfToImages.ts` | Change default `maxPages = 100` → `250` in function signature (line 29) |
-| `src/components/steps/FileUploadStep.tsx` | Change hardcoded `100` → `250` in `renderPDFToImages(file, 100, ...)` call (line 375) |
-
-A shared constant isn't practical across edge function + client code, so each is updated independently but documented together.
-
----
-
-## Part 2: Chunk Agent 0 Classification for 50+ Pages
-
-**Where**: `supabase/functions/process-plan/index.ts`, inside `runPipeline()`, the Agent 0 block (lines 614-659).
-
-**Current behavior**: Sends ALL `pageImages` to `classify-document` in a single call.
-
-**New behavior**:
-- If `pageImages.length <= 50`: existing single-call behavior (no change)
-- If `pageImages.length > 50`: chunk into groups of 25 pages
-- Call `classify-document` once per chunk
-- Each chunk call logged as `"Step 0: Document Classification (Chunk N/M)"`
-- Merge results across chunks:
-  - **page_annotations**: concatenate all arrays, adjusting page numbers per chunk offset
-  - **document_type**: majority vote across chunks
-  - **confidence**: average across chunks
-  - **hierarchy_pattern**: use the one with highest confidence or from the first chunk
-  - **table_structure**: use the first non-null result
-  - **plan_content_pages / skip_pages**: union across chunks
-- The merged classification object replaces the single-call result — downstream pipeline (page filtering, buffer, extraction) works unchanged
-
-**No changes to `classify-document/index.ts` itself** — it processes whatever images it receives.
-
----
-
-## Part 3: Multi-Entity Document Extraction
-
-Prompt-only changes to two edge functions. No logic changes.
-
-### `supabase/functions/extract-plan-vision/index.ts`
-
-Append to `VISION_EXTRACTION_PROMPT` (after the existing "DUPLICATE DETECTION" section, before "STEP 5: OUTPUT STRUCTURE" or at the end of rules):
-
-```
-=== MULTI-SECTION / MULTI-ENTITY DOCUMENTS ===
-
-Some documents contain plans from multiple organizations, states, departments,
-or entities — each with their own section. When you detect this pattern:
-
-- Each entity name (e.g., state name, department, division) → Level 1 (top-level item)
-- Programs, goals, or focus areas within each entity → Level 2 (children of entity)
-- Initiatives, strategies, action items → Level 3+ (children of programs)
-
-Look for repeating structural patterns across entity sections. If "Alabama" has
-"Program Title → Initiatives", expect the same for "Alaska", "Arizona", etc.
-
-If the document is a single organization's plan (not multi-entity), ignore this
-guidance and extract normally.
-```
-
-### `supabase/functions/extract-plan-items/index.ts`
-
-Append similar multi-entity guidance to `EXTRACTION_SYSTEM_PROMPT` (after the "SELF-CHECK BEFORE RESPONDING" section).
-
-### `supabase/functions/validate-hierarchy/index.ts`
-
-Append to `VALIDATION_SYSTEM_PROMPT` (after "HANDLING AUDIT FINDINGS"):
-
-```
-=== MULTI-ENTITY DOCUMENTS ===
-
-If the extracted items appear to come from multiple organizations, states, or
-entities (e.g., many items named "[State] Rural Health Transformation Program"):
-
-- Entity-level items should be at Level 1
-- Programs/goals within each entity at Level 2, parented to their entity
-- Initiatives/actions at Level 3+, parented to their program
-
-If items are flat (all at the same level) but clearly belong to different entity
-sections, restructure them into the correct hierarchy using entity name patterns
-as signals for Level 1 grouping.
-```
-
----
-
-## Summary of All Files
-
-| File | Part | Change |
-|------|------|--------|
-| `supabase/functions/parse-pdf/index.ts` | 1 | `MAX_PAGES` 100 → 250 |
-| `src/utils/pdfToImages.ts` | 1 | Default `maxPages` 100 → 250 |
-| `src/components/steps/FileUploadStep.tsx` | 1 | Hardcoded 100 → 250 |
-| `supabase/functions/process-plan/index.ts` | 2 | Chunk classification for 50+ pages |
-| `supabase/functions/extract-plan-vision/index.ts` | 3 | Multi-entity prompt addition |
-| `supabase/functions/extract-plan-items/index.ts` | 3 | Multi-entity prompt addition |
-| `supabase/functions/validate-hierarchy/index.ts` | 3 | Multi-entity prompt addition |
-
-No database migrations needed. No new edge functions. No UX changes.
+| `src/components/steps/FileUploadStep.tsx` | Add error grace polling logic; add `onNewFileSelected` prop and call it on file pick |
+| `src/pages/Index.tsx` | Pass `onNewFileSelected` that clears `startPage` and `endPage` |
 
