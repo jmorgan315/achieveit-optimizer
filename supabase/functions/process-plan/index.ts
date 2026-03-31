@@ -1589,7 +1589,7 @@ async function runResume(sessionId: string): Promise<void> {
           classification,
           pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
         },
-      });
+      }, runId);
 
       // Run Agents 2+3
       await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
