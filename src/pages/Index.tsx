@@ -111,6 +111,7 @@ const Index = () => {
   };
 
   const handleStartOver = () => {
+    sessionIdRef.current = null;
     resetState();
     setPendingAIData(null);
     // Reset lifted OrgProfileStep state

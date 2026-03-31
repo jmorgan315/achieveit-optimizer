@@ -295,6 +295,92 @@ export function EditItemDialog({
             />
           </div>
 
+          {/* Members */}
+          <div className="space-y-2">
+            <Label>Members</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {formData.members.map((m, i) => (
+                <Badge key={i} variant="secondary" className="text-xs gap-1 pr-1">
+                  {m}
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, members: prev.members.filter((_, j) => j !== i) }))}
+                    className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={newMember}
+                onChange={(e) => setNewMember(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const v = newMember.trim();
+                    if (v) { setFormData(prev => ({ ...prev, members: [...prev.members, v] })); setNewMember(''); }
+                  }
+                }}
+                placeholder="Add member…"
+                className="h-8 text-xs"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs shrink-0"
+                onClick={() => { const v = newMember.trim(); if (v) { setFormData(prev => ({ ...prev, members: [...prev.members, v] })); setNewMember(''); } }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+
+          {/* Tags */}
+          <div className="space-y-2">
+            <Label>Tags</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {formData.tags.map((t, i) => (
+                <Badge key={i} variant="outline" className="text-xs gap-1 pr-1">
+                  {t}
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, tags: prev.tags.filter((_, j) => j !== i) }))}
+                    className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={newTag}
+                onChange={(e) => setNewTag(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const v = newTag.trim();
+                    if (v) { setFormData(prev => ({ ...prev, tags: [...prev.tags, v] })); setNewTag(''); }
+                  }
+                }}
+                placeholder="Add tag…"
+                className="h-8 text-xs"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs shrink-0"
+                onClick={() => { const v = newTag.trim(); if (v) { setFormData(prev => ({ ...prev, tags: [...prev.tags, v] })); setNewTag(''); } }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+
           {/* Metrics Section */}
           <Collapsible open={metricsOpen} onOpenChange={setMetricsOpen}>
             <CollapsibleTrigger asChild>
