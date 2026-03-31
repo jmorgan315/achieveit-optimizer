@@ -1648,7 +1648,7 @@ async function runResume(sessionId: string): Promise<void> {
     const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
     const sourceText = (pipeCtx.documentText || "") as string;
 
-    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText);
+    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, runId);
 
     // Cleanup images (may or may not exist)
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
