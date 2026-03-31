@@ -1688,7 +1688,7 @@ async function runPostExtractionResume(
     status: "success",
   });
 
-  await updateSessionProgress(sessionId, { current_step: "validating" });
+  await updateSessionProgress(sessionId, { current_step: "validating" }, runId);
 
   // Run Agents 2+3 in parallel
   const hasSourceText = sourceText.length > 100;
