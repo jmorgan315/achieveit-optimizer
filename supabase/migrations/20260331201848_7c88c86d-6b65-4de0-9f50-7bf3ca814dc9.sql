@@ -1,0 +1,1 @@
+ALTER TABLE public.processing_sessions ADD COLUMN pipeline_run_id text;
