@@ -1,6 +1,25 @@
 import * as XLSX from 'xlsx';
 import { PlanItem, PlanLevel, PersonMapping } from '@/types/plan';
 
+/** Safely parse a spreadsheet date cell (Excel serial, ISO string, locale string) into YYYY-MM-DD or undefined */
+export function parseSpreadsheetDate(v: unknown): string | undefined {
+  if (v == null || v === '') return undefined;
+  if (typeof v === 'number') {
+    // Excel serial date: days since 1900-01-01 (with the 1900 leap year bug)
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString().slice(0, 10);
+  }
+  const s = String(v).trim();
+  if (!s) return undefined;
+  const d = new Date(s);
+  if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  // Try DD/MM/YYYY or DD-MM-YYYY
+  const m = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (!m) return undefined;
+  const d2 = new Date(`${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`);
+  return Number.isNaN(d2.getTime()) ? undefined : d2.toISOString().slice(0, 10);
+}
+
 export interface ParsedSheet {
   name: string;
   rows: (string | number | null)[][];
@@ -581,7 +600,8 @@ export function generatePlanItems(
 
         orderCounter++;
         const owner = ownerCol ? getSectionColValue(row, ownerCol) : '';
-        const dueDate = dateCol ? getSectionColValue(row, dateCol) : '';
+        const rawDate = dateCol ? getSectionColValue(row, dateCol) : '';
+        const dueDate = parseSpreadsheetDate(rawDate) || '';
         const metricVal = metricCol ? getSectionColValue(row, metricCol) : '';
         const desc = descCol ? getSectionColValue(row, descCol) : '';
         const tag = tagCol ? getSectionColValue(row, tagCol) : '';
@@ -685,7 +705,8 @@ export function generatePlanItems(
 
         orderCounter++;
         const owner = ownerCol ? getColumnValue(row, ownerCol) : '';
-        const dueDate = dateCol ? getColumnValue(row, dateCol) : '';
+        const rawDate2 = dateCol ? getColumnValue(row, dateCol) : '';
+        const dueDate = parseSpreadsheetDate(rawDate2) || '';
         const metric = metricCol ? getColumnValue(row, metricCol) : '';
         const desc = descCol ? getColumnValue(row, descCol) : '';
         const tag = tagCol ? getColumnValue(row, tagCol) : '';
