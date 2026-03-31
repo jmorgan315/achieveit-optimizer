@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { logApiCall, ensureSession, extractTokenUsage, truncateImagePayload } from "../_shared/logging.ts";
+import { logApiCall, ensureSession, extractTokenUsage, truncateImagePayload, callAnthropicWithRetryShared } from "../_shared/logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -359,14 +359,9 @@ Please audit the extraction above against the source document. Identify any miss
     }
 
     const startTime = Date.now();
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
+    const response = await callAnthropicWithRetryShared(ANTHROPIC_API_KEY, requestBody, {
+      functionName: "audit-completeness",
+      sessionId,
     });
     const durationMs = Date.now() - startTime;
 

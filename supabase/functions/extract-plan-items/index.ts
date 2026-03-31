@@ -387,9 +387,10 @@ async function callAnthropicWithRetry(
       body: JSON.stringify(body),
     });
 
-    if (response.status === 429 && attempt < maxRetries) {
-      const waitTime = Math.pow(2, attempt + 1) * 2000;
-      console.log(`Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}...`);
+    const RETRYABLE = new Set([408, 429, 500, 502, 503, 529]);
+    if (RETRYABLE.has(response.status) && attempt < maxRetries) {
+      const waitTime = Math.min(Math.pow(2, attempt + 1) * 2000, 30000);
+      console.log(`[extract-plan-items] Retryable status ${response.status}, waiting ${waitTime}ms before retry ${attempt + 1}...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       continue;
     }
