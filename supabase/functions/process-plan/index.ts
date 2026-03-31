@@ -1557,7 +1557,7 @@ async function runResume(sessionId: string): Promise<void> {
             classification,
             pipelineContext: { ...pipeCtx, previousContext },
           },
-        });
+        }, runId);
         console.log(`[process-plan] Resume: Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
       }
 
