@@ -112,6 +112,8 @@ export function EditItemDialog({
         startDate: item.startDate ? (() => { const d = new Date(item.startDate); return Number.isNaN(d.getTime()) ? undefined : d; })() : undefined,
         dueDate: item.dueDate ? (() => { const d = new Date(item.dueDate); return Number.isNaN(d.getTime()) ? undefined : d; })() : undefined,
         assignedTo: item.assignedTo,
+        members: item.members ?? [],
+        tags: item.tags ?? [],
         metricDescription: item.metricDescription,
         metricUnit: item.metricUnit,
         metricRollup: item.metricRollup,
@@ -120,6 +122,8 @@ export function EditItemDialog({
         currentValue: item.currentValue,
       });
       setMetricsOpen(!!item.metricDescription);
+      setNewMember('');
+      setNewTag('');
     }
   }, [item]);
 
