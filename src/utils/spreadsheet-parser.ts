@@ -16,6 +16,9 @@ export interface DetectedSection {
   dataRowStart: number;
   dataRowEnd: number;
   dataRowCount: number;
+  sectionType: 'strategy' | 'outcome' | 'generic';
+  outcomeText?: string;
+  outcomeRowIndex?: number;
 }
 
 export interface SheetDetection {
@@ -23,6 +26,7 @@ export interface SheetDetection {
   sections: DetectedSection[];
   allColumnHeaders: string[];
   totalDataRows: number;
+  hasStrategyPattern: boolean;
 }
 
 export interface StructureDetection {
@@ -31,16 +35,20 @@ export interface StructureDetection {
   totalItems: number;
   totalSections: number;
   recommendedSheetIndex: number;
+  hasStrategyPattern: boolean;
 }
 
-export type ColumnRole = 'item_name' | 'owner' | 'date' | 'metric' | 'description' | 'tag' | 'skip';
+export type ColumnRole = 'item_name' | 'owner' | 'date' | 'metric' | 'description' | 'tag' | 'member' | 'skip';
 export type ElementRole = { type: 'level'; depth: number } | { type: 'tag' } | { type: 'skip' };
 
+export type MeasurementMode = 'level4' | 'metric_on_parent';
+
 export interface MappingConfig {
-  selectedSheetIndex: number;
-  sectionMapping: ElementRole; // how section headers map
+  selectedSheetIndices: number[];
+  sectionMapping: ElementRole;
   columnMappings: Record<string, ColumnRole>;
   levels: PlanLevel[];
+  measurementMode: MeasurementMode;
 }
 
 // ─── Parsing ────────────────────────────────────────────────────
@@ -62,9 +70,42 @@ export async function parseSpreadsheetFile(file: File): Promise<ParsedSheet[]> {
   });
 }
 
+// ─── Strategy Pattern Helpers ───────────────────────────────────
+
+function isStrategyRow(row: (string | number | null)[] | undefined): boolean {
+  if (!Array.isArray(row)) return false;
+  const cellA = row[0];
+  if (cellA == null) return false;
+  return /^strategy\s*:/i.test(String(cellA).trim());
+}
+
+function isOutcomeRow(row: (string | number | null)[] | undefined): boolean {
+  if (!Array.isArray(row)) return false;
+  const cellA = row[0];
+  if (cellA == null) return false;
+  return /^outcomes?\s*$/i.test(String(cellA).trim()) || /^outcomes?\s*:/i.test(String(cellA).trim());
+}
+
+function getStrategyName(row: (string | number | null)[]): string {
+  const cellA = String(row[0] || '').trim();
+  // Extract text after "Strategy:"
+  const match = cellA.match(/^strategy\s*:\s*(.+)/i);
+  return match ? match[1].trim().replace(/[-–—]+$/, '').trim() : cellA;
+}
+
+function getOutcomeText(row: (string | number | null)[]): string {
+  // Outcome text is typically in column B
+  const cellB = row[1];
+  if (cellB != null && String(cellB).trim()) return String(cellB).trim();
+  // Fallback to column A content after "Outcomes"
+  const cellA = String(row[0] || '').trim();
+  const match = cellA.match(/^outcomes?\s*:\s*(.+)/i);
+  return match ? match[1].trim() : cellA;
+}
+
 // ─── Structure Detection ────────────────────────────────────────
 
-function isLikelyColumnHeaderRow(row: (string | number | null)[]): boolean {
+function isLikelyColumnHeaderRow(row: (string | number | null)[] | undefined): boolean {
   if (!Array.isArray(row)) return false;
   const filled = row.filter(c => c != null && String(c).trim().length > 0);
   if (filled.length < 2) return false;
@@ -72,7 +113,7 @@ function isLikelyColumnHeaderRow(row: (string | number | null)[]): boolean {
   return allShort && filled.length >= 2;
 }
 
-function isLikelySectionHeader(row: (string | number | null)[], avgCols: number): boolean {
+function isLikelySectionHeader(row: (string | number | null)[] | undefined, avgCols: number): boolean {
   if (!Array.isArray(row)) return false;
   const filled = row.filter(c => c != null && String(c).trim().length > 0);
   if (filled.length !== 1 && filled.length !== 2) return false;
@@ -87,110 +128,19 @@ export function detectStructure(sheets: ParsedSheet[]): StructureDetection {
       ? rows.reduce((s, r) => s + r.filter(c => c != null && String(c).trim() !== '').length, 0) / rows.length
       : 0;
 
-    const sections: DetectedSection[] = [];
-    const allColumnHeaders: string[] = [];
-    let i = 0;
+    // First pass: check if this sheet has a strategy pattern
+    const hasStrategy = rows.some(r => isStrategyRow(r));
 
-    while (i < rows.length) {
-      if (!Array.isArray(rows[i])) { i++; continue; }
-      // Look for section header
-      if (isLikelySectionHeader(rows[i], avgCols)) {
-        const headerText = String(rows[i].find(c => c != null && String(c).trim() !== '') || '').trim();
-        const headerRowIndex = i;
-        i++;
-
-        // Look for column header row
-        if (i < rows.length && isLikelyColumnHeaderRow(rows[i])) {
-          const colHeaders = rows[i]
-            .map(c => (c != null ? String(c).trim() : ''))
-            .filter(s => s.length > 0);
-          const columnHeaderRowIndex = i;
-          i++;
-
-          // Collect data rows
-          const dataRowStart = i;
-          while (i < rows.length && !isLikelySectionHeader(rows[i], avgCols)) {
-            const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
-            if (filled.length === 0) { i++; continue; }
-            if (isLikelyColumnHeaderRow(rows[i]) && i > dataRowStart + 1) break;
-            i++;
-          }
-
-          sections.push({
-            headerText,
-            headerRowIndex,
-            columnHeaders: colHeaders,
-            columnHeaderRowIndex,
-            dataRowStart,
-            dataRowEnd: i,
-            dataRowCount: i - dataRowStart,
-          });
-
-          colHeaders.forEach(h => {
-            if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
-          });
-          continue;
-        }
-      }
-
-      // No section header — check for standalone column header row
-      if (isLikelyColumnHeaderRow(rows[i]) && sections.length === 0 && allColumnHeaders.length === 0) {
-        const colHeaders = rows[i]
-          .map(c => (c != null ? String(c).trim() : ''))
-          .filter(s => s.length > 0);
-        const columnHeaderRowIndex = i;
-        i++;
-        const dataRowStart = i;
-        while (i < rows.length) {
-          const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
-          if (filled.length === 0) { i++; continue; }
-          if (isLikelySectionHeader(rows[i], avgCols)) break;
-          i++;
-        }
-        sections.push({
-          headerText: '',
-          headerRowIndex: -1,
-          columnHeaders: colHeaders,
-          columnHeaderRowIndex,
-          dataRowStart,
-          dataRowEnd: i,
-          dataRowCount: i - dataRowStart,
-        });
-        colHeaders.forEach(h => {
-          if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
-        });
-        continue;
-      }
-
-      i++;
+    if (hasStrategy) {
+      return detectStrategyPattern(sheet, rows);
     }
 
-    // Fallback: if no sections detected, treat entire sheet as one section
-    if (sections.length === 0 && rows.length > 1) {
-      const firstRow = rows[0];
-      const colHeaders = firstRow
-        .map(c => (c != null ? String(c).trim() : ''))
-        .filter(s => s.length > 0);
-
-      sections.push({
-        headerText: '',
-        headerRowIndex: -1,
-        columnHeaders: colHeaders,
-        columnHeaderRowIndex: 0,
-        dataRowStart: 1,
-        dataRowEnd: rows.length,
-        dataRowCount: rows.length - 1,
-      });
-      colHeaders.forEach(h => {
-        if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
-      });
-    }
-
-    const totalDataRows = sections.reduce((s, sec) => s + sec.dataRowCount, 0);
-    return { sheet, sections, allColumnHeaders, totalDataRows };
+    // Fallback: generic detection (original logic)
+    return detectGenericPattern(sheet, rows, avgCols);
   });
 
-  // Recommend the sheet with the most data rows
+  const hasStrategyPattern = detections.some(d => d.hasStrategyPattern);
+
   let recommendedIdx = 0;
   let maxRows = 0;
   detections.forEach((d, idx) => {
@@ -206,6 +156,240 @@ export function detectStructure(sheets: ParsedSheet[]): StructureDetection {
     totalItems: detections.reduce((s, d) => s + d.totalDataRows, 0),
     totalSections: detections.reduce((s, d) => s + d.sections.length, 0),
     recommendedSheetIndex: recommendedIdx,
+    hasStrategyPattern,
+  };
+}
+
+function detectStrategyPattern(sheet: ParsedSheet, rows: (string | number | null)[][]): SheetDetection {
+  const sections: DetectedSection[] = [];
+  const allColumnHeaders: string[] = [];
+  let i = 0;
+
+  while (i < rows.length) {
+    if (!Array.isArray(rows[i])) { i++; continue; }
+
+    if (isStrategyRow(rows[i])) {
+      const strategyName = getStrategyName(rows[i]);
+      const strategyRowIdx = i;
+      i++;
+
+      // Look for Outcome row
+      let outcomeText = '';
+      let outcomeRowIdx = -1;
+      if (i < rows.length && isOutcomeRow(rows[i])) {
+        outcomeText = getOutcomeText(rows[i]);
+        outcomeRowIdx = i;
+        i++;
+      }
+
+      // Look for column header row
+      let colHeaders: string[] = [];
+      let columnHeaderRowIndex = -1;
+      if (i < rows.length && isLikelyColumnHeaderRow(rows[i])) {
+        colHeaders = rows[i]
+          .map(c => (c != null ? String(c).trim() : ''))
+          .filter(s => s.length > 0);
+        columnHeaderRowIndex = i;
+        i++;
+      }
+
+      // Collect data rows until next strategy row or end
+      const dataRowStart = i;
+      while (i < rows.length && !isStrategyRow(rows[i])) {
+        i++;
+      }
+
+      // Trim trailing empty rows
+      let dataRowEnd = i;
+      while (dataRowEnd > dataRowStart) {
+        const row = rows[dataRowEnd - 1];
+        if (Array.isArray(row) && row.some(c => c != null && String(c).trim() !== '')) break;
+        dataRowEnd--;
+      }
+
+      sections.push({
+        headerText: strategyName,
+        headerRowIndex: strategyRowIdx,
+        columnHeaders: colHeaders,
+        columnHeaderRowIndex,
+        dataRowStart,
+        dataRowEnd,
+        dataRowCount: dataRowEnd - dataRowStart,
+        sectionType: 'strategy',
+        outcomeText,
+        outcomeRowIndex: outcomeRowIdx >= 0 ? outcomeRowIdx : undefined,
+      });
+
+      colHeaders.forEach(h => {
+        if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
+      });
+      continue;
+    }
+
+    i++;
+  }
+
+  const totalDataRows = sections.reduce((s, sec) => s + sec.dataRowCount, 0);
+  return { sheet, sections, allColumnHeaders, totalDataRows, hasStrategyPattern: true };
+}
+
+function detectGenericPattern(sheet: ParsedSheet, rows: (string | number | null)[][], avgCols: number): SheetDetection {
+  const sections: DetectedSection[] = [];
+  const allColumnHeaders: string[] = [];
+  let i = 0;
+
+  while (i < rows.length) {
+    if (!Array.isArray(rows[i])) { i++; continue; }
+
+    if (isLikelySectionHeader(rows[i], avgCols)) {
+      const headerText = String(rows[i].find(c => c != null && String(c).trim() !== '') || '').trim();
+      const headerRowIndex = i;
+      i++;
+
+      if (i < rows.length && isLikelyColumnHeaderRow(rows[i])) {
+        const colHeaders = rows[i]
+          .map(c => (c != null ? String(c).trim() : ''))
+          .filter(s => s.length > 0);
+        const columnHeaderRowIndex = i;
+        i++;
+
+        const dataRowStart = i;
+        while (i < rows.length && !isLikelySectionHeader(rows[i], avgCols)) {
+          const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
+          if (filled.length === 0) { i++; continue; }
+          if (isLikelyColumnHeaderRow(rows[i]) && i > dataRowStart + 1) break;
+          i++;
+        }
+
+        sections.push({
+          headerText,
+          headerRowIndex,
+          columnHeaders: colHeaders,
+          columnHeaderRowIndex,
+          dataRowStart,
+          dataRowEnd: i,
+          dataRowCount: i - dataRowStart,
+          sectionType: 'generic',
+        });
+        colHeaders.forEach(h => {
+          if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
+        });
+        continue;
+      }
+    }
+
+    if (isLikelyColumnHeaderRow(rows[i]) && sections.length === 0 && allColumnHeaders.length === 0) {
+      const colHeaders = rows[i]
+        .map(c => (c != null ? String(c).trim() : ''))
+        .filter(s => s.length > 0);
+      const columnHeaderRowIndex = i;
+      i++;
+      const dataRowStart = i;
+      while (i < rows.length) {
+        const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
+        if (filled.length === 0) { i++; continue; }
+        if (isLikelySectionHeader(rows[i], avgCols)) break;
+        i++;
+      }
+      sections.push({
+        headerText: '',
+        headerRowIndex: -1,
+        columnHeaders: colHeaders,
+        columnHeaderRowIndex,
+        dataRowStart,
+        dataRowEnd: i,
+        dataRowCount: i - dataRowStart,
+        sectionType: 'generic',
+      });
+      colHeaders.forEach(h => {
+        if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
+      });
+      continue;
+    }
+
+    i++;
+  }
+
+  // Fallback: if no sections detected, treat entire sheet as one section
+  if (sections.length === 0 && rows.length > 1) {
+    const firstRow = rows[0];
+    const colHeaders = firstRow
+      .map(c => (c != null ? String(c).trim() : ''))
+      .filter(s => s.length > 0);
+
+    sections.push({
+      headerText: '',
+      headerRowIndex: -1,
+      columnHeaders: colHeaders,
+      columnHeaderRowIndex: 0,
+      dataRowStart: 1,
+      dataRowEnd: rows.length,
+      dataRowCount: rows.length - 1,
+      sectionType: 'generic',
+    });
+    colHeaders.forEach(h => {
+      if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
+    });
+  }
+
+  const totalDataRows = sections.reduce((s, sec) => s + sec.dataRowCount, 0);
+  return { sheet, sections, allColumnHeaders, totalDataRows, hasStrategyPattern: false };
+}
+
+// ─── Multi-Sheet Merge ──────────────────────────────────────────
+
+export function mergeSheetDetections(detections: SheetDetection[]): SheetDetection {
+  if (detections.length === 0) {
+    return {
+      sheet: { name: 'Merged', rows: [], columnCount: 0, rowCount: 0 },
+      sections: [],
+      allColumnHeaders: [],
+      totalDataRows: 0,
+      hasStrategyPattern: false,
+    };
+  }
+  if (detections.length === 1) return detections[0];
+
+  // Use first detection as base
+  const allSections: DetectedSection[] = [];
+  const allColumnHeaders: string[] = [];
+  let totalDataRows = 0;
+  const hasStrategy = detections.some(d => d.hasStrategyPattern);
+
+  // Merge all rows from all sheets for reference (needed for column value lookups)
+  const mergedRows: (string | number | null)[][] = [];
+  const sheetRowOffsets: { sheetName: string; offset: number; detection: SheetDetection }[] = [];
+
+  for (const det of detections) {
+    const offset = mergedRows.length;
+    sheetRowOffsets.push({ sheetName: det.sheet.name, offset, detection: det });
+    mergedRows.push(...det.sheet.rows);
+
+    for (const sec of det.sections) {
+      // Offset row indices for merged context
+      allSections.push({
+        ...sec,
+        headerRowIndex: sec.headerRowIndex >= 0 ? sec.headerRowIndex + offset : -1,
+        columnHeaderRowIndex: sec.columnHeaderRowIndex >= 0 ? sec.columnHeaderRowIndex + offset : -1,
+        dataRowStart: sec.dataRowStart + offset,
+        dataRowEnd: sec.dataRowEnd + offset,
+        // Store source sheet name in headerText prefix for tag generation
+        _sourceSheet: det.sheet.name,
+      } as DetectedSection & { _sourceSheet?: string });
+      totalDataRows += sec.dataRowCount;
+    }
+
+    det.allColumnHeaders.forEach(h => {
+      if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h);
+    });
+  }
+
+  return {
+    sheet: { name: 'Merged', rows: mergedRows, columnCount: Math.max(...detections.map(d => d.sheet.columnCount)), rowCount: mergedRows.length },
+    sections: allSections,
+    allColumnHeaders,
+    totalDataRows,
+    hasStrategyPattern: hasStrategy,
   };
 }
 
@@ -216,7 +400,8 @@ const COLUMN_PATTERNS: [RegExp, ColumnRole][] = [
   [/owner|sponsor|responsible|assigned|lead/i, 'owner'],
   [/deadline|timeframe|due|date|timeline|target\s*date/i, 'date'],
   [/outcome|measurement|metric|kpi|measure|indicator/i, 'metric'],
-  [/department|division|unit|area|pillar/i, 'tag'],
+  [/department|member|team|division|unit/i, 'member'],
+  [/area|pillar/i, 'tag'],
   [/budget|cost|q[1-4]|quarter/i, 'skip'],
 ];
 
@@ -228,6 +413,26 @@ export function getDefaultColumnRole(columnName: string): ColumnRole {
   return 'skip';
 }
 
+// ─── Default Selection Logic ────────────────────────────────────
+
+export function getDefaultSheetSelection(sheets: SheetDetection[]): number[] {
+  // Check for rollup sheets
+  const rollupPattern = /enterprise|all\s|summary|consolidated/i;
+  const rollupIdx = sheets.findIndex(s => rollupPattern.test(s.sheet.name));
+  if (rollupIdx >= 0) return [rollupIdx];
+  // Otherwise select all
+  return sheets.map((_, i) => i);
+}
+
+// ─── Strategy-Pattern Levels ────────────────────────────────────
+
+export const STRATEGY_LEVELS: PlanLevel[] = [
+  { id: '1', name: 'Strategy', depth: 1 },
+  { id: '2', name: 'Outcome', depth: 2 },
+  { id: '3', name: 'Action', depth: 3 },
+  { id: '4', name: 'Measurement', depth: 4 },
+];
+
 // ─── Plan Item Generation ───────────────────────────────────────
 
 export function generatePlanItems(
@@ -236,18 +441,18 @@ export function generatePlanItems(
 ): { items: PlanItem[]; personMappings: PersonMapping[] } {
   const items: PlanItem[] = [];
   const personNames = new Set<string>();
-  const { sheet, sections } = detection;
-  const { columnMappings, sectionMapping, levels } = mapping;
+  const { sheet, sections, hasStrategyPattern } = detection;
+  const { columnMappings, sectionMapping, levels, measurementMode } = mapping;
 
   // Build column index map from the first section's column headers
   const colIndexMap = new Map<string, number>();
-  if (sections.length > 0) {
-    const refHeaders = sections[0].columnHeaders;
-    const headerRow = sheet.rows[sections[0].columnHeaderRowIndex];
+  const refSection = sections.find(s => s.columnHeaders.length > 0);
+  if (refSection) {
+    const headerRow = sheet.rows[refSection.columnHeaderRowIndex];
     if (headerRow) {
       headerRow.forEach((cell, idx) => {
         const val = cell != null ? String(cell).trim() : '';
-        if (val && refHeaders.includes(val)) {
+        if (val && refSection.columnHeaders.includes(val)) {
           colIndexMap.set(val, idx);
         }
       });
@@ -268,86 +473,249 @@ export function generatePlanItems(
     return null;
   };
 
+  const findAllColumnsByRole = (role: ColumnRole): string[] => {
+    return Object.entries(columnMappings).filter(([, r]) => r === role).map(([col]) => col);
+  };
+
   const nameCol = findColumnByRole('item_name');
   const ownerCol = findColumnByRole('owner');
   const dateCol = findColumnByRole('date');
   const metricCol = findColumnByRole('metric');
   const descCol = findColumnByRole('description');
   const tagCol = findColumnByRole('tag');
-
-  const useSectionAsLevel = sectionMapping.type === 'level';
-  const sectionDepth = useSectionAsLevel ? sectionMapping.depth : 0;
-
-  // Determine data item depth
-  const dataDepth = useSectionAsLevel ? sectionDepth + 1 : 1;
-  const dataLevelName = levels.find(l => l.depth === dataDepth)?.name || `Level ${dataDepth}`;
+  const memberCols = findAllColumnsByRole('member');
 
   let orderCounter = 0;
 
-  for (const section of sections) {
-    let sectionItemId: string | null = null;
+  // Get source sheet name from the section (if merged)
+  const getSourceSheet = (section: DetectedSection): string => {
+    return (section as any)._sourceSheet || sheet.name || '';
+  };
 
-    // Create section header as a plan item if mapped to a level
-    if (useSectionAsLevel && section.headerText) {
+  if (hasStrategyPattern) {
+    // Strategy pattern: Strategy → Outcome → Action → Measurement
+    for (const section of sections) {
+      if (section.sectionType !== 'strategy') continue;
+
       orderCounter++;
-      const sectionLevelName = levels.find(l => l.depth === sectionDepth)?.name || `Level ${sectionDepth}`;
-      const sectionItem: PlanItem = createEmptyPlanItem({
+      const strategyLevelName = levels.find(l => l.depth === 1)?.name || 'Strategy';
+      const sourceSheet = getSourceSheet(section);
+
+      // Level 1: Strategy
+      const strategyItem: PlanItem = createEmptyPlanItem({
         id: crypto.randomUUID(),
         order: String(orderCounter),
-        levelName: sectionLevelName,
-        levelDepth: sectionDepth,
+        levelName: strategyLevelName,
+        levelDepth: 1,
         name: section.headerText,
         parentId: null,
         confidence: 100,
+        tags: sourceSheet ? [`Source: ${sourceSheet}`] : [],
       });
-      items.push(sectionItem);
-      sectionItemId = sectionItem.id;
-    }
+      items.push(strategyItem);
 
-    // Process data rows
-    for (let r = section.dataRowStart; r < section.dataRowEnd; r++) {
-      const row = sheet.rows[r];
-      if (!row) continue;
-
-      const filled = row.filter(c => c != null && String(c).trim() !== '');
-      if (filled.length === 0) continue;
-
-      const name = nameCol ? getColumnValue(row, nameCol) : '';
-      if (!name) continue;
-
-      orderCounter++;
-      const owner = ownerCol ? getColumnValue(row, ownerCol) : '';
-      const dueDate = dateCol ? getColumnValue(row, dateCol) : '';
-      const metric = metricCol ? getColumnValue(row, metricCol) : '';
-      const desc = descCol ? getColumnValue(row, descCol) : '';
-      const tag = tagCol ? getColumnValue(row, tagCol) : '';
-
-      if (owner) personNames.add(owner);
-
-      const item: PlanItem = createEmptyPlanItem({
-        id: crypto.randomUUID(),
-        order: String(orderCounter),
-        levelName: dataLevelName,
-        levelDepth: dataDepth,
-        name,
-        description: desc,
-        assignedTo: owner,
-        dueDate,
-        parentId: sectionItemId,
-        tags: tag ? [tag] : [],
-        confidence: 100,
-      });
-
-      if (metric) {
-        item.metricDescription = 'Track to Target';
-        item.metricTarget = metric;
+      // Level 2: Outcome
+      let outcomeItemId: string | null = null;
+      if (section.outcomeText) {
+        orderCounter++;
+        const outcomeLevelName = levels.find(l => l.depth === 2)?.name || 'Outcome';
+        const outcomeItem: PlanItem = createEmptyPlanItem({
+          id: crypto.randomUUID(),
+          order: String(orderCounter),
+          levelName: outcomeLevelName,
+          levelDepth: 2,
+          name: section.outcomeText,
+          parentId: strategyItem.id,
+          confidence: 100,
+          tags: sourceSheet ? [`Source: ${sourceSheet}`] : [],
+        });
+        items.push(outcomeItem);
+        outcomeItemId = outcomeItem.id;
       }
 
-      items.push(item);
+      // Level 3: Actions (data rows)
+      // Re-build colIndexMap per section if it has its own column headers
+      const sectionColMap = new Map<string, number>(colIndexMap);
+      if (section.columnHeaders.length > 0 && section.columnHeaderRowIndex >= 0) {
+        const hRow = sheet.rows[section.columnHeaderRowIndex];
+        if (hRow) {
+          sectionColMap.clear();
+          hRow.forEach((cell, idx) => {
+            const val = cell != null ? String(cell).trim() : '';
+            if (val) sectionColMap.set(val, idx);
+          });
+        }
+      }
+
+      const getSectionColValue = (row: (string | number | null)[], colName: string): string => {
+        const idx = sectionColMap.get(colName);
+        if (idx == null) return '';
+        const val = row[idx];
+        return val != null ? String(val).trim() : '';
+      };
+
+      for (let r = section.dataRowStart; r < section.dataRowEnd; r++) {
+        const row = sheet.rows[r];
+        if (!row) continue;
+        // Skip strategy/outcome rows that might be within range
+        if (isStrategyRow(row) || isOutcomeRow(row)) continue;
+        // Skip column header rows
+        if (isLikelyColumnHeaderRow(row) && r === section.columnHeaderRowIndex) continue;
+
+        const filled = row.filter(c => c != null && String(c).trim() !== '');
+        if (filled.length === 0) continue;
+
+        const name = nameCol ? getSectionColValue(row, nameCol) : '';
+        if (!name) continue;
+
+        orderCounter++;
+        const owner = ownerCol ? getSectionColValue(row, ownerCol) : '';
+        const dueDate = dateCol ? getSectionColValue(row, dateCol) : '';
+        const metricVal = metricCol ? getSectionColValue(row, metricCol) : '';
+        const desc = descCol ? getSectionColValue(row, descCol) : '';
+        const tag = tagCol ? getSectionColValue(row, tagCol) : '';
+
+        if (owner) personNames.add(owner);
+
+        const actionLevelName = levels.find(l => l.depth === 3)?.name || 'Action';
+        const tags: string[] = [];
+        if (tag) tags.push(tag);
+        if (sourceSheet) tags.push(`Source: ${sourceSheet}`);
+
+        // Collect member values
+        const members: string[] = [];
+        for (const mc of memberCols) {
+          const mv = getSectionColValue(row, mc);
+          if (mv) members.push(mv);
+        }
+
+        const actionItem: PlanItem = createEmptyPlanItem({
+          id: crypto.randomUUID(),
+          order: String(orderCounter),
+          levelName: actionLevelName,
+          levelDepth: 3,
+          name,
+          description: desc,
+          assignedTo: owner,
+          dueDate,
+          parentId: outcomeItemId || strategyItem.id,
+          tags,
+          members,
+          confidence: 100,
+        });
+
+        // Handle measurement column
+        if (metricVal) {
+          if (measurementMode === 'level4') {
+            // Create Level 4 Measurement item
+            orderCounter++;
+            const measLevelName = levels.find(l => l.depth === 4)?.name || 'Measurement';
+            const measItem: PlanItem = createEmptyPlanItem({
+              id: crypto.randomUUID(),
+              order: String(orderCounter),
+              levelName: measLevelName,
+              levelDepth: 4,
+              name: metricVal,
+              parentId: actionItem.id,
+              confidence: 100,
+              tags: sourceSheet ? [`Source: ${sourceSheet}`] : [],
+            });
+            items.push(actionItem);
+            items.push(measItem);
+            continue;
+          } else {
+            // metric_on_parent: store as metric on the action
+            actionItem.metricDescription = 'Track to Target';
+            actionItem.metricTarget = metricVal;
+          }
+        }
+
+        items.push(actionItem);
+      }
+    }
+  } else {
+    // Generic pattern (original logic)
+    const useSectionAsLevel = sectionMapping.type === 'level';
+    const sectionDepth = useSectionAsLevel ? sectionMapping.depth : 0;
+    const dataDepth = useSectionAsLevel ? sectionDepth + 1 : 1;
+    const dataLevelName = levels.find(l => l.depth === dataDepth)?.name || `Level ${dataDepth}`;
+
+    for (const section of sections) {
+      let sectionItemId: string | null = null;
+      const sourceSheet = getSourceSheet(section);
+
+      if (useSectionAsLevel && section.headerText) {
+        orderCounter++;
+        const sectionLevelName = levels.find(l => l.depth === sectionDepth)?.name || `Level ${sectionDepth}`;
+        const sectionItem: PlanItem = createEmptyPlanItem({
+          id: crypto.randomUUID(),
+          order: String(orderCounter),
+          levelName: sectionLevelName,
+          levelDepth: sectionDepth,
+          name: section.headerText,
+          parentId: null,
+          confidence: 100,
+          tags: sourceSheet ? [`Source: ${sourceSheet}`] : [],
+        });
+        items.push(sectionItem);
+        sectionItemId = sectionItem.id;
+      }
+
+      for (let r = section.dataRowStart; r < section.dataRowEnd; r++) {
+        const row = sheet.rows[r];
+        if (!row) continue;
+
+        const filled = row.filter(c => c != null && String(c).trim() !== '');
+        if (filled.length === 0) continue;
+
+        const name = nameCol ? getColumnValue(row, nameCol) : '';
+        if (!name) continue;
+
+        orderCounter++;
+        const owner = ownerCol ? getColumnValue(row, ownerCol) : '';
+        const dueDate = dateCol ? getColumnValue(row, dateCol) : '';
+        const metric = metricCol ? getColumnValue(row, metricCol) : '';
+        const desc = descCol ? getColumnValue(row, descCol) : '';
+        const tag = tagCol ? getColumnValue(row, tagCol) : '';
+
+        if (owner) personNames.add(owner);
+
+        const tags: string[] = [];
+        if (tag) tags.push(tag);
+        if (sourceSheet) tags.push(`Source: ${sourceSheet}`);
+
+        const members: string[] = [];
+        for (const mc of memberCols) {
+          const mv = getColumnValue(row, mc);
+          if (mv) members.push(mv);
+        }
+
+        const item: PlanItem = createEmptyPlanItem({
+          id: crypto.randomUUID(),
+          order: String(orderCounter),
+          levelName: dataLevelName,
+          levelDepth: dataDepth,
+          name,
+          description: desc,
+          assignedTo: owner,
+          dueDate,
+          parentId: sectionItemId,
+          tags,
+          members,
+          confidence: 100,
+        });
+
+        if (metric) {
+          item.metricDescription = 'Track to Target';
+          item.metricTarget = metric;
+        }
+
+        items.push(item);
+      }
     }
   }
 
-  // Simple dedup: name+parent
+  // Cross-sheet dedup: name+parent key, keep first occurrence
   const seen = new Map<string, number>();
   const deduped: PlanItem[] = [];
   for (const item of items) {
@@ -358,7 +726,6 @@ export function generatePlanItems(
     }
   }
 
-  // Build person mappings
   const personMappings: PersonMapping[] = Array.from(personNames).map((name, i) => ({
     id: String(i + 1),
     foundName: name,
