@@ -24,7 +24,6 @@ interface FileUploadStepProps {
   sessionId?: string;
   hasExistingItems?: boolean;
   onAdvanceExisting?: () => void;
-  onNewFileSelected?: () => void;
   // Lifted state
   uploadedFile: File | null; setUploadedFile: (v: File | null) => void;
   fileContent: string; setFileContent: (v: string) => void;
@@ -53,7 +52,7 @@ const CHARS_PER_PAGE_THRESHOLD = 200;
 
 export function FileUploadStep({
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
-  hasExistingItems, onAdvanceExisting, onNewFileSelected,
+  hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
   fileContent, setFileContent,
   extractedItems, setExtractedItems,
@@ -212,11 +211,6 @@ export function FileUploadStep({
     let batchStallStart: number | null = null;
     let hasAttemptedExtractionResume = false;
 
-    // Transient error grace: if progress was made, allow a few extra polls before giving up
-    let hadProgress = false;
-    let errorGracePolls = 0;
-    const MAX_ERROR_GRACE = 3;
-
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
 
@@ -325,20 +319,7 @@ export function FileUploadStep({
         return { success: false, error: 'Completed but no results found' };
       }
 
-      // Track progress: if we've advanced past classifying or have items, the pipeline made real progress
-      const progressSteps = ['extracting', 'extraction_complete', 'validating'];
-      if (progressSteps.includes(step) || stepResults?.extraction?.items?.length > 0) {
-        hadProgress = true;
-      }
-
       if (session.status === 'error') {
-        // If progress was made, allow grace polls for transient errors (e.g. during resume)
-        if (hadProgress && errorGracePolls < MAX_ERROR_GRACE) {
-          errorGracePolls++;
-          console.log(`[Polling] Transient error detected, grace poll ${errorGracePolls}/${MAX_ERROR_GRACE}...`);
-          addMessage('Retrying after transient error...');
-          continue;
-        }
         const results = (session as any).step_results as any;
         throw new Error(results?.error || 'Pipeline failed');
       }
@@ -391,7 +372,7 @@ export function FileUploadStep({
 
     try {
       const pageRange = orgProfile?.pageRange;
-      const { images, pageCount } = await renderPDFToImages(file, 250, 0.75, pageRange);
+      const { images, pageCount } = await renderPDFToImages(file, 100, 0.75, pageRange);
 
       const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024));
       const totalKB = imageSizes.reduce((s, k) => s + k, 0);
@@ -624,7 +605,6 @@ export function FileUploadStep({
   const handleFileUpload = async (file: File) => {
     setIsProcessing(true);
     setUploadedFile(file);
-    onNewFileSelected?.();
     setExtractedItems(null);
     setExtractedMappings(null);
     setDetectedLevels(null);

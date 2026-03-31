@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { logApiCall, ensureSession, extractTokenUsage, callAnthropicWithRetryShared } from "../_shared/logging.ts";
+import { logApiCall, ensureSession, extractTokenUsage } from "../_shared/logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -49,56 +49,6 @@ Merged items: Split them back into the original distinct items. The merged item'
 Rephrased items: Replace the name with the originalText from the audit. Keep everything else about the item the same.
 
 Duplicate items (from audit): Merge them as described in DUPLICATE MERGING above.
-
-=== MULTI-ENTITY HIERARCHY RESTRUCTURING (CRITICAL) ===
-
-When you receive items that appear to come from multiple organizations, states,
-departments, or entities, you MUST restructure them into a proper hierarchy.
-Do NOT leave them flat.
-
-DETECTION: Look for items that follow a repeating pattern of:
-- An entity identifier (e.g., "[State Name] Rural Health Transformation Program",
-  "[Department Name] Strategic Plan", "[Division] Operational Goals")
-- Followed by items that are clearly sub-items: initiatives, strategies, goals,
-  action items, or focus areas that belong to that entity
-
-RESTRUCTURING RULES:
-1. Items containing entity identifiers (state names, org names, department names)
-   that represent the overall program or plan → Level 1 (parent, no parent_name)
-2. Items that appear BETWEEN one entity identifier and the next → children of
-   that entity at Level 2 (set parent_name to the entity item's name)
-3. If children have their own sub-items → Level 3 (parent_name = their Level 2 parent)
-
-EXAMPLE — Input (flat):
-  "Alabama Rural Health Transformation Program" (Level 1)
-  "Enhance Health IT and Cybersecurity" (Level 1)
-  "Collaborative EHR Regional Hubs" (Level 1)
-  "Expand Telehealth and Remote Monitoring" (Level 1)
-  "Alaska Rural Health Transformation Program" (Level 1)
-  "Promote Lifelong Health and Well-Being" (Level 1)
-
-EXAMPLE — Expected output (restructured):
-  "Alabama Rural Health Transformation Program" (Level 1, no parent)
-    "Enhance Health IT and Cybersecurity" (Level 2, parent = "Alabama Rural Health Transformation Program")
-    "Collaborative EHR Regional Hubs" (Level 2, parent = "Alabama Rural Health Transformation Program")
-    "Expand Telehealth and Remote Monitoring" (Level 2, parent = "Alabama Rural Health Transformation Program")
-  "Alaska Rural Health Transformation Program" (Level 1, no parent)
-    "Promote Lifelong Health and Well-Being" (Level 2, parent = "Alaska Rural Health Transformation Program")
-
-KEY SIGNALS that an item is an entity-level parent (Level 1):
-- Contains a state name, country name, or proper organization name
-- Contains words like "Program", "Plan", "Initiative" as a title
-- Is followed by items that describe goals, strategies, or actions (not another entity)
-- Often has a different naming pattern than its children (longer/formal vs shorter/action-oriented)
-
-KEY SIGNALS that an item is a child (Level 2+):
-- Describes a specific action, goal, strategy, or initiative
-- Does NOT contain an entity/state/org identifier
-- Appears between two entity-level items in the sequence
-
-You MUST apply this restructuring. Leaving multi-entity items flat at the same level
-is considered a validation failure. The whole point of hierarchy validation is to
-fix exactly this kind of structural issue.
 
 === OUTPUT FORMAT ===
 
@@ -312,9 +262,14 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     };
 
     const startTime = Date.now();
-    const response = await callAnthropicWithRetryShared(ANTHROPIC_API_KEY, requestBody, {
-      functionName: "validate-hierarchy",
-      sessionId,
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(requestBody),
     });
     const durationMs = Date.now() - startTime;
 

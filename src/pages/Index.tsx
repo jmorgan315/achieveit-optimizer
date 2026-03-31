@@ -375,7 +375,6 @@ const Index = () => {
                   advanceToStep(3);
                 }
               }}
-              onNewFileSelected={() => { setStartPage(''); setEndPage(''); }}
               uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
               fileContent={fileContent} setFileContent={setFileContent}
               extractedItems={extractedItems} setExtractedItems={setExtractedItems}

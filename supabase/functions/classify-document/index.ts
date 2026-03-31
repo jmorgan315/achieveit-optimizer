@@ -9,7 +9,7 @@ const corsHeaders = {
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const ANTHROPIC_MAX_RETRIES = 4;
 const ANTHROPIC_BASE_DELAY_MS = 3000;
-const RETRYABLE_ANTHROPIC_STATUSES = new Set([408, 429, 500, 502, 503, 529]);
+const RETRYABLE_ANTHROPIC_STATUSES = new Set([429, 500, 502, 503, 529]);
 
 function createSafeError(status: number, publicMessage: string, internalDetails?: unknown): Response {
   if (internalDetails) {

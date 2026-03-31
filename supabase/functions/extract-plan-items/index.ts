@@ -236,19 +236,7 @@ OUTPUT:
 3. Do root items have empty children arrays? → Move subsequent items into children
 4. Are lower-level items at root? → They should be children of higher-level items
 5. If all items are at root with no nesting, your response is WRONG — restructure.
-6. COUNT: Does the number of items in your output match the number of items in the document? If not, go back and add the missing ones.
-
-=== MULTI-SECTION / MULTI-ENTITY DOCUMENTS ===
-
-Some documents contain plans from multiple organizations, states, departments, or entities — each with their own section. When you detect this pattern:
-
-- Each entity name (e.g., state name, department, division) → Level 1 (top-level item)
-- Programs, goals, or focus areas within each entity → Level 2 (children of entity)
-- Initiatives, strategies, action items → Level 3+ (children of programs)
-
-Look for repeating structural patterns across entity sections. If "Alabama" has "Program Title → Initiatives", expect the same for "Alaska", "Arizona", etc.
-
-If the document is a single organization's plan (not multi-entity), ignore this guidance and extract normally.`;
+6. COUNT: Does the number of items in your output match the number of items in the document? If not, go back and add the missing ones.`;
 
 const VERIFICATION_SYSTEM_PROMPT = `You are a completeness auditor. You will receive:
 1. The original document text
@@ -387,10 +375,9 @@ async function callAnthropicWithRetry(
       body: JSON.stringify(body),
     });
 
-    const RETRYABLE = new Set([408, 429, 500, 502, 503, 529]);
-    if (RETRYABLE.has(response.status) && attempt < maxRetries) {
-      const waitTime = Math.min(Math.pow(2, attempt + 1) * 2000, 30000);
-      console.log(`[extract-plan-items] Retryable status ${response.status}, waiting ${waitTime}ms before retry ${attempt + 1}...`);
+    if (response.status === 429 && attempt < maxRetries) {
+      const waitTime = Math.pow(2, attempt + 1) * 2000;
+      console.log(`Rate limited, waiting ${waitTime}ms before retry ${attempt + 1}...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
       continue;
     }

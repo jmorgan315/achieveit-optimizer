@@ -82,7 +82,6 @@ export type Database = {
           id: string
           org_industry: string | null
           org_name: string | null
-          pipeline_run_id: string | null
           status: string
           step_results: Json | null
           total_api_calls: number
@@ -102,7 +101,6 @@ export type Database = {
           id?: string
           org_industry?: string | null
           org_name?: string | null
-          pipeline_run_id?: string | null
           status?: string
           step_results?: Json | null
           total_api_calls?: number
@@ -122,7 +120,6 @@ export type Database = {
           id?: string
           org_industry?: string | null
           org_name?: string | null
-          pipeline_run_id?: string | null
           status?: string
           step_results?: Json | null
           total_api_calls?: number

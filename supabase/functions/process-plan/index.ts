@@ -15,36 +15,9 @@ function getServiceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
-async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>, runId?: string): Promise<void> {
+async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
   try {
     const client = getServiceClient();
-
-    // Ownership check: if a runId is provided, verify it still owns the session
-    if (runId) {
-      const { data: current } = await client
-        .from("processing_sessions")
-        .select("pipeline_run_id, status, current_step")
-        .eq("id", sessionId)
-        .single();
-
-      // If another run has taken ownership, silently skip this write
-      if (current?.pipeline_run_id && current.pipeline_run_id !== runId) {
-        console.log(`[process-plan] Stale run ${runId.slice(0, 8)}… skipping update (owner is ${(current.pipeline_run_id as string).slice(0, 8)}…)`);
-        return;
-      }
-
-      // Also guard against overwriting completed sessions
-      if (
-        (current?.status === "completed" || current?.status === "complete" ||
-         current?.current_step === "completed" || current?.current_step === "complete") &&
-        updates.status !== "completed" && updates.status !== "complete" &&
-        updates.current_step !== "completed" && updates.current_step !== "complete"
-      ) {
-        console.log(`[process-plan] Skipping update — session ${sessionId} already completed`);
-        return;
-      }
-    }
-
     const { error } = await client.from("processing_sessions").update(updates).eq("id", sessionId);
     if (error) console.error("[process-plan] Failed to update session progress:", error.message);
   } catch (e) {
@@ -623,7 +596,7 @@ async function cleanupPageImages(sessionId: string): Promise<void> {
 // ==============================
 // The actual pipeline logic, runs in background after early return
 // ==============================
-async function runPipeline(sessionId: string, body: Record<string, unknown>, runId: string): Promise<void> {
+async function runPipeline(sessionId: string, body: Record<string, unknown>): Promise<void> {
   try {
     const {
       documentText,
@@ -646,217 +619,25 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
 
     if (useVision) {
       console.log("[process-plan] Starting Step 0 (document classification)");
-      await updateSessionProgress(sessionId, { current_step: "classifying" }, runId);
-
-      const allPageImages = pageImages as string[];
-      const CHUNK_THRESHOLD = 50;
-      const CHUNK_SIZE = 25;
+      await updateSessionProgress(sessionId, { current_step: "classifying" });
 
       try {
-        if (allPageImages.length <= CHUNK_THRESHOLD) {
-          // Single call for small documents
-          const classifyResult = await callEdgeFunction("classify-document", {
-            pageImages,
-            orgName: organizationName || "",
-            industry: industry || "",
-            userPlanLevels: planLevels || null,
-            pageRange: pageRange || null,
-            additionalNotes: documentHints || null,
-            sessionId,
-          });
+        const classifyResult = await callEdgeFunction("classify-document", {
+          pageImages,
+          orgName: organizationName || "",
+          industry: industry || "",
+          userPlanLevels: planLevels || null,
+          pageRange: pageRange || null,
+          additionalNotes: documentHints || null,
+          sessionId,
+        });
 
-          if (classifyResult.ok && (classifyResult.data as { success: boolean }).success) {
-            classification = (classifyResult.data as { classification: Record<string, unknown> }).classification;
-            console.log("[process-plan] Step 0 complete, document_type:", classification?.document_type);
-          } else {
-            console.warn("[process-plan] Step 0 failed (non-fatal):", JSON.stringify(classifyResult.data));
-          }
-        } else {
-          // Chunked classification for large documents
-          const totalChunks = Math.ceil(allPageImages.length / CHUNK_SIZE);
-          console.log(`[process-plan] Step 0: Chunking ${allPageImages.length} pages into ${totalChunks} chunks of ${CHUNK_SIZE}`);
+        if (classifyResult.ok && (classifyResult.data as { success: boolean }).success) {
+          classification = (classifyResult.data as { classification: Record<string, unknown> }).classification;
+          console.log("[process-plan] Step 0 complete, document_type:", classification?.document_type);
 
-          const chunkResults: Array<Record<string, unknown>> = [];
-
-          for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-            const startIdx = chunkIdx * CHUNK_SIZE;
-            const chunkImages = allPageImages.slice(startIdx, startIdx + CHUNK_SIZE);
-            const chunkLabel = `Step 0: Document Classification (Chunk ${chunkIdx + 1}/${totalChunks})`;
-            console.log(`[process-plan] ${chunkLabel}, pages ${startIdx + 1}-${startIdx + chunkImages.length}`);
-
-            // Retry the edge function call itself up to 2 times (transport-level failures)
-            let chunkSuccess = false;
-            for (let edgeAttempt = 0; edgeAttempt < 3; edgeAttempt++) {
-              const chunkResult = await callEdgeFunction("classify-document", {
-                pageImages: chunkImages,
-                orgName: organizationName || "",
-                industry: industry || "",
-                userPlanLevels: planLevels || null,
-                pageRange: pageRange || null,
-                additionalNotes: documentHints || null,
-                sessionId,
-                stepLabel: chunkLabel,
-              });
-
-              if (chunkResult.ok && (chunkResult.data as { success: boolean }).success) {
-                const chunkClassification = (chunkResult.data as { classification: Record<string, unknown> }).classification;
-
-                // Adjust page numbers in page_annotations to reflect actual page positions
-                if (Array.isArray(chunkClassification?.page_annotations)) {
-                  chunkClassification.page_annotations = (chunkClassification.page_annotations as Array<Record<string, unknown>>).map(
-                    (ann: Record<string, unknown>) => ({
-                      ...ann,
-                      page_number: (ann.page_number as number) + startIdx,
-                    })
-                  );
-                }
-                // Adjust plan_content_pages
-                if (Array.isArray(chunkClassification?.plan_content_pages)) {
-                  chunkClassification.plan_content_pages = (chunkClassification.plan_content_pages as number[]).map(
-                    (p: number) => p + startIdx
-                  );
-                }
-                // Adjust skip_pages
-                if (Array.isArray(chunkClassification?.skip_pages)) {
-                  chunkClassification.skip_pages = (chunkClassification.skip_pages as number[]).map(
-                    (p: number) => p + startIdx
-                  );
-                }
-
-                chunkResults.push(chunkClassification);
-                chunkSuccess = true;
-                break; // success, no more retries
-              } else {
-                const errDetail = JSON.stringify(chunkResult.data).slice(0, 500);
-                if (edgeAttempt < 2) {
-                  const retryDelay = edgeAttempt === 0 ? 5000 : 15000;
-                  console.warn(`[process-plan] ${chunkLabel} attempt ${edgeAttempt + 1} failed, retrying in ${retryDelay}ms: ${errDetail}`);
-                  await new Promise(r => setTimeout(r, retryDelay));
-                } else {
-                  console.error(`[process-plan] ${chunkLabel} failed after 3 attempts: ${errDetail}`);
-                }
-              }
-            }
-
-            // Graceful chunk skip: if all retries failed, mark pages as unclassified
-            if (!chunkSuccess) {
-              const chunkPageNumbers = Array.from({ length: chunkImages.length }, (_, i) => startIdx + i + 1);
-              console.warn(`[process-plan] ${chunkLabel} SKIPPED — marking pages ${chunkPageNumbers[0]}-${chunkPageNumbers[chunkPageNumbers.length - 1]} as unclassified (will be sent to extraction)`);
-
-              // Log the failure to api_call_logs for admin visibility
-              logApiCall({
-                session_id: sessionId,
-                edge_function: "process-plan",
-                step_label: `${chunkLabel} — SKIPPED`,
-                status: "error",
-                error_message: `Classification chunk ${chunkIdx + 1}/${totalChunks} failed after 3 attempts. Pages ${chunkPageNumbers[0]}-${chunkPageNumbers[chunkPageNumbers.length - 1]} marked as unclassified and sent to extraction.`,
-              });
-
-              // Generate synthetic unclassified annotations — mark all pages as containing plan items
-              const syntheticAnnotations = chunkPageNumbers.map(pageNum => ({
-                page_number: pageNum,
-                contains_plan_items: true,
-                classification: "unclassified",
-                notes: "Classification chunk failed — page included in extraction as safety measure",
-              }));
-
-              chunkResults.push({
-                document_type: "unknown",
-                confidence: 0,
-                page_annotations: syntheticAnnotations,
-                plan_content_pages: chunkPageNumbers,
-                skip_pages: [],
-                hierarchy_pattern: null,
-                table_structure: null,
-                chunk_skipped: true,
-              });
-            }
-          }
-
-          // ── Classification gate: all chunks have completed or been gracefully skipped ──
-          console.log(`[process-plan] Step 0: All ${totalChunks} chunks processed (${chunkResults.length} results). Classification gate passed.`);
-
-          // Merge chunk results
-          if (chunkResults.length > 0) {
-            // Majority vote for document_type (exclude "unknown" from skipped chunks if possible)
-            const typeCounts: Record<string, number> = {};
-            for (const cr of chunkResults) {
-              const dt = (cr.document_type as string) || "unknown";
-              if (dt !== "unknown" || chunkResults.every(c => (c.document_type as string || "unknown") === "unknown")) {
-                typeCounts[dt] = (typeCounts[dt] || 0) + 1;
-              }
-            }
-            const majorityType = Object.keys(typeCounts).length > 0
-              ? Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0][0]
-              : "unknown";
-
-            // Average confidence (exclude 0 from skipped chunks)
-            const confidences = chunkResults.map(cr => (cr.confidence as number) || 0).filter(c => c > 0);
-            const avgConfidence = confidences.length > 0 ? confidences.reduce((s, c) => s + c, 0) / confidences.length : 0;
-
-            // Concatenate page_annotations
-            const allAnnotations = chunkResults.flatMap(cr => (cr.page_annotations as unknown[]) || []);
-
-            // Union plan_content_pages and skip_pages
-            const allPlanPages = [...new Set(chunkResults.flatMap(cr => (cr.plan_content_pages as number[]) || []))].sort((a, b) => a - b);
-            const allSkipPages = [...new Set(chunkResults.flatMap(cr => (cr.skip_pages as number[]) || []))].sort((a, b) => a - b);
-
-            // Use first non-null for hierarchy_pattern and table_structure
-            const hierarchyPattern = chunkResults.find(cr => cr.hierarchy_pattern)?.hierarchy_pattern || null;
-            const tableStructure = chunkResults.find(cr => cr.table_structure)?.table_structure || null;
-
-            const skippedChunks = chunkResults.filter(cr => cr.chunk_skipped).length;
-
-            classification = {
-              document_type: majorityType,
-              confidence: avgConfidence,
-              page_annotations: allAnnotations,
-              plan_content_pages: allPlanPages,
-              skip_pages: allSkipPages,
-              hierarchy_pattern: hierarchyPattern,
-              table_structure: tableStructure,
-              chunked: true,
-              total_chunks: totalChunks,
-              skipped_chunks: skippedChunks,
-            };
-
-            console.log(`[process-plan] Step 0 merged from ${chunkResults.length}/${totalChunks} chunks (${skippedChunks} skipped), document_type: ${majorityType}, confidence: ${avgConfidence.toFixed(2)}`);
-          } else {
-            // All chunks failed AND no synthetic results (should not happen with new logic, but safety net)
-            console.warn("[process-plan] Step 0: All chunks failed — building fallback classification marking all pages for extraction");
-            const allPageNumbers = Array.from({ length: allPageImages.length }, (_, i) => i + 1);
-            classification = {
-              document_type: "unknown",
-              confidence: 0,
-              page_annotations: allPageNumbers.map(p => ({
-                page_number: p,
-                contains_plan_items: true,
-                classification: "unclassified",
-                notes: "All classification chunks failed — page included in extraction as safety measure",
-              })),
-              plan_content_pages: allPageNumbers,
-              skip_pages: [],
-              hierarchy_pattern: null,
-              table_structure: null,
-              chunked: true,
-              total_chunks: totalChunks,
-              all_chunks_failed: true,
-            };
-
-            logApiCall({
-              session_id: sessionId,
-              edge_function: "process-plan",
-              step_label: "Step 0: Classification — FULL FALLBACK",
-              status: "error",
-              error_message: `All ${totalChunks} classification chunks failed. All ${allPageImages.length} pages marked for extraction as safety fallback.`,
-            });
-          }
-        }
-
-        // Determine extraction mode from classification
-        if (classification) {
-          const docType = classification.document_type as string;
-          const tableStructure = classification.table_structure;
+          const docType = classification?.document_type as string;
+          const tableStructure = classification?.table_structure;
           if (docType === "tabular" && tableStructure) {
             extractionMode = "table";
           } else if (docType === "presentation" || docType === "mixed") {
@@ -866,9 +647,11 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
 
           // Save classification to session
           await updateSessionProgress(sessionId, {
-            document_type: classification.document_type || null,
+            document_type: classification?.document_type || null,
             classification_result: classification,
-          }, runId);
+          });
+        } else {
+          console.warn("[process-plan] Step 0 failed (non-fatal):", JSON.stringify(classifyResult.data));
         }
       } catch (err) {
         console.error("[process-plan] Step 0 exception (non-fatal):", err);
@@ -878,7 +661,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
     // ==============================
     // AGENT 1: Extraction
     // ==============================
-    await updateSessionProgress(sessionId, { current_step: "extracting" }, runId);
+    await updateSessionProgress(sessionId, { current_step: "extracting" });
 
     let agent1Data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } | null = null;
     let extractionMethod = "text";
@@ -1021,7 +804,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
         // ==============================
         const isLastBatch = batchIdx === batches.length - 1;
         await updateSessionProgress(sessionId, {
-          current_step: "extracting",
+          current_step: isLastBatch ? "extracting" : "extracting",
           step_results: {
             extraction: {
               items: allItems,
@@ -1056,7 +839,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
               pageRange,
             },
           },
-        }, runId);
+        });
         console.log(`[process-plan] Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
       }
 
@@ -1135,7 +918,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
         status: "error",
         current_step: "error",
         step_results: { error: agent1Error || "Extraction produced no items", pipelineStep: "agent1" },
-      }, runId);
+      });
       return;
     }
 
@@ -1257,13 +1040,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
     await updateSessionProgress(sessionId, {
       current_step: "extraction_complete",
       step_results: extractionSnapshot,
-    }, runId);
+    });
     console.log(`[process-plan] Extraction checkpoint persisted (${agent1ItemCount} items), proceeding to Agents 2+3`);
 
     // ==============================
     // STEPS 2 & 3: Audit + Validation (PARALLEL)
     // ==============================
-    await updateSessionProgress(sessionId, { current_step: "validating" }, runId);
+    await updateSessionProgress(sessionId, { current_step: "validating" });
     console.log("[process-plan] Starting Steps 2 & 3 in parallel (audit + validation)");
 
     const sourceForAudit = (documentText as string) || "";
@@ -1425,7 +1208,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
       step_results: finalResult,
       extraction_method: extractionMethod,
       total_items_extracted: finalItemCount,
-    }, runId);
+    });
 
     // Fire-and-forget cleanup of stored page images
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Cleanup error:", e));
@@ -1436,7 +1219,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
       status: "error",
       current_step: "error",
       step_results: { error: "Pipeline processing failed. Please try again." },
-    }, runId);
+    });
   }
 }
 
@@ -1448,7 +1231,7 @@ async function runResume(sessionId: string): Promise<void> {
     const client = getServiceClient();
     const { data: session, error: fetchError } = await client
       .from("processing_sessions")
-      .select("step_results, current_step, status, org_name, org_industry")
+      .select("step_results, current_step, org_name, org_industry")
       .eq("id", sessionId)
       .single();
 
@@ -1458,25 +1241,10 @@ async function runResume(sessionId: string): Promise<void> {
     }
 
     const currentStep = (session as Record<string, unknown>).current_step as string;
-    const currentStatus = (session as Record<string, unknown>).status as string;
-
-    if (currentStep === "completed" || currentStep === "complete" || currentStatus === "completed" || currentStatus === "complete") {
-      console.log("[process-plan] Resume: already completed (step=" + currentStep + ", status=" + currentStatus + "), nothing to do");
+    if (currentStep === "completed" || currentStep === "complete") {
+      console.log("[process-plan] Resume: already completed, nothing to do");
       return;
     }
-
-    // Claim ownership: generate a new run ID and write it to the session
-    // This invalidates any still-running original pipeline's run ID
-    const runId = crypto.randomUUID();
-    const { error: claimError } = await client
-      .from("processing_sessions")
-      .update({ pipeline_run_id: runId })
-      .eq("id", sessionId);
-    if (claimError) {
-      console.error("[process-plan] Resume: failed to claim ownership:", claimError.message);
-      return;
-    }
-    console.log(`[process-plan] Resume: claimed ownership with runId ${runId.slice(0, 8)}…`);
 
     const stepResults = (session as Record<string, unknown>).step_results as Record<string, unknown>;
 
@@ -1549,10 +1317,10 @@ async function runResume(sessionId: string): Promise<void> {
             classification,
             pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
           },
-        }, runId);
+        });
 
         // Now run Agents 2+3 via the existing post-extraction resume path
-        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, runId);
+        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
         return;
       }
 
@@ -1574,7 +1342,7 @@ async function runResume(sessionId: string): Promise<void> {
           status: "error",
           current_step: "error",
           step_results: { error: "Resume failed: could not load stored page images" },
-        }, runId);
+        });
         return;
       }
 
@@ -1641,7 +1409,7 @@ async function runResume(sessionId: string): Promise<void> {
             classification,
             pipelineContext: { ...pipeCtx, previousContext },
           },
-        }, runId);
+        });
         console.log(`[process-plan] Resume: Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
       }
 
@@ -1673,10 +1441,10 @@ async function runResume(sessionId: string): Promise<void> {
           classification,
           pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
         },
-      }, runId);
+      });
 
       // Run Agents 2+3
-      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, runId);
+      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
 
       // Cleanup images
       cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
@@ -1686,31 +1454,6 @@ async function runResume(sessionId: string): Promise<void> {
     // ==============================
     // PATH B: Resume post-extraction (current_step === "extraction_complete")
     // ==============================
-    // PATH B.5: Resume from stuck "validating" state (agent 2/3 timed out)
-    if (currentStep === "validating" || currentStep === "auditing") {
-      const extraction = stepResults?.extraction as Record<string, unknown> | undefined;
-      if (extraction?.items && Array.isArray(extraction.items) && extraction.items.length > 0) {
-        console.log(`[process-plan] Resume: stuck at ${currentStep}, re-running post-extraction agents`);
-        const pipeCtx = (stepResults.pipelineContext || {}) as Record<string, unknown>;
-        const classification = (stepResults.classification || null) as Record<string, unknown> | null;
-        await runPostExtractionResume(
-          sessionId,
-          extraction.items as unknown[],
-          (extraction.detectedLevels || []) as { depth: number; name: string }[],
-          classification,
-          (pipeCtx.organizationName || (session as Record<string, unknown>).org_name) as string | undefined,
-          (pipeCtx.industry || (session as Record<string, unknown>).org_industry) as string | undefined,
-          pipeCtx.planLevels as unknown[] | undefined,
-          (pipeCtx.extractionMethod || "vision") as string,
-          (pipeCtx.documentText || "") as string,
-          runId,
-        );
-        return;
-      }
-      console.error("[process-plan] Resume: stuck at", currentStep, "but no extraction items found");
-      return;
-    }
-
     if (currentStep !== "extraction_complete") {
       console.error("[process-plan] Resume: unexpected current_step:", currentStep);
       return;
@@ -1732,7 +1475,7 @@ async function runResume(sessionId: string): Promise<void> {
     const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
     const sourceText = (pipeCtx.documentText || "") as string;
 
-    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, runId);
+    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText);
 
     // Cleanup images (may or may not exist)
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
@@ -1743,7 +1486,7 @@ async function runResume(sessionId: string): Promise<void> {
       status: "error",
       current_step: "error",
       step_results: { error: "Resume pipeline failed. Please try again." },
-    }, runId);
+    });
   }
 }
 
@@ -1757,8 +1500,7 @@ async function runPostExtractionResume(
   industry: string | undefined,
   planLevels: unknown[] | undefined,
   extractionMethod: string,
-  sourceText: string,
-  runId?: string
+  sourceText: string
 ): Promise<void> {
   const agent1NameSet = collectItemNameSet(agent1Items);
   const agent1ItemCount = countAllItems(agent1Items);
@@ -1772,7 +1514,7 @@ async function runPostExtractionResume(
     status: "success",
   });
 
-  await updateSessionProgress(sessionId, { current_step: "validating" }, runId);
+  await updateSessionProgress(sessionId, { current_step: "validating" });
 
   // Run Agents 2+3 in parallel
   const hasSourceText = sourceText.length > 100;
@@ -1894,7 +1636,7 @@ async function runPostExtractionResume(
       sessionId,
     },
     total_items_extracted: finalItemCount,
-  }, runId);
+  });
 
   await logApiCall({
     session_id: sessionId,
@@ -1943,13 +1685,11 @@ serve(async (req) => {
     const sessionId = await ensureSession(incomingSessionId);
     console.log("[process-plan] Pipeline starting, sessionId:", sessionId);
 
-    // Generate run ID for ownership and write it with initial status
-    const runId = crypto.randomUUID();
-    await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued", pipeline_run_id: runId });
-    console.log(`[process-plan] Pipeline claimed ownership with runId ${runId.slice(0, 8)}…`);
+    // Update session to in_progress
+    await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued" });
 
     // Fire off the pipeline in the background (non-awaited)
-    runPipeline(sessionId, body, runId).catch((err) => {
+    runPipeline(sessionId, body).catch((err) => {
       console.error("[process-plan] Background pipeline fatal error:", err);
     });
 
