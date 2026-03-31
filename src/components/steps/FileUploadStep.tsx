@@ -24,6 +24,7 @@ interface FileUploadStepProps {
   sessionId?: string;
   hasExistingItems?: boolean;
   onAdvanceExisting?: () => void;
+  onNewFileSelected?: () => void;
   // Lifted state
   uploadedFile: File | null; setUploadedFile: (v: File | null) => void;
   fileContent: string; setFileContent: (v: string) => void;
