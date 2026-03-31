@@ -125,8 +125,9 @@ export function OrgProfileStep({
     setLookupResult(null);
 
     try {
+      const sid = sessionId ?? await ensureSessionId();
       const { data, error } = await supabase.functions.invoke('lookup-organization', {
-        body: { organizationName: orgName.trim(), industry, sessionId },
+        body: { organizationName: orgName.trim(), industry, sessionId: sid },
       });
 
       if (error) throw error;

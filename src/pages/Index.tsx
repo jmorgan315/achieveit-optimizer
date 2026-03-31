@@ -346,7 +346,8 @@ const Index = () => {
             <OrgProfileStep
               onComplete={handleOrgProfileComplete}
               onSkip={handleOrgProfileSkip}
-              sessionId={state.sessionId}
+              sessionId={state.sessionId ?? sessionIdRef.current ?? undefined}
+              ensureSessionId={ensureSessionId}
               orgName={orgName} setOrgName={setOrgName}
               industry={industry} setIndustry={setIndustry}
               documentHints={documentHints} setDocumentHints={setDocumentHints}
