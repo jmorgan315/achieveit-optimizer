@@ -794,7 +794,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
     // ==============================
     // AGENT 1: Extraction
     // ==============================
-    await updateSessionProgress(sessionId, { current_step: "extracting" });
+    await updateSessionProgress(sessionId, { current_step: "extracting" }, runId);
 
     let agent1Data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } | null = null;
     let extractionMethod = "text";
