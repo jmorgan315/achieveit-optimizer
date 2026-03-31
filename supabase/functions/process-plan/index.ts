@@ -784,7 +784,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
           await updateSessionProgress(sessionId, {
             document_type: classification.document_type || null,
             classification_result: classification,
-          });
+          }, runId);
         }
       } catch (err) {
         console.error("[process-plan] Step 0 exception (non-fatal):", err);
