@@ -312,14 +312,9 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     };
 
     const startTime = Date.now();
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(requestBody),
+    const response = await callAnthropicWithRetryShared(ANTHROPIC_API_KEY, requestBody, {
+      functionName: "validate-hierarchy",
+      sessionId,
     });
     const durationMs = Date.now() - startTime;
 
