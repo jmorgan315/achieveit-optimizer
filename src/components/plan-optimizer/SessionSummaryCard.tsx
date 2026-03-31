@@ -83,7 +83,10 @@ export function SessionSummaryCard({ sessionId, items }: SessionSummaryCardProps
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wider">Pipeline</p>
                 <p className="font-medium flex items-center gap-1">
-                  <Layers className="h-3 w-3" /> 3-Agent
+                  <Layers className="h-3 w-3" />
+                  {session?.extraction_method === 'spreadsheet'
+                    ? 'Direct Import (no AI)'
+                    : '4-Agent (Classify → Extract → Audit → Validate)'}
                 </p>
               </div>
               <div className="space-y-1">
