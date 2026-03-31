@@ -494,47 +494,60 @@ export function generatePlanItems(
 
   if (hasStrategyPattern) {
     // Strategy pattern: Strategy → Outcome → Action → Measurement
+    // Find-or-create maps for cross-sheet dedup of Level 1 and Level 2
+    const strategyMap = new Map<string, PlanItem>();
+    const outcomeMap = new Map<string, PlanItem>();
+
     for (const section of sections) {
       if (section.sectionType !== 'strategy') continue;
 
-      orderCounter++;
-      const strategyLevelName = levels.find(l => l.depth === 1)?.name || 'Strategy';
       const sourceSheet = getSourceSheet(section);
+      const strategyLevelName = levels.find(l => l.depth === 1)?.name || 'Strategy';
+      const strategyKey = section.headerText.toLowerCase().trim();
 
-      // Level 1: Strategy
-      const strategyItem: PlanItem = createEmptyPlanItem({
-        id: crypto.randomUUID(),
-        order: String(orderCounter),
-        levelName: strategyLevelName,
-        levelDepth: 1,
-        name: section.headerText,
-        parentId: null,
-        confidence: 100,
-        tags: sourceSheet ? [`Source: ${sourceSheet}`] : [],
-      });
-      items.push(strategyItem);
-
-      // Level 2: Outcome
-      let outcomeItemId: string | null = null;
-      if (section.outcomeText) {
+      // Find or create Strategy item (Level 1)
+      let strategyItem = strategyMap.get(strategyKey);
+      if (!strategyItem) {
         orderCounter++;
-        const outcomeLevelName = levels.find(l => l.depth === 2)?.name || 'Outcome';
-        const outcomeItem: PlanItem = createEmptyPlanItem({
+        strategyItem = createEmptyPlanItem({
           id: crypto.randomUUID(),
           order: String(orderCounter),
-          levelName: outcomeLevelName,
-          levelDepth: 2,
-          name: section.outcomeText,
-          parentId: strategyItem.id,
+          levelName: strategyLevelName,
+          levelDepth: 1,
+          name: section.headerText,
+          parentId: null,
           confidence: 100,
           tags: sourceSheet ? [`Source: ${sourceSheet}`] : [],
         });
-        items.push(outcomeItem);
+        items.push(strategyItem);
+        strategyMap.set(strategyKey, strategyItem);
+      }
+
+      // Find or create Outcome item (Level 2)
+      let outcomeItemId: string | null = null;
+      if (section.outcomeText) {
+        const outcomeKey = `${section.outcomeText.toLowerCase().trim()}|${strategyItem.id}`;
+        let outcomeItem = outcomeMap.get(outcomeKey);
+        if (!outcomeItem) {
+          orderCounter++;
+          const outcomeLevelName = levels.find(l => l.depth === 2)?.name || 'Outcome';
+          outcomeItem = createEmptyPlanItem({
+            id: crypto.randomUUID(),
+            order: String(orderCounter),
+            levelName: outcomeLevelName,
+            levelDepth: 2,
+            name: section.outcomeText,
+            parentId: strategyItem.id,
+            confidence: 100,
+            tags: sourceSheet ? [`Source: ${sourceSheet}`] : [],
+          });
+          items.push(outcomeItem);
+          outcomeMap.set(outcomeKey, outcomeItem);
+        }
         outcomeItemId = outcomeItem.id;
       }
 
-      // Level 3: Actions (data rows)
-      // Re-build colIndexMap per section if it has its own column headers
+      // Level 3: Actions — always unique per sheet
       const sectionColMap = new Map<string, number>(colIndexMap);
       if (section.columnHeaders.length > 0 && section.columnHeaderRowIndex >= 0) {
         const hRow = sheet.rows[section.columnHeaderRowIndex];
@@ -557,9 +570,7 @@ export function generatePlanItems(
       for (let r = section.dataRowStart; r < section.dataRowEnd; r++) {
         const row = sheet.rows[r];
         if (!row) continue;
-        // Skip strategy/outcome rows that might be within range
         if (isStrategyRow(row) || isOutcomeRow(row)) continue;
-        // Skip column header rows
         if (isLikelyColumnHeaderRow(row) && r === section.columnHeaderRowIndex) continue;
 
         const filled = row.filter(c => c != null && String(c).trim() !== '');
@@ -582,11 +593,14 @@ export function generatePlanItems(
         if (tag) tags.push(tag);
         if (sourceSheet) tags.push(`Source: ${sourceSheet}`);
 
-        // Collect member values
+        // Collect member values, fall back to sheet name if empty
         const members: string[] = [];
         for (const mc of memberCols) {
           const mv = getSectionColValue(row, mc);
           if (mv) members.push(mv);
+        }
+        if (members.length === 0 && sourceSheet) {
+          members.push(sourceSheet);
         }
 
         const actionItem: PlanItem = createEmptyPlanItem({
@@ -607,7 +621,6 @@ export function generatePlanItems(
         // Handle measurement column
         if (metricVal) {
           if (measurementMode === 'level4') {
-            // Create Level 4 Measurement item
             orderCounter++;
             const measLevelName = levels.find(l => l.depth === 4)?.name || 'Measurement';
             const measItem: PlanItem = createEmptyPlanItem({
@@ -624,7 +637,6 @@ export function generatePlanItems(
             items.push(measItem);
             continue;
           } else {
-            // metric_on_parent: store as metric on the action
             actionItem.metricDescription = 'Track to Target';
             actionItem.metricTarget = metricVal;
           }
