@@ -773,6 +773,8 @@ export function FileUploadStep({
   const handleContinue = () => {
     if (extractedItems && extractedMappings && detectedLevels && onAIExtraction) {
       onAIExtraction(extractedItems, extractedMappings, detectedLevels);
+    } else if (hasExistingItems && onAdvanceExisting) {
+      onAdvanceExisting();
     } else if (fileContent.trim() && fileContent !== '__VISION_EXTRACTED__') {
       onTextSubmit(fileContent);
     }
