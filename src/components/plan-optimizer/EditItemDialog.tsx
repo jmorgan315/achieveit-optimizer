@@ -90,6 +90,8 @@ export function EditItemDialog({
     startDate: undefined,
     dueDate: undefined,
     assignedTo: '',
+    members: [],
+    tags: [],
     metricDescription: '',
     metricUnit: '',
     metricRollup: '',
@@ -98,6 +100,8 @@ export function EditItemDialog({
     currentValue: '',
   });
   const [metricsOpen, setMetricsOpen] = useState(false);
+  const [newMember, setNewMember] = useState('');
+  const [newTag, setNewTag] = useState('');
 
   useEffect(() => {
     if (item) {
