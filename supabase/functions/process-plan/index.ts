@@ -1592,7 +1592,7 @@ async function runResume(sessionId: string): Promise<void> {
       }, runId);
 
       // Run Agents 2+3
-      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
+      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, runId);
 
       // Cleanup images
       cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
