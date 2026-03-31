@@ -18,6 +18,28 @@ function getServiceClient() {
 async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
   try {
     const client = getServiceClient();
+
+    // Guard: don't overwrite a completed session unless this update is also completing
+    const completing =
+      updates.status === "completed" || updates.status === "complete" ||
+      updates.current_step === "completed" || updates.current_step === "complete";
+
+    if (!completing) {
+      const { data: current } = await client
+        .from("processing_sessions")
+        .select("status, current_step")
+        .eq("id", sessionId)
+        .single();
+
+      if (
+        current?.status === "completed" || current?.status === "complete" ||
+        current?.current_step === "completed" || current?.current_step === "complete"
+      ) {
+        console.log(`[process-plan] Skipping update — session ${sessionId} already completed`);
+        return;
+      }
+    }
+
     const { error } = await client.from("processing_sessions").update(updates).eq("id", sessionId);
     if (error) console.error("[process-plan] Failed to update session progress:", error.message);
   } catch (e) {
@@ -1337,7 +1359,7 @@ async function runResume(sessionId: string): Promise<void> {
     const client = getServiceClient();
     const { data: session, error: fetchError } = await client
       .from("processing_sessions")
-      .select("step_results, current_step, org_name, org_industry")
+      .select("step_results, current_step, status, org_name, org_industry")
       .eq("id", sessionId)
       .single();
 
@@ -1347,8 +1369,10 @@ async function runResume(sessionId: string): Promise<void> {
     }
 
     const currentStep = (session as Record<string, unknown>).current_step as string;
-    if (currentStep === "completed" || currentStep === "complete") {
-      console.log("[process-plan] Resume: already completed, nothing to do");
+    const currentStatus = (session as Record<string, unknown>).status as string;
+
+    if (currentStep === "completed" || currentStep === "complete" || currentStatus === "completed" || currentStatus === "complete") {
+      console.log("[process-plan] Resume: already completed (step=" + currentStep + ", status=" + currentStatus + "), nothing to do");
       return;
     }
 
@@ -1560,6 +1584,30 @@ async function runResume(sessionId: string): Promise<void> {
     // ==============================
     // PATH B: Resume post-extraction (current_step === "extraction_complete")
     // ==============================
+    // PATH B.5: Resume from stuck "validating" state (agent 2/3 timed out)
+    if (currentStep === "validating" || currentStep === "auditing") {
+      const extraction = stepResults?.extraction as Record<string, unknown> | undefined;
+      if (extraction?.items && Array.isArray(extraction.items) && extraction.items.length > 0) {
+        console.log(`[process-plan] Resume: stuck at ${currentStep}, re-running post-extraction agents`);
+        const pipeCtx = (stepResults.pipelineContext || {}) as Record<string, unknown>;
+        const classification = (stepResults.classification || null) as Record<string, unknown> | null;
+        await runPostExtractionResume(
+          sessionId,
+          extraction.items as unknown[],
+          (extraction.detectedLevels || []) as { depth: number; name: string }[],
+          classification,
+          (pipeCtx.organizationName || (session as Record<string, unknown>).org_name) as string | undefined,
+          (pipeCtx.industry || (session as Record<string, unknown>).org_industry) as string | undefined,
+          pipeCtx.planLevels as unknown[] | undefined,
+          (pipeCtx.extractionMethod || "vision") as string,
+          (pipeCtx.documentText || "") as string,
+        );
+        return;
+      }
+      console.error("[process-plan] Resume: stuck at", currentStep, "but no extraction items found");
+      return;
+    }
+
     if (currentStep !== "extraction_complete") {
       console.error("[process-plan] Resume: unexpected current_step:", currentStep);
       return;
