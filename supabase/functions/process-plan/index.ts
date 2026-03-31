@@ -1619,6 +1619,7 @@ async function runResume(sessionId: string): Promise<void> {
           pipeCtx.planLevels as unknown[] | undefined,
           (pipeCtx.extractionMethod || "vision") as string,
           (pipeCtx.documentText || "") as string,
+          runId,
         );
         return;
       }
