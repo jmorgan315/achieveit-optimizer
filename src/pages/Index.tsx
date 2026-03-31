@@ -86,21 +86,30 @@ const Index = () => {
   } = usePlanState();
 
   const sessionIdRef = useRef<string | null>(null);
+  const sessionPromiseRef = useRef<Promise<string> | null>(null);
 
-  const ensureSessionId = () => {
+  const ensureSessionId = useCallback(async (): Promise<string> => {
     if (sessionIdRef.current) return sessionIdRef.current;
     if (state.sessionId) { sessionIdRef.current = state.sessionId; return state.sessionId; }
-    const id = crypto.randomUUID();
-    sessionIdRef.current = id;
-    console.log('[Session] Creating new session:', id);
-    setSessionId(id);
-    supabase.from('processing_sessions').insert({ id, status: 'in_progress' })
-      .then(({ error }) => {
-        if (error) console.error('[Session] Failed to create session row:', error);
-        else console.log('[Session] Row created successfully:', id);
-      });
-    return id;
-  };
+    if (sessionPromiseRef.current) return sessionPromiseRef.current;
+
+    sessionPromiseRef.current = (async () => {
+      const id = crypto.randomUUID();
+      sessionIdRef.current = id;
+      console.log('[Session] Creating new session:', id);
+      setSessionId(id);
+      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress' }, { onConflict: 'id' });
+      if (error) console.error('[Session] Failed to create session row:', error);
+      else console.log('[Session] Row created successfully:', id);
+      return id;
+    })();
+
+    try {
+      return await sessionPromiseRef.current;
+    } finally {
+      sessionPromiseRef.current = null;
+    }
+  }, [state.sessionId, setSessionId]);
 
   const goToStep = (step: number) => {
     setCurrentStep(step);
