@@ -15,25 +15,30 @@ function getServiceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
-async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
+async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>, runId?: string): Promise<void> {
   try {
     const client = getServiceClient();
 
-    // Guard: don't overwrite a completed session unless this update is also completing
-    const completing =
-      updates.status === "completed" || updates.status === "complete" ||
-      updates.current_step === "completed" || updates.current_step === "complete";
-
-    if (!completing) {
+    // Ownership check: if a runId is provided, verify it still owns the session
+    if (runId) {
       const { data: current } = await client
         .from("processing_sessions")
-        .select("status, current_step")
+        .select("pipeline_run_id, status, current_step")
         .eq("id", sessionId)
         .single();
 
+      // If another run has taken ownership, silently skip this write
+      if (current?.pipeline_run_id && current.pipeline_run_id !== runId) {
+        console.log(`[process-plan] Stale run ${runId.slice(0, 8)}… skipping update (owner is ${(current.pipeline_run_id as string).slice(0, 8)}…)`);
+        return;
+      }
+
+      // Also guard against overwriting completed sessions
       if (
-        current?.status === "completed" || current?.status === "complete" ||
-        current?.current_step === "completed" || current?.current_step === "complete"
+        (current?.status === "completed" || current?.status === "complete" ||
+         current?.current_step === "completed" || current?.current_step === "complete") &&
+        updates.status !== "completed" && updates.status !== "complete" &&
+        updates.current_step !== "completed" && updates.current_step !== "complete"
       ) {
         console.log(`[process-plan] Skipping update — session ${sessionId} already completed`);
         return;
@@ -618,7 +623,7 @@ async function cleanupPageImages(sessionId: string): Promise<void> {
 // ==============================
 // The actual pipeline logic, runs in background after early return
 // ==============================
-async function runPipeline(sessionId: string, body: Record<string, unknown>): Promise<void> {
+async function runPipeline(sessionId: string, body: Record<string, unknown>, runId: string): Promise<void> {
   try {
     const {
       documentText,
@@ -641,7 +646,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
     if (useVision) {
       console.log("[process-plan] Starting Step 0 (document classification)");
-      await updateSessionProgress(sessionId, { current_step: "classifying" });
+      await updateSessionProgress(sessionId, { current_step: "classifying" }, runId);
 
       const allPageImages = pageImages as string[];
       const CHUNK_THRESHOLD = 50;
@@ -779,7 +784,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
           await updateSessionProgress(sessionId, {
             document_type: classification.document_type || null,
             classification_result: classification,
-          });
+          }, runId);
         }
       } catch (err) {
         console.error("[process-plan] Step 0 exception (non-fatal):", err);
@@ -789,7 +794,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // AGENT 1: Extraction
     // ==============================
-    await updateSessionProgress(sessionId, { current_step: "extracting" });
+    await updateSessionProgress(sessionId, { current_step: "extracting" }, runId);
 
     let agent1Data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } | null = null;
     let extractionMethod = "text";
@@ -932,7 +937,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         // ==============================
         const isLastBatch = batchIdx === batches.length - 1;
         await updateSessionProgress(sessionId, {
-          current_step: isLastBatch ? "extracting" : "extracting",
+          current_step: "extracting",
           step_results: {
             extraction: {
               items: allItems,
@@ -967,7 +972,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
               pageRange,
             },
           },
-        });
+        }, runId);
         console.log(`[process-plan] Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
       }
 
@@ -1046,7 +1051,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         status: "error",
         current_step: "error",
         step_results: { error: agent1Error || "Extraction produced no items", pipelineStep: "agent1" },
-      });
+      }, runId);
       return;
     }
 
@@ -1168,13 +1173,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     await updateSessionProgress(sessionId, {
       current_step: "extraction_complete",
       step_results: extractionSnapshot,
-    });
+    }, runId);
     console.log(`[process-plan] Extraction checkpoint persisted (${agent1ItemCount} items), proceeding to Agents 2+3`);
 
     // ==============================
     // STEPS 2 & 3: Audit + Validation (PARALLEL)
     // ==============================
-    await updateSessionProgress(sessionId, { current_step: "validating" });
+    await updateSessionProgress(sessionId, { current_step: "validating" }, runId);
     console.log("[process-plan] Starting Steps 2 & 3 in parallel (audit + validation)");
 
     const sourceForAudit = (documentText as string) || "";
@@ -1336,7 +1341,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       step_results: finalResult,
       extraction_method: extractionMethod,
       total_items_extracted: finalItemCount,
-    });
+    }, runId);
 
     // Fire-and-forget cleanup of stored page images
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Cleanup error:", e));
@@ -1347,7 +1352,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       status: "error",
       current_step: "error",
       step_results: { error: "Pipeline processing failed. Please try again." },
-    });
+    }, runId);
   }
 }
 
@@ -1375,6 +1380,19 @@ async function runResume(sessionId: string): Promise<void> {
       console.log("[process-plan] Resume: already completed (step=" + currentStep + ", status=" + currentStatus + "), nothing to do");
       return;
     }
+
+    // Claim ownership: generate a new run ID and write it to the session
+    // This invalidates any still-running original pipeline's run ID
+    const runId = crypto.randomUUID();
+    const { error: claimError } = await client
+      .from("processing_sessions")
+      .update({ pipeline_run_id: runId })
+      .eq("id", sessionId);
+    if (claimError) {
+      console.error("[process-plan] Resume: failed to claim ownership:", claimError.message);
+      return;
+    }
+    console.log(`[process-plan] Resume: claimed ownership with runId ${runId.slice(0, 8)}…`);
 
     const stepResults = (session as Record<string, unknown>).step_results as Record<string, unknown>;
 
@@ -1447,10 +1465,10 @@ async function runResume(sessionId: string): Promise<void> {
             classification,
             pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
           },
-        });
+        }, runId);
 
         // Now run Agents 2+3 via the existing post-extraction resume path
-        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
+        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, runId);
         return;
       }
 
@@ -1472,7 +1490,7 @@ async function runResume(sessionId: string): Promise<void> {
           status: "error",
           current_step: "error",
           step_results: { error: "Resume failed: could not load stored page images" },
-        });
+        }, runId);
         return;
       }
 
@@ -1539,7 +1557,7 @@ async function runResume(sessionId: string): Promise<void> {
             classification,
             pipelineContext: { ...pipeCtx, previousContext },
           },
-        });
+        }, runId);
         console.log(`[process-plan] Resume: Batch ${batchIdx + 1}/${batches.length} persisted (${allItems.length} cumulative items)`);
       }
 
@@ -1571,10 +1589,10 @@ async function runResume(sessionId: string): Promise<void> {
           classification,
           pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
         },
-      });
+      }, runId);
 
       // Run Agents 2+3
-      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
+      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, runId);
 
       // Cleanup images
       cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
@@ -1601,6 +1619,7 @@ async function runResume(sessionId: string): Promise<void> {
           pipeCtx.planLevels as unknown[] | undefined,
           (pipeCtx.extractionMethod || "vision") as string,
           (pipeCtx.documentText || "") as string,
+          runId,
         );
         return;
       }
@@ -1629,7 +1648,7 @@ async function runResume(sessionId: string): Promise<void> {
     const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
     const sourceText = (pipeCtx.documentText || "") as string;
 
-    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText);
+    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, runId);
 
     // Cleanup images (may or may not exist)
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
@@ -1640,7 +1659,7 @@ async function runResume(sessionId: string): Promise<void> {
       status: "error",
       current_step: "error",
       step_results: { error: "Resume pipeline failed. Please try again." },
-    });
+    }, runId);
   }
 }
 
@@ -1654,7 +1673,8 @@ async function runPostExtractionResume(
   industry: string | undefined,
   planLevels: unknown[] | undefined,
   extractionMethod: string,
-  sourceText: string
+  sourceText: string,
+  runId?: string
 ): Promise<void> {
   const agent1NameSet = collectItemNameSet(agent1Items);
   const agent1ItemCount = countAllItems(agent1Items);
@@ -1668,7 +1688,7 @@ async function runPostExtractionResume(
     status: "success",
   });
 
-  await updateSessionProgress(sessionId, { current_step: "validating" });
+  await updateSessionProgress(sessionId, { current_step: "validating" }, runId);
 
   // Run Agents 2+3 in parallel
   const hasSourceText = sourceText.length > 100;
@@ -1790,7 +1810,7 @@ async function runPostExtractionResume(
       sessionId,
     },
     total_items_extracted: finalItemCount,
-  });
+  }, runId);
 
   await logApiCall({
     session_id: sessionId,
@@ -1839,11 +1859,13 @@ serve(async (req) => {
     const sessionId = await ensureSession(incomingSessionId);
     console.log("[process-plan] Pipeline starting, sessionId:", sessionId);
 
-    // Update session to in_progress
-    await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued" });
+    // Generate run ID for ownership and write it with initial status
+    const runId = crypto.randomUUID();
+    await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued", pipeline_run_id: runId });
+    console.log(`[process-plan] Pipeline claimed ownership with runId ${runId.slice(0, 8)}…`);
 
     // Fire off the pipeline in the background (non-awaited)
-    runPipeline(sessionId, body).catch((err) => {
+    runPipeline(sessionId, body, runId).catch((err) => {
       console.error("[process-plan] Background pipeline fatal error:", err);
     });
 
