@@ -624,6 +624,7 @@ export function FileUploadStep({
   const handleFileUpload = async (file: File) => {
     setIsProcessing(true);
     setUploadedFile(file);
+    onNewFileSelected?.();
     setExtractedItems(null);
     setExtractedMappings(null);
     setDetectedLevels(null);
