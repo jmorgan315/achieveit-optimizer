@@ -600,7 +600,8 @@ export function generatePlanItems(
 
         orderCounter++;
         const owner = ownerCol ? getSectionColValue(row, ownerCol) : '';
-        const dueDate = dateCol ? getSectionColValue(row, dateCol) : '';
+        const rawDate = dateCol ? getSectionColValue(row, dateCol) : '';
+        const dueDate = parseSpreadsheetDate(rawDate) || '';
         const metricVal = metricCol ? getSectionColValue(row, metricCol) : '';
         const desc = descCol ? getSectionColValue(row, descCol) : '';
         const tag = tagCol ? getSectionColValue(row, tagCol) : '';
