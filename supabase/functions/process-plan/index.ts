@@ -1359,7 +1359,7 @@ async function runResume(sessionId: string): Promise<void> {
     const client = getServiceClient();
     const { data: session, error: fetchError } = await client
       .from("processing_sessions")
-      .select("step_results, current_step, org_name, org_industry")
+      .select("step_results, current_step, status, org_name, org_industry")
       .eq("id", sessionId)
       .single();
 
@@ -1369,8 +1369,10 @@ async function runResume(sessionId: string): Promise<void> {
     }
 
     const currentStep = (session as Record<string, unknown>).current_step as string;
-    if (currentStep === "completed" || currentStep === "complete") {
-      console.log("[process-plan] Resume: already completed, nothing to do");
+    const currentStatus = (session as Record<string, unknown>).status as string;
+
+    if (currentStep === "completed" || currentStep === "complete" || currentStatus === "completed" || currentStatus === "complete") {
+      console.log("[process-plan] Resume: already completed (step=" + currentStep + ", status=" + currentStatus + "), nothing to do");
       return;
     }
 
