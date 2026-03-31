@@ -1341,7 +1341,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
       step_results: finalResult,
       extraction_method: extractionMethod,
       total_items_extracted: finalItemCount,
-    });
+    }, runId);
 
     // Fire-and-forget cleanup of stored page images
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Cleanup error:", e));
