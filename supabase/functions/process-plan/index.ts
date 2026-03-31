@@ -18,6 +18,28 @@ function getServiceClient() {
 async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
   try {
     const client = getServiceClient();
+
+    // Guard: don't overwrite a completed session unless this update is also completing
+    const completing =
+      updates.status === "completed" || updates.status === "complete" ||
+      updates.current_step === "completed" || updates.current_step === "complete";
+
+    if (!completing) {
+      const { data: current } = await client
+        .from("processing_sessions")
+        .select("status, current_step")
+        .eq("id", sessionId)
+        .single();
+
+      if (
+        current?.status === "completed" || current?.status === "complete" ||
+        current?.current_step === "completed" || current?.current_step === "complete"
+      ) {
+        console.log(`[process-plan] Skipping update — session ${sessionId} already completed`);
+        return;
+      }
+    }
+
     const { error } = await client.from("processing_sessions").update(updates).eq("id", sessionId);
     if (error) console.error("[process-plan] Failed to update session progress:", error.message);
   } catch (e) {
