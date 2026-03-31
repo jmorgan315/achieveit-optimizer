@@ -155,10 +155,9 @@ const Index = () => {
     goToStep(step);
   };
 
-  const handleOrgProfileComplete = (profile: OrgProfile) => {
+  const handleOrgProfileComplete = async (profile: OrgProfile) => {
     setOrgProfile(profile);
-    const sid = ensureSessionId();
-    // Use upsert to handle race condition — the INSERT from ensureSessionId may not have completed yet
+    const sid = await ensureSessionId();
     supabase.from('processing_sessions').upsert({
       id: sid,
       org_name: profile.organizationName,
@@ -170,9 +169,9 @@ const Index = () => {
     advanceToStep(1);
   };
 
-  const handleOrgProfileSkip = () => {
+  const handleOrgProfileSkip = async () => {
     setOrgProfile(undefined);
-    ensureSessionId();
+    await ensureSessionId();
     advanceToStep(1);
   };
 
