@@ -257,7 +257,19 @@ Before returning, verify:
 2. Are items properly NESTED with children arrays (not flat)?
 3. Did I detect the document's actual terminology for levels?
 4. For tables: Did I handle merged cells by filling down parent values?
-5. Root level items should be 3-8 strategic priorities, not 20+ flat items`;
+5. Root level items should be 3-8 strategic priorities, not 20+ flat items
+
+=== MULTI-SECTION / MULTI-ENTITY DOCUMENTS ===
+
+Some documents contain plans from multiple organizations, states, departments, or entities — each with their own section. When you detect this pattern:
+
+- Each entity name (e.g., state name, department, division) → Level 1 (top-level item)
+- Programs, goals, or focus areas within each entity → Level 2 (children of entity)
+- Initiatives, strategies, action items → Level 3+ (children of programs)
+
+Look for repeating structural patterns across entity sections. If "Alabama" has "Program Title → Initiatives", expect the same for "Alaska", "Arizona", etc.
+
+If the document is a single organization's plan (not multi-entity), ignore this guidance and extract normally.`;
 
 const extractPlanItemsSchema = {
   type: "object",

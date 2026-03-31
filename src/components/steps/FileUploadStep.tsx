@@ -372,7 +372,7 @@ export function FileUploadStep({
 
     try {
       const pageRange = orgProfile?.pageRange;
-      const { images, pageCount } = await renderPDFToImages(file, 100, 0.75, pageRange);
+      const { images, pageCount } = await renderPDFToImages(file, 250, 0.75, pageRange);
 
       const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024));
       const totalKB = imageSizes.reduce((s, k) => s + k, 0);

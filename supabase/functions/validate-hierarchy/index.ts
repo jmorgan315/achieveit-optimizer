@@ -50,6 +50,16 @@ Rephrased items: Replace the name with the originalText from the audit. Keep eve
 
 Duplicate items (from audit): Merge them as described in DUPLICATE MERGING above.
 
+=== MULTI-ENTITY DOCUMENTS ===
+
+If the extracted items appear to come from multiple organizations, states, or entities (e.g., many items named "[State] Rural Health Transformation Program"):
+
+- Entity-level items should be at Level 1
+- Programs/goals within each entity at Level 2, parented to their entity
+- Initiatives/actions at Level 3+, parented to their program
+
+If items are flat (all at the same level) but clearly belong to different entity sections, restructure them into the correct hierarchy using entity name patterns as signals for Level 1 grouping.
+
 === OUTPUT FORMAT ===
 
 Return the FULL corrected items tree plus a corrections log. Every item should have: name, levelType, children (array), and retain any other fields from the original (description, owner, metricTarget, etc.).`;
