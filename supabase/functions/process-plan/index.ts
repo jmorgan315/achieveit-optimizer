@@ -1859,11 +1859,13 @@ serve(async (req) => {
     const sessionId = await ensureSession(incomingSessionId);
     console.log("[process-plan] Pipeline starting, sessionId:", sessionId);
 
-    // Update session to in_progress
-    await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued" });
+    // Generate run ID for ownership and write it with initial status
+    const runId = crypto.randomUUID();
+    await updateSessionProgress(sessionId, { status: "in_progress", current_step: "queued", pipeline_run_id: runId });
+    console.log(`[process-plan] Pipeline claimed ownership with runId ${runId.slice(0, 8)}…`);
 
     // Fire off the pipeline in the background (non-awaited)
-    runPipeline(sessionId, body).catch((err) => {
+    runPipeline(sessionId, body, runId).catch((err) => {
       console.error("[process-plan] Background pipeline fatal error:", err);
     });
 
