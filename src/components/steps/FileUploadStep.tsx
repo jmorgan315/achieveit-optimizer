@@ -325,7 +325,20 @@ export function FileUploadStep({
         return { success: false, error: 'Completed but no results found' };
       }
 
+      // Track progress: if we've advanced past classifying or have items, the pipeline made real progress
+      const progressSteps = ['extracting', 'extraction_complete', 'validating'];
+      if (progressSteps.includes(step) || stepResults?.extraction?.items?.length > 0) {
+        hadProgress = true;
+      }
+
       if (session.status === 'error') {
+        // If progress was made, allow grace polls for transient errors (e.g. during resume)
+        if (hadProgress && errorGracePolls < MAX_ERROR_GRACE) {
+          errorGracePolls++;
+          console.log(`[Polling] Transient error detected, grace poll ${errorGracePolls}/${MAX_ERROR_GRACE}...`);
+          addMessage('Retrying after transient error...');
+          continue;
+        }
         const results = (session as any).step_results as any;
         throw new Error(results?.error || 'Pipeline failed');
       }
