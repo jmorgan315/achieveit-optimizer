@@ -1490,7 +1490,7 @@ async function runResume(sessionId: string): Promise<void> {
           status: "error",
           current_step: "error",
           step_results: { error: "Resume failed: could not load stored page images" },
-        });
+        }, runId);
         return;
       }
 
