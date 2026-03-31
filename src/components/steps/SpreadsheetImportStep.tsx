@@ -5,12 +5,15 @@ import {
   parseSpreadsheetFile,
   detectStructure,
   generatePlanItems,
+  mergeSheetDetections,
   getDefaultColumnRole,
+  getDefaultSheetSelection,
   StructureDetection,
-  SheetDetection,
   ColumnRole,
   ElementRole,
   MappingConfig,
+  MeasurementMode,
+  STRATEGY_LEVELS,
 } from '@/utils/spreadsheet-parser';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface } from '@/components/spreadsheet/MappingInterface';
@@ -27,7 +30,7 @@ interface SpreadsheetImportStepProps {
 export function SpreadsheetImportStep({ file, sessionId, onComplete }: SpreadsheetImportStepProps) {
   const [phase, setPhase] = useState<Phase>('parsing');
   const [detection, setDetection] = useState<StructureDetection | null>(null);
-  const [selectedSheetIndex, setSelectedSheetIndex] = useState(0);
+  const [selectedSheetIndices, setSelectedSheetIndices] = useState<number[]>([]);
 
   // Mapping state
   const [columnMappings, setColumnMappings] = useState<Record<string, ColumnRole>>({});
@@ -41,10 +44,19 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
         const sheets = await parseSpreadsheetFile(file);
         const det = detectStructure(sheets);
         setDetection(det);
-        setSelectedSheetIndex(det.recommendedSheetIndex);
 
-        // Set default column mappings for recommended sheet
-        const recSheet = det.sheets[det.recommendedSheetIndex];
+        // Default sheet selection
+        const defaultIndices = getDefaultSheetSelection(det.sheets);
+        setSelectedSheetIndices(defaultIndices);
+
+        // Set levels based on pattern
+        if (det.hasStrategyPattern) {
+          setLevels(STRATEGY_LEVELS);
+        }
+
+        // Set default column mappings from first selected sheet
+        const firstIdx = defaultIndices[0] ?? 0;
+        const recSheet = det.sheets[firstIdx];
         if (recSheet) {
           const defaults: Record<string, ColumnRole> = {};
           recSheet.allColumnHeaders.forEach(col => {
@@ -52,12 +64,12 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
           });
           setColumnMappings(defaults);
 
-          // If sections exist, default section headers to Level 1
-          const hasSections = recSheet.sections.some(s => s.headerText);
-          if (hasSections) {
+          if (det.hasStrategyPattern) {
+            // Strategy pattern: section mapping is handled automatically
             setSectionMapping({ type: 'level', depth: 1 });
           } else {
-            setSectionMapping({ type: 'skip' });
+            const hasSections = recSheet.sections.some(s => s.headerText);
+            setSectionMapping(hasSections ? { type: 'level', depth: 1 } : { type: 'skip' });
           }
         }
 
@@ -69,15 +81,18 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
     })();
   }, [file]);
 
-  const handleSheetSelect = (idx: number) => {
-    setSelectedSheetIndex(idx);
-    if (detection) {
-      const sd = detection.sheets[idx];
-      const defaults: Record<string, ColumnRole> = {};
-      sd.allColumnHeaders.forEach(col => {
-        defaults[col] = getDefaultColumnRole(col);
-      });
-      setColumnMappings(defaults);
+  const handleSheetSelect = (indices: number[]) => {
+    setSelectedSheetIndices(indices);
+    // Update column mappings from first selected sheet
+    if (detection && indices.length > 0) {
+      const sd = detection.sheets[indices[0]];
+      if (sd) {
+        const defaults: Record<string, ColumnRole> = {};
+        sd.allColumnHeaders.forEach(col => {
+          defaults[col] = getDefaultColumnRole(col);
+        });
+        setColumnMappings(defaults);
+      }
     }
   };
 
@@ -89,8 +104,10 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
     if (!detection) return;
     setPhase('generating');
 
-    const sd = detection.sheets[selectedSheetIndex];
-    const { items, personMappings } = generatePlanItems(sd, {
+    // Merge selected sheets
+    const selectedDetections = selectedSheetIndices.map(i => detection.sheets[i]).filter(Boolean);
+    const merged = mergeSheetDetections(selectedDetections);
+    const { items, personMappings } = generatePlanItems(merged, {
       ...config,
       levels,
     });
@@ -108,11 +125,12 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
         mappingConfig: {
           columnMappings: config.columnMappings,
           sectionMapping: config.sectionMapping,
+          measurementMode: config.measurementMode,
         },
-        sheetsProcessed: 1,
-        sheetName: sd.sheet.name,
+        sheetsProcessed: selectedSheetIndices.length,
+        sheetNames: selectedSheetIndices.map(i => detection.sheets[i]?.sheet.name).filter(Boolean),
         totalItems: items.length,
-        duplicatesRemoved: sd.totalDataRows - items.length,
+        hasStrategyPattern: detection.hasStrategyPattern,
       } as any,
     }, { onConflict: 'id' }).then(({ error }) => {
       if (error) console.error('[Session] Failed to update spreadsheet session:', error);
@@ -143,17 +161,19 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
     return (
       <DetectionSummary
         detection={detection}
-        selectedSheetIndex={selectedSheetIndex}
-        onSelectSheet={handleSheetSelect}
+        selectedSheetIndices={selectedSheetIndices}
+        onSelectSheets={handleSheetSelect}
         onContinue={handleContinueToMapping}
       />
     );
   }
 
   if (phase === 'mapping' && detection) {
+    const selectedDetections = selectedSheetIndices.map(i => detection.sheets[i]).filter(Boolean);
+    const merged = mergeSheetDetections(selectedDetections);
     return (
       <MappingInterface
-        sheetDetection={detection.sheets[selectedSheetIndex]}
+        sheetDetection={merged}
         levels={levels}
         onApply={handleApplyMapping}
         columnMappings={columnMappings}

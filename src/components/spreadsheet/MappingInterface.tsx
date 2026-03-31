@@ -1,18 +1,18 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, Info } from 'lucide-react';
 import {
   SheetDetection,
   ColumnRole,
   ElementRole,
   MappingConfig,
+  MeasurementMode,
   generatePlanItems,
-  getDefaultColumnRole,
 } from '@/utils/spreadsheet-parser';
-import { PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
+import { PlanLevel } from '@/types/plan';
 
 interface MappingInterfaceProps {
   sheetDetection: SheetDetection;
@@ -29,6 +29,7 @@ const COLUMN_ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: 'owner', label: 'Owner' },
   { value: 'date', label: 'Date / Deadline' },
   { value: 'metric', label: 'Metric / Measurement' },
+  { value: 'member', label: 'Member' },
   { value: 'description', label: 'Description' },
   { value: 'tag', label: 'Tag' },
   { value: 'skip', label: 'Skip / Ignore' },
@@ -44,30 +45,35 @@ export function MappingInterface({
   setSectionMapping,
 }: MappingInterfaceProps) {
   const hasSections = sheetDetection.sections.some(s => s.headerText);
+  const isStrategy = sheetDetection.hasStrategyPattern;
+  const [measurementMode, setMeasurementMode] = useState<MeasurementMode>('level4');
 
   // Live preview
   const preview = useMemo(() => {
     const config: MappingConfig = {
-      selectedSheetIndex: 0,
+      selectedSheetIndices: [0],
       sectionMapping,
       columnMappings,
       levels,
+      measurementMode,
     };
     const { items } = generatePlanItems(sheetDetection, config);
     return items.slice(0, 15);
-  }, [sheetDetection, sectionMapping, columnMappings, levels]);
+  }, [sheetDetection, sectionMapping, columnMappings, levels, measurementMode]);
 
   const handleApply = () => {
     const config: MappingConfig = {
-      selectedSheetIndex: 0,
+      selectedSheetIndices: [0],
       sectionMapping,
       columnMappings,
       levels,
+      measurementMode,
     };
     onApply(config);
   };
 
   const hasItemName = Object.values(columnMappings).includes('item_name');
+  const hasMetricMapped = Object.values(columnMappings).includes('metric');
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -101,7 +107,35 @@ export function MappingInterface({
           </CardContent>
         </Card>
 
-        {hasSections && (
+        {/* Measurement mode toggle — only when strategy pattern + metric column mapped */}
+        {isStrategy && hasMetricMapped && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Measurement Handling</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  How should the Outcome/Measurement column be handled?
+                </p>
+                <Select
+                  value={measurementMode}
+                  onValueChange={(v) => setMeasurementMode(v as MeasurementMode)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="level4">Create as Level 4 (Measurement)</SelectItem>
+                    <SelectItem value="metric_on_parent">Store as metric on parent Action</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {hasSections && !isStrategy && (
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Section Headers</CardTitle>
@@ -141,14 +175,21 @@ export function MappingInterface({
           </Card>
         )}
 
+        {isStrategy && (
+          <div className="text-xs text-muted-foreground flex items-center gap-1 px-1">
+            <Info className="h-3 w-3 shrink-0" />
+            <span>Strategy pattern detected: hierarchy auto-mapped as {levels.map(l => l.name).join(' → ')}</span>
+          </div>
+        )}
+
         <div className="flex justify-end">
-          <Button onClick={handleApply} disabled={!hasItemName}>
+          <Button onClick={handleApply} disabled={!hasItemName && !isStrategy}>
             <CheckCircle2 className="h-4 w-4 mr-2" />
             Apply Mapping
           </Button>
         </div>
 
-        {!hasItemName && (
+        {!hasItemName && !isStrategy && (
           <p className="text-xs text-destructive text-right">
             Please map at least one column to "Item Name"
           </p>
