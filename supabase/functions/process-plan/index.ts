@@ -646,7 +646,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
 
     if (useVision) {
       console.log("[process-plan] Starting Step 0 (document classification)");
-      await updateSessionProgress(sessionId, { current_step: "classifying" });
+      await updateSessionProgress(sessionId, { current_step: "classifying" }, runId);
 
       const allPageImages = pageImages as string[];
       const CHUNK_THRESHOLD = 50;
