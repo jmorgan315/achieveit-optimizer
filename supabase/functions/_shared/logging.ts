@@ -137,6 +137,61 @@ export function extractTokenUsage(response: Record<string, unknown>): { input_to
   };
 }
 
+// ─── Shared Anthropic retry utility ───
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 529]);
+const BACKOFF_SCHEDULE_MS = [5_000, 15_000, 30_000]; // 3 retries
+
+/**
+ * Fetch wrapper for Anthropic API with exponential backoff.
+ * Retries on 408, 429, 500, 502, 503, 529 up to 3 times (4 total attempts).
+ * Respects `retry-after` header when present.
+ */
+export async function callAnthropicWithRetryShared(
+  apiKey: string,
+  body: Record<string, unknown>,
+  context?: { functionName?: string; sessionId?: string }
+): Promise<Response> {
+  const label = context?.functionName || "anthropic-call";
+  let lastResponse: Response | null = null;
+
+  for (let attempt = 0; attempt <= BACKOFF_SCHEDULE_MS.length; attempt++) {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (response.ok) return response;
+
+    lastResponse = response;
+
+    if (!RETRYABLE_STATUSES.has(response.status) || attempt >= BACKOFF_SCHEDULE_MS.length) {
+      // Not retryable or exhausted retries — return as-is
+      return response;
+    }
+
+    // Determine wait time: prefer retry-after header, else use schedule
+    const retryAfterHeader = response.headers.get("retry-after");
+    let waitMs = BACKOFF_SCHEDULE_MS[attempt];
+    if (retryAfterHeader) {
+      const parsed = parseInt(retryAfterHeader, 10);
+      if (!isNaN(parsed)) waitMs = Math.max(parsed * 1000, waitMs);
+    }
+
+    console.warn(
+      `[${label}] Retryable status ${response.status}, attempt ${attempt + 1}/${BACKOFF_SCHEDULE_MS.length}, waiting ${waitMs}ms` +
+      (context?.sessionId ? ` (session=${context.sessionId})` : "")
+    );
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+
+  return lastResponse!;
+}
+
 /** Truncate image data from a request payload for logging (replace base64 with metadata) */
 export function truncateImagePayload(payload: Record<string, unknown>): Record<string, unknown> {
   const clone = JSON.parse(JSON.stringify(payload));
