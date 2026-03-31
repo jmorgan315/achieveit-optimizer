@@ -1051,7 +1051,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>, run
         status: "error",
         current_step: "error",
         step_results: { error: agent1Error || "Extraction produced no items", pipelineStep: "agent1" },
-      });
+      }, runId);
       return;
     }
 
