@@ -1363,7 +1363,7 @@ async function runResume(sessionId: string): Promise<void> {
         });
 
         // Now run Agents 2+3 via the existing post-extraction resume path
-        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText);
+        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, pipelineRunId);
         return;
       }
 
