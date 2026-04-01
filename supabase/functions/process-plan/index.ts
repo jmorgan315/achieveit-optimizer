@@ -1266,6 +1266,10 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 // Resume function: handles mid-extraction AND post-extraction resume
 // ==============================
 async function runResume(sessionId: string): Promise<void> {
+  const pipelineRunId = crypto.randomUUID();
+  console.log(`[process-plan] Starting resume pipeline run ${pipelineRunId} for session ${sessionId}`);
+  await updateSessionProgress(sessionId, { pipeline_run_id: pipelineRunId });
+
   try {
     const client = getServiceClient();
     const { data: session, error: fetchError } = await client
