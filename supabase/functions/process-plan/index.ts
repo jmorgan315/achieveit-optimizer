@@ -970,20 +970,96 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         }
       }
     } else {
-      const result = await callEdgeFunction("extract-plan-items", {
-        documentText,
-        organizationName,
-        industry,
-        documentHints,
-        planLevels,
-        pageRange,
-        sessionId,
-      });
-      if (result.ok && (result.data as { success: boolean }).success) {
-        const d = (result.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
-        agent1Data = { items: d.items || [], detectedLevels: d.detectedLevels || [] };
+      // ==============================
+      // BATCHED TEXT EXTRACTION (used for text_heavy override or no-vision documents)
+      // ==============================
+      const textToExtract = (documentText as string).trim();
+      const textChunks = splitDocumentIntoChunks(textToExtract);
+      const totalChunks = textChunks.length;
+      console.log(`[process-plan] Step 1 text: ${textToExtract.length} chars in ${totalChunks} chunk(s)`);
+
+      let allTextItems: unknown[] = [];
+      let textDetectedLevels: { depth: number; name: string }[] = [];
+
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        // Ownership check before each text extraction batch
+        if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
+        if (chunkIdx > 0) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
+        const result = await callEdgeFunction("extract-plan-items", {
+          documentText: textChunks[chunkIdx],
+          organizationName,
+          industry,
+          documentHints,
+          planLevels,
+          pageRange,
+          sessionId,
+          batchLabel: `Step 1: Text Extraction (Chunk ${chunkIdx + 1} of ${totalChunks})`,
+        });
+
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const d = (result.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
+          if (d.items?.length) {
+            allTextItems = [...allTextItems, ...d.items];
+          }
+          if (d.detectedLevels?.length && textDetectedLevels.length === 0) {
+            textDetectedLevels = d.detectedLevels;
+          }
+        } else {
+          console.warn(`[process-plan] Text chunk ${chunkIdx + 1} failed:`, (result.data as { error?: string }).error);
+        }
+
+        // Per-batch persistence for text extraction
+        const isLastChunk = chunkIdx === totalChunks - 1;
+        await updateSessionProgress(sessionId, {
+          current_step: "extracting",
+          step_results: {
+            extraction: {
+              items: allTextItems,
+              detectedLevels: textDetectedLevels.length > 0 ? textDetectedLevels : [
+                { depth: 1, name: "Strategic Priority" },
+                { depth: 2, name: "Objective" },
+                { depth: 3, name: "Goal" },
+                { depth: 4, name: "Strategy" },
+                { depth: 5, name: "KPI" },
+              ],
+              batches_completed: chunkIdx + 1,
+              batches_total: totalChunks,
+              completed_at: isLastChunk ? new Date().toISOString() : null,
+            },
+            classification: classification || null,
+            pipelineContext: {
+              organizationName,
+              industry,
+              planLevels,
+              documentText: textToExtract,
+              extractionMethod,
+              useVision: false,
+              extractionMode,
+              documentHints,
+              pageRange,
+            },
+          },
+        });
+        console.log(`[process-plan] Text chunk ${chunkIdx + 1}/${totalChunks} persisted (${allTextItems.length} cumulative items)`);
+      }
+
+      if (allTextItems.length > 0) {
+        agent1Data = {
+          items: allTextItems,
+          detectedLevels: textDetectedLevels.length > 0 ? textDetectedLevels : [
+            { depth: 1, name: "Strategic Priority" },
+            { depth: 2, name: "Objective" },
+            { depth: 3, name: "Goal" },
+            { depth: 4, name: "Strategy" },
+            { depth: 5, name: "KPI" },
+          ],
+        };
       } else {
-        agent1Error = (result.data as { error?: string }).error || "Text extraction failed";
+        agent1Error = "Text extraction produced no items";
       }
     }
 
