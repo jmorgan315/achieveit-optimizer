@@ -204,15 +204,25 @@ export function FileUploadStep({
   }> => {
     const POLL_INTERVAL = 3000;
     const MAX_POLLS = 200; // 10 minutes max
+    const MAX_RESUMES = 20;
 
     let lastReportedStep = '';
     let extractionCompleteAt: number | null = null;
-    let hasAttemptedAuditResume = false;
+    let resumeCount = 0;
 
     // Extraction-phase stall detection
     let lastBatchCount: number | null = null;
     let batchStallStart: number | null = null;
-    let hasAttemptedExtractionResume = false;
+
+    // Progress high-water mark — never let the bar go backwards
+    const highWaterProgress: Record<string, number> = {};
+    const setStepProgressHWM = (step: ProcessingStep, pct: number) => {
+      const prev = highWaterProgress[step] || 0;
+      if (pct >= prev) {
+        highWaterProgress[step] = pct;
+        setStepProgress(step, pct);
+      }
+    };
 
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
