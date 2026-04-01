@@ -615,6 +615,10 @@ async function cleanupPageImages(sessionId: string): Promise<void> {
 // The actual pipeline logic, runs in background after early return
 // ==============================
 async function runPipeline(sessionId: string, body: Record<string, unknown>): Promise<void> {
+  const pipelineRunId = crypto.randomUUID();
+  console.log(`[process-plan] Starting pipeline run ${pipelineRunId} for session ${sessionId}`);
+  await updateSessionProgress(sessionId, { pipeline_run_id: pipelineRunId });
+
   try {
     const {
       documentText,
