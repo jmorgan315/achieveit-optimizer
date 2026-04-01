@@ -1531,11 +1531,16 @@ async function runResume(sessionId: string): Promise<void> {
 
   } catch (error) {
     console.error("[process-plan] Resume error:", error);
-    await updateSessionProgress(sessionId, {
-      status: "error",
-      current_step: "error",
-      step_results: { error: "Resume pipeline failed. Please try again." },
-    });
+    // Guard: only write error status if this run still owns the session
+    if (await checkOwnership(sessionId, pipelineRunId)) {
+      await updateSessionProgress(sessionId, {
+        status: "error",
+        current_step: "error",
+        step_results: { error: "Resume pipeline failed. Please try again." },
+      });
+    } else {
+      console.warn(`[process-plan] Suppressing resume error write — run ${pipelineRunId} was superseded`);
+    }
   }
 }
 
