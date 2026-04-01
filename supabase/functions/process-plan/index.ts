@@ -1493,7 +1493,7 @@ async function runResume(sessionId: string): Promise<void> {
         return;
       }
 
-      // Some batches remain — download images from storage and continue extraction
+      // Some batches remain — resume extraction
       console.log(`[process-plan] Resume: ${batchesCompleted} of ${batchesTotal} batches done, resuming extraction`);
 
       await logApiCall({
@@ -1503,6 +1503,99 @@ async function runResume(sessionId: string): Promise<void> {
         status: "success",
       });
 
+      // ==============================
+      // TEXT EXTRACTION RESUME PATH
+      // ==============================
+      if (extractionMethod === "text" && documentText.length > 50) {
+        console.log(`[process-plan] Resume: using text extraction path`);
+        const textChunks = splitDocumentIntoChunks(documentText.trim());
+        let allItems = [...existingItems];
+
+        for (let chunkIdx = batchesCompleted; chunkIdx < textChunks.length; chunkIdx++) {
+          if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
+          if (chunkIdx > batchesCompleted) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+
+          const result = await callEdgeFunction("extract-plan-items", {
+            documentText: textChunks[chunkIdx],
+            organizationName,
+            industry,
+            documentHints,
+            planLevels,
+            pageRange,
+            sessionId,
+            batchLabel: `Step 1: Text Extraction (Chunk ${chunkIdx + 1} of ${textChunks.length}) [Resume]`,
+          });
+
+          if (result.ok && (result.data as { success: boolean }).success) {
+            const d = (result.data as { data: { items?: unknown[]; detectedLevels?: { depth: number; name: string }[] } }).data;
+            if (d.items?.length) {
+              allItems = [...allItems, ...d.items];
+            }
+            if (d.detectedLevels?.length && detectedLevels.length === 0) {
+              detectedLevels = d.detectedLevels;
+            }
+          } else {
+            console.warn(`[process-plan] Resume: Text chunk ${chunkIdx + 1} failed:`, (result.data as { error?: string }).error);
+          }
+
+          const isLastChunk = chunkIdx === textChunks.length - 1;
+          await updateSessionProgress(sessionId, {
+            current_step: "extracting",
+            step_results: {
+              extraction: {
+                items: allItems,
+                detectedLevels,
+                batches_completed: chunkIdx + 1,
+                batches_total: textChunks.length,
+                completed_at: isLastChunk ? new Date().toISOString() : null,
+              },
+              classification,
+              pipelineContext: { ...pipeCtx },
+            },
+          });
+          console.log(`[process-plan] Resume: Text chunk ${chunkIdx + 1}/${textChunks.length} persisted (${allItems.length} cumulative items)`);
+        }
+
+        // Run dedup
+        const dedupStart = Date.now();
+        const beforeDedupCount = countAllItems(allItems);
+        const dedupResult = deduplicateItems(allItems);
+        const dedupDuration = Date.now() - dedupStart;
+        const dedupedItems = dedupResult.items;
+        const dedupedItemCount = countAllItems(dedupedItems);
+
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "dedup-merge",
+          step_label: "Step 1.5: Dedup & Merge (Resume)",
+          status: "success",
+          input_tokens: 0,
+          output_tokens: 0,
+          duration_ms: dedupDuration,
+          request_payload: { input_count: beforeDedupCount, output_count: dedupedItemCount, duplicates_removed: dedupResult.removedDetails.length },
+          response_payload: { removed_items: dedupResult.removedDetails },
+        });
+
+        await updateSessionProgress(sessionId, {
+          current_step: "extraction_complete",
+          step_results: {
+            extraction: { items: dedupedItems, detectedLevels, completed_at: new Date().toISOString() },
+            classification,
+            pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
+          },
+        });
+
+        if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, pipelineRunId);
+        return;
+      }
+
+      // ==============================
+      // VISION EXTRACTION RESUME PATH (original)
+      // ==============================
       // Download images from storage
       const allImages = await loadPageImages(sessionId, totalFilteredImages);
       if (allImages.length === 0) {
