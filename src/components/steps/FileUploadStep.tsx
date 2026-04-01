@@ -931,6 +931,15 @@ export function FileUploadStep({
                 </Button>
               </div>
 
+              {/* Page count error blocker */}
+              {pageCountError && (
+                <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
+                  <AlertTriangle className="h-5 w-5" />
+                  <AlertTitle>Document Too Large</AlertTitle>
+                  <AlertDescription>{pageCountError}</AlertDescription>
+                </Alert>
+              )}
+
               {/* Processing Overlay */}
               {isLoading && (
                 <ProcessingOverlay
