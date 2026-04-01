@@ -1,59 +1,82 @@
 
 
-# Pipeline Ownership: Guarding the catch blocks
+# Enable Repeated Automatic Resumes from Frontend Stall Detector
 
-## The Risk You Identified
+## Overview
+Remove the single-fire guards on both stall detectors and allow them to re-arm after each resume. Cap at 20 total resumes. Show friendly continuation messages in the Activity Log. Track a progress high-water mark so the bar never goes backwards.
 
-Three outer `catch` blocks write `status: "error"` to the session on any exception:
+## Changes — single file: `src/components/steps/FileUploadStep.tsx`
 
-- `runPipeline` catch (line 1216-1222)
-- `runResume` catch (line 1483-1489)
-- `runPostExtractionResume` errors bubble into `runResume`'s catch
+### 1. Replace single-fire booleans with a shared counter
 
-If a superseded run encounters an unrelated exception *after* yielding ownership, that catch block would overwrite the new run's `status` and `current_step` with `"error"`.
+Remove `hasAttemptedExtractionResume` and `hasAttemptedAuditResume`. Replace with:
+```typescript
+let resumeCount = 0;
+const MAX_RESUMES = 20;
+```
 
-## Confirmed: Early return is safe — but catch blocks are not
+### 2. Modify extraction stall detection (lines 264-293)
 
-The plan's ownership checks use `if (!checkOwnership(...)) return;` — a clean return won't trigger catch blocks. That path is safe.
+Replace the `!hasAttemptedExtractionResume` guard with `resumeCount < MAX_RESUMES`. After firing a resume:
+- Increment `resumeCount`
+- Reset `batchStallStart = null` so the 30s timer re-arms
+- Log: `console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES}`)``
+- Add friendly message: `addMessage(`Processing large document... (continuation ${resumeCount})`)` instead of "Resuming extraction..."
 
-**The danger**: If a superseded run somehow throws between checks (e.g., a network error on a stale in-flight request), the catch fires and clobbers the session.
+Before firing, check session status — if `session.status === 'completed' || session.status === 'error'`, skip the resume (the existing status checks at lines 319-328 handle completion, but the stall detection runs before those checks; add a quick guard).
 
-## The Fix
+### 3. Modify post-extraction stall detection (lines 295-317)
 
-Add an ownership check inside each outer catch block before writing error status. The implementation should:
+Same pattern: replace `!hasAttemptedAuditResume` with `resumeCount < MAX_RESUMES`. After firing:
+- Increment `resumeCount`
+- Reset `extractionCompleteAt = null` so the 20s timer re-arms
+- Friendly message: `addMessage(`Finalizing analysis... (continuation ${resumeCount})`)`
 
-1. **Store `pipelineRunId` in a variable accessible to the catch block** (it's already scoped in the function body).
+### 4. Add max-resume error
 
-2. **In each catch block**, before writing `status: "error"`, re-check ownership:
-   ```typescript
-   } catch (error) {
-     console.error("[process-plan] Pipeline error:", error);
-     // Don't clobber session if we've been superseded
-     if (await checkOwnership(sessionId, pipelineRunId)) {
-       await updateSessionProgress(sessionId, {
-         status: "error",
-         current_step: "error",
-         step_results: { error: "Pipeline processing failed." },
-       });
-     } else {
-       console.warn(`[process-plan] Suppressing error write — run ${pipelineRunId} was superseded`);
-     }
-   }
-   ```
+After the stall detection blocks but before the completion check, add:
+```typescript
+if (resumeCount >= MAX_RESUMES) {
+  // Check for partial results before throwing
+  // (existing partial results fallback at line 331 handles this)
+  throw new Error('Processing exceeded maximum resume attempts');
+}
+```
 
-3. Apply this pattern to both catch blocks:
-   - `runPipeline` (line 1216)
-   - `runResume` (line 1483) — pass `pipelineRunId` through so it's available
+### 5. Progress high-water mark
 
-4. `runPostExtractionResume` needs `pipelineRunId` as a parameter (already in the plan) so `runResume`'s catch can use it.
+Add a wrapper around `setStepProgress` calls inside the polling loop to track the maximum value seen:
+```typescript
+let highWaterProgress: Record<string, number> = {};
+const setStepProgressHWM = (step: string, pct: number) => {
+  const prev = highWaterProgress[step] || 0;
+  if (pct >= prev) {
+    highWaterProgress[step] = pct;
+    setStepProgress(step as any, pct);
+  }
+};
+```
+Replace `setStepProgress` calls inside `pollForResults` with `setStepProgressHWM`.
 
-## Summary
+### 6. No backend changes
 
-The plan's early-return approach is correct. This is one additional safeguard: **guard the catch blocks with an ownership check** so a dying superseded run can't write `status: "error"` over the new run's progress.
+The backend already:
+- Generates a new `pipeline_run_id` on each resume call
+- Picks up from the last persisted batch
+- Gracefully stops superseded runs
 
-## Files
+## Summary of behavior
 
-| File | Change |
-|------|--------|
-| `supabase/functions/process-plan/index.ts` | Add ownership check in catch blocks of `runPipeline` and `runResume` before writing error status |
+```text
+Poll loop iteration:
+  1. Read session from DB
+  2. Update UI step/progress (high-water mark)
+  3. If extracting + batch count stalled > 30s + resumeCount < 20:
+     → fire resume, increment counter, reset stall timer
+  4. If extraction_complete + stuck > 20s + resumeCount < 20:
+     → fire resume, increment counter, reset timer
+  5. If completed → return results
+  6. If error → throw
+  7. If resumeCount >= 20 → throw (falls to partial results handler)
+```
 
