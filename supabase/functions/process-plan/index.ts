@@ -1233,6 +1233,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       dedupResults: dedupResult.removedDetails,
     };
 
+    // Ownership check before writing final results
+    if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
     await updateSessionProgress(sessionId, {
       status: "completed",
       current_step: "complete",
