@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { logApiCall, ensureSession, extractTokenUsage } from "../_shared/logging.ts";
+import { logApiCall, ensureSession, extractTokenUsage, callAnthropicWithRetry } from "../_shared/logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
