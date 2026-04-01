@@ -10,6 +10,7 @@ import { AIExtractionResponse, convertAIResponseToPlanItems } from '@/utils/text
 import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages } from '@/utils/pdfToImages';
 import { ProcessingOverlay, ProcessingStep } from './ProcessingOverlay';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { supabase } from '@/integrations/supabase/client';
 import { Textarea } from '@/components/ui/textarea';
 
