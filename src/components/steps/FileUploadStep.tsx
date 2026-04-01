@@ -247,16 +247,16 @@ export function FileUploadStep({
       if (step && step !== lastReportedStep) {
         lastReportedStep = step;
         if (step === 'classifying') {
-          setStepProgress('classify', 50);
+          setStepProgressHWM('classify', 50);
           addMessage('Classifying document structure...');
         } else if (step === 'extracting') {
-          setStepProgress('extract', 50);
+          setStepProgressHWM('extract', 50);
           addMessage('Extracting plan items...');
         } else if (step === 'extraction_complete') {
-          setStepProgress('extract', 100);
+          setStepProgressHWM('extract', 100);
           addMessage('Extraction complete, running validation...');
         } else if (step === 'validating') {
-          setStepProgress('validate', 50);
+          setStepProgressHWM('validate', 50);
           addMessage('Auditing and validating...');
         }
       }
