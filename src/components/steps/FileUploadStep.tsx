@@ -268,58 +268,75 @@ export function FileUploadStep({
         if (batchesTotal > 1 && batchesCompleted > 0) {
           const pct = Math.round((batchesCompleted / batchesTotal) * 100);
           setStepProgressHWM('extract', Math.min(pct, 95));
-      if (step === 'extracting') {
-        const currentBatchCount = stepResults?.extraction?.batches_completed ?? null;
-        if (currentBatchCount !== null) {
-          if (lastBatchCount !== null && currentBatchCount === lastBatchCount) {
-            if (!batchStallStart) {
-              batchStallStart = Date.now();
-            }
-            const stallDuration = Date.now() - batchStallStart;
-            if (stallDuration > 30000 && !hasAttemptedExtractionResume) {
-              hasAttemptedExtractionResume = true;
-              console.log(`[Polling] Extraction stall detected (batch ${currentBatchCount} unchanged for ${Math.round(stallDuration / 1000)}s), firing resume...`);
-              addMessage('Resuming extraction...');
-              try {
-                await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ resume_session_id: pollSessionId }),
-                });
-              } catch (resumeErr) {
-                console.error('[Polling] Extraction resume call failed:', resumeErr);
-              }
-            }
-          } else {
-            // Batch count changed — reset stall timer
-            lastBatchCount = currentBatchCount;
-            batchStallStart = null;
-          }
         }
       }
 
-      // Post-extraction stall detection: if stuck at extraction_complete for >20s, fire resume
-      if (step === 'extraction_complete') {
-        if (!extractionCompleteAt) {
-          extractionCompleteAt = Date.now();
-        }
-        const stallDuration = Date.now() - extractionCompleteAt;
-        if (stallDuration > 20000 && !hasAttemptedAuditResume) {
-          hasAttemptedAuditResume = true;
-          console.log(`[Polling] Stall detected at extraction_complete (${Math.round(stallDuration / 1000)}s), firing resume...`);
-          addMessage('Resuming validation...');
-          try {
-            await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ resume_session_id: pollSessionId }),
-            });
-          } catch (resumeErr) {
-            console.error('[Polling] Resume call failed:', resumeErr);
+      // Skip stall detection if session already finished
+      if (session.status === 'completed' || session.status === 'error') {
+        // fall through to the status checks below
+      } else {
+        // Extraction-phase stall detection: if batches_completed unchanged for >30s
+        if (step === 'extracting') {
+          const currentBatchCount = stepResults?.extraction?.batches_completed ?? null;
+          if (currentBatchCount !== null) {
+            if (lastBatchCount !== null && currentBatchCount === lastBatchCount) {
+              if (!batchStallStart) {
+                batchStallStart = Date.now();
+              }
+              const stallDuration = Date.now() - batchStallStart;
+              if (stallDuration > 30000 && resumeCount < MAX_RESUMES) {
+                resumeCount++;
+                batchStallStart = null; // re-arm stall timer
+                console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES} — extraction stall (batch ${currentBatchCount} unchanged for ${Math.round(stallDuration / 1000)}s)`);
+                addMessage(`Processing large document... (continuation ${resumeCount})`);
+                try {
+                  await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resume_session_id: pollSessionId }),
+                  });
+                } catch (resumeErr) {
+                  console.error('[Polling] Extraction resume call failed:', resumeErr);
+                }
+              }
+            } else {
+              // Batch count changed — reset stall timer
+              lastBatchCount = currentBatchCount;
+              batchStallStart = null;
+            }
           }
         }
-      } else {
-        extractionCompleteAt = null;
+
+        // Post-extraction stall detection: if stuck at extraction_complete for >20s, fire resume
+        if (step === 'extraction_complete') {
+          if (!extractionCompleteAt) {
+            extractionCompleteAt = Date.now();
+          }
+          const stallDuration = Date.now() - extractionCompleteAt;
+          if (stallDuration > 20000 && resumeCount < MAX_RESUMES) {
+            resumeCount++;
+            extractionCompleteAt = null; // re-arm stall timer
+            console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES} — post-extraction stall (${Math.round(stallDuration / 1000)}s)`);
+            addMessage(`Finalizing analysis... (continuation ${resumeCount})`);
+            try {
+              await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resume_session_id: pollSessionId }),
+              });
+            } catch (resumeErr) {
+              console.error('[Polling] Resume call failed:', resumeErr);
+            }
+          }
+        } else {
+          extractionCompleteAt = null;
+        }
+
+        // Max resume guard
+        if (resumeCount >= MAX_RESUMES) {
+          console.warn(`[Polling] Reached max resume limit (${MAX_RESUMES}), falling through to partial results`);
+          break;
+        }
       }
 
       if (session.status === 'completed') {
