@@ -681,6 +681,22 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     }
 
     // ==============================
+    // TEXT_HEAVY OVERRIDE: Use text extraction instead of vision
+    // ==============================
+    if (useVision && classification?.document_type === "text_heavy" && hasDocumentText) {
+      console.log("[process-plan] Document classified as text_heavy — using text extraction instead of vision");
+      useVision = false;
+      extractionMethod = "text";
+
+      await logApiCall({
+        session_id: sessionId,
+        edge_function: "process-plan",
+        step_label: "Text_heavy override: switching from vision to text extraction",
+        status: "success",
+      });
+    }
+
+    // ==============================
     // AGENT 1: Extraction
     // ==============================
     await updateSessionProgress(sessionId, { current_step: "extracting" });
