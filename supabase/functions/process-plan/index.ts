@@ -1074,6 +1074,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // STEPS 2 & 3: Audit + Validation (PARALLEL)
     // ==============================
+    // Ownership check before Agents 2+3
+    if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
     await updateSessionProgress(sessionId, { current_step: "validating" });
     console.log("[process-plan] Starting Steps 2 & 3 in parallel (audit + validation)");
 
