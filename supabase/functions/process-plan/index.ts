@@ -24,6 +24,24 @@ async function updateSessionProgress(sessionId: string, updates: Record<string, 
     console.error("[process-plan] updateSessionProgress exception:", e);
   }
 }
+async function checkOwnership(sessionId: string, myRunId: string): Promise<boolean> {
+  try {
+    const client = getServiceClient();
+    const { data } = await client.from("processing_sessions")
+      .select("pipeline_run_id").eq("id", sessionId).single();
+    const currentId = (data as Record<string, unknown>)?.pipeline_run_id as string | null;
+    if (currentId && currentId !== myRunId) {
+      console.warn(`[process-plan] Pipeline run ${myRunId} superseded by ${currentId}, stopping gracefully`);
+      return false;
+    }
+    console.log(`[process-plan] Ownership check passed for run ${myRunId}`);
+    return true;
+  } catch (e) {
+    console.error("[process-plan] checkOwnership exception:", e);
+    // On error checking, assume we still own it to avoid silent stops
+    return true;
+  }
+}
 
 interface PipelineProgress {
   agent: number;
