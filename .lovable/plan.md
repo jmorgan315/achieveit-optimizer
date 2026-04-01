@@ -1,33 +1,71 @@
 
 
-# Raise page limit to 250 and add frontend upload blocker
+# Chunked Classification for 50+ Page Documents
 
-## Changes
+## Overview
+When a document has more than 50 pages, split page images into chunks of 25 and classify each chunk separately. Merge results into a single classification. Documents with 50 or fewer pages are unchanged.
 
-### 1. `supabase/functions/parse-pdf/index.ts`
-- Line 12: Change `MAX_PAGES = 100` → `MAX_PAGES = 250`
+## Changes — single file: `supabase/functions/classify-document/index.ts`
 
-### 2. `src/utils/pdfToImages.ts`
-- Line 26: Change default `maxPages: number = 100` → `maxPages: number = 250`
+### 1. Add constant
+```typescript
+const CLASSIFICATION_CHUNK_SIZE = 25;
+const CLASSIFICATION_CHUNK_THRESHOLD = 50;
+```
 
-### 3. `src/components/steps/FileUploadStep.tsx`
-- Line 375: Change `renderPDFToImages(file, 100, ...)` → `renderPDFToImages(file, 250, ...)`
-- Add new state: `const [pageCountError, setPageCountError] = useState<string | null>(null)`
-- Add constant: `const MAX_PDF_PAGES = 250`
-- After `parsePdfWithEdgeFunction` returns (line 639-643 area), check `textResult.pageCount > MAX_PDF_PAGES` → set `pageCountError` with the message, clear file content, abort processing, return early
-- For the vision-only path (large files that skip text extraction), check page count from `renderPDFToImages` result → same blocker
-- In `clearFile`, also clear `pageCountError`
-- Add blocker UI: between the file status bar and the processing overlay (around line 912), render an error banner when `pageCountError` is set:
-  - Red alert with AlertTriangle icon
-  - Message: "This document has [X] pages. The current limit is 250 pages. Try uploading only the section that contains your strategic plan, or use Document Scope to narrow the page range."
-- Update Continue button disabled logic (line 1026): add `|| !!pageCountError` to the disabled condition
-- The blocker only fires for PDF uploads — Excel/CSV path is unaffected
+### 2. Add helper: `buildImageContent`
+Extract the existing image-processing loop (lines 277-296) into a reusable function that converts a slice of `pageImages` into Claude content blocks. Accepts `pageImages` array and `startIndex` (for correct page numbering in the prompt).
 
-## Files
+### 3. Add helper: `classifyChunk`
+Takes a chunk of page images, the chunk index, page offset, API key, user prompt base, and session ID. Builds the request, calls `callAnthropicWithRetry` (the local one already in the file), parses the response, logs it. Returns the parsed classification or `null` on failure.
 
-| File | Change |
-|------|--------|
-| `supabase/functions/parse-pdf/index.ts` | `MAX_PAGES` 100 → 250 |
-| `src/utils/pdfToImages.ts` | Default `maxPages` 100 → 250 |
-| `src/components/steps/FileUploadStep.tsx` | Add page count check, blocker UI, disable Continue when blocked |
+### 4. Add helper: `mergeClassifications`
+Merges multiple chunk classification results into one:
+- `page_annotations`: concatenate all, already correctly numbered since each chunk prompt specifies its page range
+- `plan_content_pages`: union of all chunks
+- `skip_pages`: union of all chunks
+- `document_type`: majority vote across chunks, fallback to first chunk
+- `confidence`: average across chunks
+- `hierarchy_pattern`: take from the chunk with highest confidence (most likely has the richest content)
+- `table_structure`: take first non-null
+- `extraction_recommendations`: take from highest-confidence chunk
+- `non_plan_content`: OR-merge all boolean fields, concat metadata_columns
+
+### 5. Add helper: `buildFallbackAnnotationsForPages`
+For failed chunks, generate conservative page_annotations with `contains_plan_items: true` and classification `"plan_content"` for each page in the failed range.
+
+### 6. Modify main handler (lines 268-395)
+After validation and session setup:
+
+```
+if (pageCount <= CLASSIFICATION_CHUNK_THRESHOLD) {
+  // existing single-request path — no changes
+} else {
+  // chunked path:
+  // 1. Split pageImages into chunks of CLASSIFICATION_CHUNK_SIZE
+  // 2. Process each chunk sequentially (to avoid rate limits)
+  //    - Add page range info to user prompt: "These are pages X-Y of Z total"
+  //    - Call classifyChunk
+  //    - On failure: log warning, add fallback annotations for those pages
+  // 3. mergeClassifications on all results
+  // 4. Log total chunks, succeeded/failed counts, total time
+}
+```
+
+Each chunk's user prompt gets an additional line: `"Note: These are pages {start}-{end} of {total} total pages. Return page numbers using the original document numbering (starting from {start})."` — this ensures page indices are preserved.
+
+### 7. Logging
+- Log at start: `"[classify-document] Chunked classification: {N} chunks of {CHUNK_SIZE} for {pageCount} pages"`
+- Log per chunk: success/failure, duration, tokens
+- Log at end: `"[classify-document] Chunked classification complete: {succeeded}/{total} chunks succeeded in {totalMs}ms"`
+
+### 8. Deploy
+Deploy `classify-document` edge function.
+
+## What does NOT change
+- Classification prompt (CLASSIFICATION_SYSTEM_PROMPT)
+- Model (`claude-opus-4-6`)
+- Documents with ≤50 pages (existing single-request path)
+- All other edge functions
+- Frontend code
 
