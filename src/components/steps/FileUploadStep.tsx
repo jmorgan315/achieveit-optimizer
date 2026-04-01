@@ -656,6 +656,13 @@ export function FileUploadStep({
         }
 
         if (textResult) {
+          // Check page count limit
+          if (textResult.pageCount > MAX_PDF_PAGES) {
+            setPageCountError(`This document has ${textResult.pageCount} pages. The current limit is ${MAX_PDF_PAGES} pages. Try uploading only the section that contains your strategic plan, or use Document Scope to narrow the page range.`);
+            setFileContent('');
+            setIsProcessing(false);
+            return;
+          }
           const quality = evaluateTextQuality(textResult.text, textResult.pageCount);
           console.log(`Text quality: ${Math.round(quality.charsPerPage)} chars/page, threshold: ${CHARS_PER_PAGE_THRESHOLD}. Decision: ${quality.useText ? 'text' : 'vision'}. ${quality.reason}`);
 
