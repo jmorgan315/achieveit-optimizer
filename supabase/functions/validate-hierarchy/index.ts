@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { logApiCall, ensureSession, extractTokenUsage } from "../_shared/logging.ts";
+import { logApiCall, ensureSession, extractTokenUsage, callAnthropicWithRetry } from "../_shared/logging.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -262,7 +262,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     };
 
     const startTime = Date.now();
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await callAnthropicWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key": ANTHROPIC_API_KEY,

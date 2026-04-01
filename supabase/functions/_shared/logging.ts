@@ -163,3 +163,33 @@ export function truncateImagePayload(payload: Record<string, unknown>): Record<s
   }
   return clone;
 }
+
+/** Retry wrapper for Anthropic API calls with exponential backoff */
+export async function callAnthropicWithRetry(
+  url: string,
+  fetchOptions: RequestInit,
+  maxRetries = 3,
+  initialDelayMs = 2000,
+): Promise<Response> {
+  const RETRYABLE_STATUSES = new Set([429, 408, 529]);
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, fetchOptions);
+      if (response.ok || !RETRYABLE_STATUSES.has(response.status) || attempt === maxRetries) {
+        return response;
+      }
+      const delay = initialDelayMs * Math.pow(2, attempt);
+      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} failed with status ${response.status}. Retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt === maxRetries) throw lastError;
+      const delay = initialDelayMs * Math.pow(2, attempt);
+      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} network error: ${lastError.message}. Retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError || new Error("Retry failed");
+}
