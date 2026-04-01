@@ -1249,11 +1249,16 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
   } catch (error) {
     console.error("[process-plan] Pipeline error:", error);
-    await updateSessionProgress(sessionId, {
-      status: "error",
-      current_step: "error",
-      step_results: { error: "Pipeline processing failed. Please try again." },
-    });
+    // Guard: only write error status if this run still owns the session
+    if (await checkOwnership(sessionId, pipelineRunId)) {
+      await updateSessionProgress(sessionId, {
+        status: "error",
+        current_step: "error",
+        step_results: { error: "Pipeline processing failed. Please try again." },
+      });
+    } else {
+      console.warn(`[process-plan] Suppressing error write — run ${pipelineRunId} was superseded`);
+    }
   }
 }
 
