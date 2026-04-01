@@ -1,70 +1,33 @@
 
 
-# Add `callAnthropicWithRetry` shared utility and apply to Agents 2 & 3
-
-## Overview
-Add an exponential-backoff retry wrapper for Anthropic API calls to `_shared/logging.ts`, then use it in `audit-completeness` and `validate-hierarchy` edge functions. Backend-only change — no frontend modifications.
+# Raise page limit to 250 and add frontend upload blocker
 
 ## Changes
 
-### 1. `supabase/functions/_shared/logging.ts` — add `callAnthropicWithRetry`
+### 1. `supabase/functions/parse-pdf/index.ts`
+- Line 12: Change `MAX_PAGES = 100` → `MAX_PAGES = 250`
 
-Add a new exported async function at the end of the file:
+### 2. `src/utils/pdfToImages.ts`
+- Line 26: Change default `maxPages: number = 100` → `maxPages: number = 250`
 
-```typescript
-export async function callAnthropicWithRetry(
-  url: string,
-  fetchOptions: RequestInit,
-  maxRetries = 3,
-  initialDelayMs = 2000,
-): Promise<Response> {
-  const RETRYABLE_STATUSES = new Set([429, 408, 529]);
-  let lastError: Error | null = null;
-  
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const response = await fetch(url, fetchOptions);
-      if (response.ok || !RETRYABLE_STATUSES.has(response.status) || attempt === maxRetries) {
-        return response;
-      }
-      // Retryable status — log and retry
-      const delay = initialDelayMs * Math.pow(2, attempt);
-      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} failed with status ${response.status}. Retrying in ${delay}ms...`);
-      await new Promise(r => setTimeout(r, delay));
-    } catch (err) {
-      // Network error
-      lastError = err instanceof Error ? err : new Error(String(err));
-      if (attempt === maxRetries) throw lastError;
-      const delay = initialDelayMs * Math.pow(2, attempt);
-      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} network error: ${lastError.message}. Retrying in ${delay}ms...`);
-      await new Promise(r => setTimeout(r, delay));
-    }
-  }
-  throw lastError || new Error("Retry failed");
-}
-```
-
-### 2. `supabase/functions/audit-completeness/index.ts`
-
-- Import `callAnthropicWithRetry` from `../_shared/logging.ts`
-- Replace the direct `fetch("https://api.anthropic.com/v1/messages", ...)` call (line 362) with `callAnthropicWithRetry("https://api.anthropic.com/v1/messages", { method, headers, body })`
-- No other changes — same `startTime`, `durationMs`, error handling, response parsing
-
-### 3. `supabase/functions/validate-hierarchy/index.ts`
-
-- Import `callAnthropicWithRetry` from `../_shared/logging.ts`
-- Replace the direct `fetch(...)` call (line 265) with `callAnthropicWithRetry(...)` 
-- No other changes
-
-### 4. Deploy & verify
-
-Deploy all three: `_shared/logging.ts` is bundled automatically with each function, so deploy `audit-completeness` and `validate-hierarchy`. Verify via edge function logs.
+### 3. `src/components/steps/FileUploadStep.tsx`
+- Line 375: Change `renderPDFToImages(file, 100, ...)` → `renderPDFToImages(file, 250, ...)`
+- Add new state: `const [pageCountError, setPageCountError] = useState<string | null>(null)`
+- Add constant: `const MAX_PDF_PAGES = 250`
+- After `parsePdfWithEdgeFunction` returns (line 639-643 area), check `textResult.pageCount > MAX_PDF_PAGES` → set `pageCountError` with the message, clear file content, abort processing, return early
+- For the vision-only path (large files that skip text extraction), check page count from `renderPDFToImages` result → same blocker
+- In `clearFile`, also clear `pageCountError`
+- Add blocker UI: between the file status bar and the processing overlay (around line 912), render an error banner when `pageCountError` is set:
+  - Red alert with AlertTriangle icon
+  - Message: "This document has [X] pages. The current limit is 250 pages. Try uploading only the section that contains your strategic plan, or use Document Scope to narrow the page range."
+- Update Continue button disabled logic (line 1026): add `|| !!pageCountError` to the disabled condition
+- The blocker only fires for PDF uploads — Excel/CSV path is unaffected
 
 ## Files
 
 | File | Change |
 |------|--------|
-| `supabase/functions/_shared/logging.ts` | Add `callAnthropicWithRetry` function |
-| `supabase/functions/audit-completeness/index.ts` | Import + use retry wrapper for Anthropic fetch |
-| `supabase/functions/validate-hierarchy/index.ts` | Import + use retry wrapper for Anthropic fetch |
+| `supabase/functions/parse-pdf/index.ts` | `MAX_PAGES` 100 → 250 |
+| `src/utils/pdfToImages.ts` | Default `maxPages` 100 → 250 |
+| `src/components/steps/FileUploadStep.tsx` | Add page count check, blocker UI, disable Continue when blocked |
 
