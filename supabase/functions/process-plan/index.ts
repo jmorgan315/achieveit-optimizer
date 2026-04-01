@@ -1011,6 +1011,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // DEDUPLICATION (after merge/safety-net, before checkpoint)
     // ==============================
+    // Ownership check before dedup/checkpoint
+    if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
     const dedupStart = Date.now();
     const beforeDedupCount = countAllItems(agent1Data.items);
     const dedupResult = deduplicateItems(agent1Data.items);
