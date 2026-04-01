@@ -10,6 +10,7 @@ import { AIExtractionResponse, convertAIResponseToPlanItems } from '@/utils/text
 import { cleanLevelName } from '@/utils/cleanLevelName';
 import { renderPDFToImages } from '@/utils/pdfToImages';
 import { ProcessingOverlay, ProcessingStep } from './ProcessingOverlay';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { supabase } from '@/integrations/supabase/client';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -49,6 +50,7 @@ const INITIAL_PROGRESS: ProgressState = {
 };
 
 const CHARS_PER_PAGE_THRESHOLD = 200;
+const MAX_PDF_PAGES = 250;
 
 export function FileUploadStep({
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
@@ -69,6 +71,7 @@ export function FileUploadStep({
   const [visionError, setVisionError] = useState<string | null>(null);
   const [pasteMode, setPasteMode] = useState(false);
   const [pastedText, setPastedText] = useState('');
+  const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
@@ -372,7 +375,16 @@ export function FileUploadStep({
 
     try {
       const pageRange = orgProfile?.pageRange;
-      const { images, pageCount } = await renderPDFToImages(file, 100, 0.75, pageRange);
+      const { images, pageCount } = await renderPDFToImages(file, 250, 0.75, pageRange);
+
+      // Check page count limit
+      if (pageCount > MAX_PDF_PAGES) {
+        setPageCountError(`This document has ${pageCount} pages. The current limit is ${MAX_PDF_PAGES} pages. Try uploading only the section that contains your strategic plan, or use Document Scope to narrow the page range.`);
+        setFileContent('');
+        setIsExtracting(false);
+        setIsProcessing(false);
+        return null;
+      }
 
       const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024));
       const totalKB = imageSizes.reduce((s, k) => s + k, 0);
@@ -644,6 +656,13 @@ export function FileUploadStep({
         }
 
         if (textResult) {
+          // Check page count limit
+          if (textResult.pageCount > MAX_PDF_PAGES) {
+            setPageCountError(`This document has ${textResult.pageCount} pages. The current limit is ${MAX_PDF_PAGES} pages. Try uploading only the section that contains your strategic plan, or use Document Scope to narrow the page range.`);
+            setFileContent('');
+            setIsProcessing(false);
+            return;
+          }
           const quality = evaluateTextQuality(textResult.text, textResult.pageCount);
           console.log(`Text quality: ${Math.round(quality.charsPerPage)} chars/page, threshold: ${CHARS_PER_PAGE_THRESHOLD}. Decision: ${quality.useText ? 'text' : 'vision'}. ${quality.reason}`);
 
@@ -789,6 +808,7 @@ export function FileUploadStep({
     setProcessingStatus('');
     setUseVisionAI(false);
     setVisionError(null);
+    setPageCountError(null);
     setPasteMode(false);
     setPastedText('');
     resetProgress();
@@ -911,6 +931,15 @@ export function FileUploadStep({
                 </Button>
               </div>
 
+              {/* Page count error blocker */}
+              {pageCountError && (
+                <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
+                  <AlertTriangle className="h-5 w-5" />
+                  <AlertTitle>Document Too Large</AlertTitle>
+                  <AlertDescription>{pageCountError}</AlertDescription>
+                </Alert>
+              )}
+
               {/* Processing Overlay */}
               {isLoading && (
                 <ProcessingOverlay
@@ -1023,7 +1052,7 @@ export function FileUploadStep({
 
           <Button
             onClick={handleContinue}
-            disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading}
+            disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading || !!pageCountError}
             className="w-full h-12 text-base font-medium"
           >
             {isLoading ? (
