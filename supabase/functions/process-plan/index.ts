@@ -1395,6 +1395,9 @@ async function runResume(sessionId: string): Promise<void> {
       let previousContext = previousContextFromState;
 
       for (let batchIdx = batchesCompleted; batchIdx < batches.length; batchIdx++) {
+        // Ownership check before each resumed extraction batch
+        if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
         const batch = batches[batchIdx];
 
         if (batchIdx > batchesCompleted) {
