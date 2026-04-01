@@ -375,7 +375,16 @@ export function FileUploadStep({
 
     try {
       const pageRange = orgProfile?.pageRange;
-      const { images, pageCount } = await renderPDFToImages(file, 100, 0.75, pageRange);
+      const { images, pageCount } = await renderPDFToImages(file, 250, 0.75, pageRange);
+
+      // Check page count limit
+      if (pageCount > MAX_PDF_PAGES) {
+        setPageCountError(`This document has ${pageCount} pages. The current limit is ${MAX_PDF_PAGES} pages. Try uploading only the section that contains your strategic plan, or use Document Scope to narrow the page range.`);
+        setFileContent('');
+        setIsExtracting(false);
+        setIsProcessing(false);
+        return null;
+      }
 
       const imageSizes = images.map(img => Math.round(img.dataUrl.length * 0.75 / 1024));
       const totalKB = imageSizes.reduce((s, k) => s + k, 0);
