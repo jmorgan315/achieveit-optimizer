@@ -9,7 +9,7 @@ const corsHeaders = {
 
 // Validation constants
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_PAGES = 100;
+const MAX_PAGES = 250;
 const ALLOWED_MIME_TYPES = ['application/pdf'];
 
 // Safe error helper - logs details server-side, returns generic message to client
