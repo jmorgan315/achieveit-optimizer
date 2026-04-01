@@ -203,7 +203,7 @@ export function FileUploadStep({
     error?: string;
   }> => {
     const POLL_INTERVAL = 3000;
-    const MAX_POLLS = 200; // 10 minutes max
+    const MAX_POLLS = 800; // ~40 minutes max for large documents
     const MAX_RESUMES = 20;
 
     let lastReportedStep = '';
