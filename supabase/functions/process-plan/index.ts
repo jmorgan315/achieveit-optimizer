@@ -1676,6 +1676,9 @@ async function runPostExtractionResume(
   const finalItemCount = countAllItems(finalItems);
   console.log(`[process-plan] Resume complete: ${finalItemCount} items, confidence=${sessionConfidence}%`);
 
+  // Ownership check before writing final resume results
+  if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
   await updateSessionProgress(sessionId, {
     status: "completed",
     current_step: "complete",
