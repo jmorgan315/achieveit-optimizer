@@ -1569,6 +1569,9 @@ async function runPostExtractionResume(
     status: "success",
   });
 
+  // Ownership check before Agents 2+3 in resume
+  if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
   await updateSessionProgress(sessionId, { current_step: "validating" });
 
   // Run Agents 2+3 in parallel
