@@ -267,11 +267,7 @@ export function FileUploadStep({
         const batchesTotal = stepResults.extraction.batches_total || 0;
         if (batchesTotal > 1 && batchesCompleted > 0) {
           const pct = Math.round((batchesCompleted / batchesTotal) * 100);
-          setStepProgress('extract', Math.min(pct, 95));
-        }
-      }
-
-      // Extraction-phase stall detection: if batches_completed unchanged for >30s
+          setStepProgressHWM('extract', Math.min(pct, 95));
       if (step === 'extracting') {
         const currentBatchCount = stepResults?.extraction?.batches_completed ?? null;
         if (currentBatchCount !== null) {
