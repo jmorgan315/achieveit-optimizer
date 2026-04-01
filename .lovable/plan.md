@@ -1,12 +1,10 @@
 
 
-# Fix: Increase extraction stall threshold to 120s
+# Increase MAX_POLLS to 800
 
-## Change
+**File**: `src/components/steps/FileUploadStep.tsx`
 
-**File**: `src/components/steps/FileUploadStep.tsx`, line 287
+Change `MAX_POLLS = 200` → `MAX_POLLS = 800` (40 minutes ceiling instead of 10).
 
-Change `stallDuration > 30000` → `stallDuration > 120000`
-
-This is a single-value change. The post-extraction threshold (20s at line 316) stays as-is.
+One constant, no other changes.
 
