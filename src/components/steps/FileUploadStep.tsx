@@ -204,15 +204,25 @@ export function FileUploadStep({
   }> => {
     const POLL_INTERVAL = 3000;
     const MAX_POLLS = 200; // 10 minutes max
+    const MAX_RESUMES = 20;
 
     let lastReportedStep = '';
     let extractionCompleteAt: number | null = null;
-    let hasAttemptedAuditResume = false;
+    let resumeCount = 0;
 
     // Extraction-phase stall detection
     let lastBatchCount: number | null = null;
     let batchStallStart: number | null = null;
-    let hasAttemptedExtractionResume = false;
+
+    // Progress high-water mark — never let the bar go backwards
+    const highWaterProgress: Record<string, number> = {};
+    const setStepProgressHWM = (step: ProcessingStep, pct: number) => {
+      const prev = highWaterProgress[step] || 0;
+      if (pct >= prev) {
+        highWaterProgress[step] = pct;
+        setStepProgress(step, pct);
+      }
+    };
 
     for (let i = 0; i < MAX_POLLS; i++) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
@@ -237,16 +247,16 @@ export function FileUploadStep({
       if (step && step !== lastReportedStep) {
         lastReportedStep = step;
         if (step === 'classifying') {
-          setStepProgress('classify', 50);
+          setStepProgressHWM('classify', 50);
           addMessage('Classifying document structure...');
         } else if (step === 'extracting') {
-          setStepProgress('extract', 50);
+          setStepProgressHWM('extract', 50);
           addMessage('Extracting plan items...');
         } else if (step === 'extraction_complete') {
-          setStepProgress('extract', 100);
+          setStepProgressHWM('extract', 100);
           addMessage('Extraction complete, running validation...');
         } else if (step === 'validating') {
-          setStepProgress('validate', 50);
+          setStepProgressHWM('validate', 50);
           addMessage('Auditing and validating...');
         }
       }
@@ -257,63 +267,76 @@ export function FileUploadStep({
         const batchesTotal = stepResults.extraction.batches_total || 0;
         if (batchesTotal > 1 && batchesCompleted > 0) {
           const pct = Math.round((batchesCompleted / batchesTotal) * 100);
-          setStepProgress('extract', Math.min(pct, 95));
+          setStepProgressHWM('extract', Math.min(pct, 95));
         }
       }
 
-      // Extraction-phase stall detection: if batches_completed unchanged for >30s
-      if (step === 'extracting') {
-        const currentBatchCount = stepResults?.extraction?.batches_completed ?? null;
-        if (currentBatchCount !== null) {
-          if (lastBatchCount !== null && currentBatchCount === lastBatchCount) {
-            if (!batchStallStart) {
-              batchStallStart = Date.now();
-            }
-            const stallDuration = Date.now() - batchStallStart;
-            if (stallDuration > 30000 && !hasAttemptedExtractionResume) {
-              hasAttemptedExtractionResume = true;
-              console.log(`[Polling] Extraction stall detected (batch ${currentBatchCount} unchanged for ${Math.round(stallDuration / 1000)}s), firing resume...`);
-              addMessage('Resuming extraction...');
-              try {
-                await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ resume_session_id: pollSessionId }),
-                });
-              } catch (resumeErr) {
-                console.error('[Polling] Extraction resume call failed:', resumeErr);
-              }
-            }
-          } else {
-            // Batch count changed — reset stall timer
-            lastBatchCount = currentBatchCount;
-            batchStallStart = null;
-          }
-        }
-      }
-
-      // Post-extraction stall detection: if stuck at extraction_complete for >20s, fire resume
-      if (step === 'extraction_complete') {
-        if (!extractionCompleteAt) {
-          extractionCompleteAt = Date.now();
-        }
-        const stallDuration = Date.now() - extractionCompleteAt;
-        if (stallDuration > 20000 && !hasAttemptedAuditResume) {
-          hasAttemptedAuditResume = true;
-          console.log(`[Polling] Stall detected at extraction_complete (${Math.round(stallDuration / 1000)}s), firing resume...`);
-          addMessage('Resuming validation...');
-          try {
-            await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ resume_session_id: pollSessionId }),
-            });
-          } catch (resumeErr) {
-            console.error('[Polling] Resume call failed:', resumeErr);
-          }
-        }
+      // Skip stall detection if session already finished
+      if (session.status === 'completed' || session.status === 'error') {
+        // fall through to the status checks below
       } else {
-        extractionCompleteAt = null;
+        // Extraction-phase stall detection: if batches_completed unchanged for >30s
+        if (step === 'extracting') {
+          const currentBatchCount = stepResults?.extraction?.batches_completed ?? null;
+          if (currentBatchCount !== null) {
+            if (lastBatchCount !== null && currentBatchCount === lastBatchCount) {
+              if (!batchStallStart) {
+                batchStallStart = Date.now();
+              }
+              const stallDuration = Date.now() - batchStallStart;
+              if (stallDuration > 30000 && resumeCount < MAX_RESUMES) {
+                resumeCount++;
+                batchStallStart = null; // re-arm stall timer
+                console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES} — extraction stall (batch ${currentBatchCount} unchanged for ${Math.round(stallDuration / 1000)}s)`);
+                addMessage(`Processing large document... (continuation ${resumeCount})`);
+                try {
+                  await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ resume_session_id: pollSessionId }),
+                  });
+                } catch (resumeErr) {
+                  console.error('[Polling] Extraction resume call failed:', resumeErr);
+                }
+              }
+            } else {
+              // Batch count changed — reset stall timer
+              lastBatchCount = currentBatchCount;
+              batchStallStart = null;
+            }
+          }
+        }
+
+        // Post-extraction stall detection: if stuck at extraction_complete for >20s, fire resume
+        if (step === 'extraction_complete') {
+          if (!extractionCompleteAt) {
+            extractionCompleteAt = Date.now();
+          }
+          const stallDuration = Date.now() - extractionCompleteAt;
+          if (stallDuration > 20000 && resumeCount < MAX_RESUMES) {
+            resumeCount++;
+            extractionCompleteAt = null; // re-arm stall timer
+            console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES} — post-extraction stall (${Math.round(stallDuration / 1000)}s)`);
+            addMessage(`Finalizing analysis... (continuation ${resumeCount})`);
+            try {
+              await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resume_session_id: pollSessionId }),
+              });
+            } catch (resumeErr) {
+              console.error('[Polling] Resume call failed:', resumeErr);
+            }
+          }
+        } else {
+          extractionCompleteAt = null;
+        }
+
+        // Max resume guard
+        if (resumeCount >= MAX_RESUMES) {
+          console.warn(`[Polling] Reached max resume limit (${MAX_RESUMES}), falling through to partial results`);
+          break;
+        }
       }
 
       if (session.status === 'completed') {
