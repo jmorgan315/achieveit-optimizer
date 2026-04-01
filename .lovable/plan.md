@@ -1,25 +1,70 @@
 
 
-# Redeploy Edge Functions to Match Rolled-Back Repo
+# Add `callAnthropicWithRetry` shared utility and apply to Agents 2 & 3
 
-## Situation
+## Overview
+Add an exponential-backoff retry wrapper for Anthropic API calls to `_shared/logging.ts`, then use it in `audit-completeness` and `validate-hierarchy` edge functions. Backend-only change — no frontend modifications.
 
-The Lovable rollback restored the frontend code but edge functions deploy independently — the deployed versions on the server still have Phase 1 large-document changes (multi-entity prompts, chunked classification, pipeline_run_id, retry logic).
+## Changes
 
-The repo files are already correct (pre-Phase 1). I verified: no matches for `pipeline_run_id`, `multi-entity`, or `chunked classif` in the current `supabase/functions/` directory.
+### 1. `supabase/functions/_shared/logging.ts` — add `callAnthropicWithRetry`
 
-## Fix
+Add a new exported async function at the end of the file:
 
-Redeploy these four edge functions from the current repo state:
+```typescript
+export async function callAnthropicWithRetry(
+  url: string,
+  fetchOptions: RequestInit,
+  maxRetries = 3,
+  initialDelayMs = 2000,
+): Promise<Response> {
+  const RETRYABLE_STATUSES = new Set([429, 408, 529]);
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, fetchOptions);
+      if (response.ok || !RETRYABLE_STATUSES.has(response.status) || attempt === maxRetries) {
+        return response;
+      }
+      // Retryable status — log and retry
+      const delay = initialDelayMs * Math.pow(2, attempt);
+      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} failed with status ${response.status}. Retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    } catch (err) {
+      // Network error
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt === maxRetries) throw lastError;
+      const delay = initialDelayMs * Math.pow(2, attempt);
+      console.warn(`[Retry] Attempt ${attempt + 1}/${maxRetries} network error: ${lastError.message}. Retrying in ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+  throw lastError || new Error("Retry failed");
+}
+```
 
-1. **extract-plan-vision** — overwrites deployed version that has multi-entity prompt additions
-2. **extract-plan-items** — overwrites deployed version that has multi-entity prompt additions  
-3. **validate-hierarchy** — overwrites deployed version that has multi-entity prompt additions
-4. **process-plan** — overwrites deployed version that has chunked classification and pipeline_run_id
+### 2. `supabase/functions/audit-completeness/index.ts`
 
-No code changes needed — just a deploy of the existing repo files to sync the server with the rolled-back codebase.
+- Import `callAnthropicWithRetry` from `../_shared/logging.ts`
+- Replace the direct `fetch("https://api.anthropic.com/v1/messages", ...)` call (line 362) with `callAnthropicWithRetry("https://api.anthropic.com/v1/messages", { method, headers, body })`
+- No other changes — same `startTime`, `durationMs`, error handling, response parsing
 
-## Technical Detail
+### 3. `supabase/functions/validate-hierarchy/index.ts`
 
-Will call `supabase--deploy_edge_functions` with all four function names simultaneously, then verify via logs that the deployed versions are running correctly.
+- Import `callAnthropicWithRetry` from `../_shared/logging.ts`
+- Replace the direct `fetch(...)` call (line 265) with `callAnthropicWithRetry(...)` 
+- No other changes
+
+### 4. Deploy & verify
+
+Deploy all three: `_shared/logging.ts` is bundled automatically with each function, so deploy `audit-completeness` and `validate-hierarchy`. Verify via edge function logs.
+
+## Files
+
+| File | Change |
+|------|--------|
+| `supabase/functions/_shared/logging.ts` | Add `callAnthropicWithRetry` function |
+| `supabase/functions/audit-completeness/index.ts` | Import + use retry wrapper for Anthropic fetch |
+| `supabase/functions/validate-hierarchy/index.ts` | Import + use retry wrapper for Anthropic fetch |
 
