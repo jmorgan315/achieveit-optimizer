@@ -85,6 +85,40 @@ function countAllItems(items: unknown[]): number {
   return count;
 }
 
+// Split text into chunks at paragraph boundaries (~25K chars each)
+const TEXT_CHUNK_SIZE = 25000;
+function splitDocumentIntoChunks(text: string, maxChunkSize: number = TEXT_CHUNK_SIZE): string[] {
+  if (text.length <= maxChunkSize) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChunkSize) {
+      chunks.push(remaining);
+      break;
+    }
+
+    let splitAt = maxChunkSize;
+    const lastDoubleNewline = remaining.lastIndexOf('\n\n', maxChunkSize);
+    if (lastDoubleNewline > maxChunkSize * 0.5) {
+      splitAt = lastDoubleNewline + 2;
+    } else {
+      const lastNewline = remaining.lastIndexOf('\n', maxChunkSize);
+      if (lastNewline > maxChunkSize * 0.5) {
+        splitAt = lastNewline + 1;
+      }
+    }
+
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
+  }
+
+  return chunks;
+}
+
 // Collect all item names (lowercased) from nested tree into a Set
 function collectItemNameSet(items: unknown[]): Set<string> {
   const names = new Set<string>();
@@ -631,7 +665,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     } = body;
 
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
-    const useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
+    let useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
 
     // ==============================
     // AGENT 0: Document Classification
@@ -678,6 +712,22 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       } catch (err) {
         console.error("[process-plan] Step 0 exception (non-fatal):", err);
       }
+    }
+
+    // ==============================
+    // TEXT_HEAVY OVERRIDE: Use text extraction instead of vision
+    // ==============================
+    if (useVision && classification?.document_type === "text_heavy" && hasDocumentText) {
+      console.log("[process-plan] Document classified as text_heavy — using text extraction instead of vision");
+      useVision = false;
+      extractionMethod = "text";
+
+      await logApiCall({
+        session_id: sessionId,
+        edge_function: "process-plan",
+        step_label: "Text_heavy override: switching from vision to text extraction",
+        status: "success",
+      });
     }
 
     // ==============================
@@ -920,20 +970,96 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         }
       }
     } else {
-      const result = await callEdgeFunction("extract-plan-items", {
-        documentText,
-        organizationName,
-        industry,
-        documentHints,
-        planLevels,
-        pageRange,
-        sessionId,
-      });
-      if (result.ok && (result.data as { success: boolean }).success) {
-        const d = (result.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
-        agent1Data = { items: d.items || [], detectedLevels: d.detectedLevels || [] };
+      // ==============================
+      // BATCHED TEXT EXTRACTION (used for text_heavy override or no-vision documents)
+      // ==============================
+      const textToExtract = (documentText as string).trim();
+      const textChunks = splitDocumentIntoChunks(textToExtract);
+      const totalChunks = textChunks.length;
+      console.log(`[process-plan] Step 1 text: ${textToExtract.length} chars in ${totalChunks} chunk(s)`);
+
+      let allTextItems: unknown[] = [];
+      let textDetectedLevels: { depth: number; name: string }[] = [];
+
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        // Ownership check before each text extraction batch
+        if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
+        if (chunkIdx > 0) {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
+        const result = await callEdgeFunction("extract-plan-items", {
+          documentText: textChunks[chunkIdx],
+          organizationName,
+          industry,
+          documentHints,
+          planLevels,
+          pageRange,
+          sessionId,
+          batchLabel: `Step 1: Text Extraction (Chunk ${chunkIdx + 1} of ${totalChunks})`,
+        });
+
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const d = (result.data as { data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } }).data;
+          if (d.items?.length) {
+            allTextItems = [...allTextItems, ...d.items];
+          }
+          if (d.detectedLevels?.length && textDetectedLevels.length === 0) {
+            textDetectedLevels = d.detectedLevels;
+          }
+        } else {
+          console.warn(`[process-plan] Text chunk ${chunkIdx + 1} failed:`, (result.data as { error?: string }).error);
+        }
+
+        // Per-batch persistence for text extraction
+        const isLastChunk = chunkIdx === totalChunks - 1;
+        await updateSessionProgress(sessionId, {
+          current_step: "extracting",
+          step_results: {
+            extraction: {
+              items: allTextItems,
+              detectedLevels: textDetectedLevels.length > 0 ? textDetectedLevels : [
+                { depth: 1, name: "Strategic Priority" },
+                { depth: 2, name: "Objective" },
+                { depth: 3, name: "Goal" },
+                { depth: 4, name: "Strategy" },
+                { depth: 5, name: "KPI" },
+              ],
+              batches_completed: chunkIdx + 1,
+              batches_total: totalChunks,
+              completed_at: isLastChunk ? new Date().toISOString() : null,
+            },
+            classification: classification || null,
+            pipelineContext: {
+              organizationName,
+              industry,
+              planLevels,
+              documentText: textToExtract,
+              extractionMethod,
+              useVision: false,
+              extractionMode,
+              documentHints,
+              pageRange,
+            },
+          },
+        });
+        console.log(`[process-plan] Text chunk ${chunkIdx + 1}/${totalChunks} persisted (${allTextItems.length} cumulative items)`);
+      }
+
+      if (allTextItems.length > 0) {
+        agent1Data = {
+          items: allTextItems,
+          detectedLevels: textDetectedLevels.length > 0 ? textDetectedLevels : [
+            { depth: 1, name: "Strategic Priority" },
+            { depth: 2, name: "Objective" },
+            { depth: 3, name: "Goal" },
+            { depth: 4, name: "Strategy" },
+            { depth: 5, name: "KPI" },
+          ],
+        };
       } else {
-        agent1Error = (result.data as { error?: string }).error || "Text extraction failed";
+        agent1Error = "Text extraction produced no items";
       }
     }
 
@@ -1367,7 +1493,7 @@ async function runResume(sessionId: string): Promise<void> {
         return;
       }
 
-      // Some batches remain — download images from storage and continue extraction
+      // Some batches remain — resume extraction
       console.log(`[process-plan] Resume: ${batchesCompleted} of ${batchesTotal} batches done, resuming extraction`);
 
       await logApiCall({
@@ -1377,6 +1503,99 @@ async function runResume(sessionId: string): Promise<void> {
         status: "success",
       });
 
+      // ==============================
+      // TEXT EXTRACTION RESUME PATH
+      // ==============================
+      if (extractionMethod === "text" && documentText.length > 50) {
+        console.log(`[process-plan] Resume: using text extraction path`);
+        const textChunks = splitDocumentIntoChunks(documentText.trim());
+        let allItems = [...existingItems];
+
+        for (let chunkIdx = batchesCompleted; chunkIdx < textChunks.length; chunkIdx++) {
+          if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
+          if (chunkIdx > batchesCompleted) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+
+          const result = await callEdgeFunction("extract-plan-items", {
+            documentText: textChunks[chunkIdx],
+            organizationName,
+            industry,
+            documentHints,
+            planLevels,
+            pageRange,
+            sessionId,
+            batchLabel: `Step 1: Text Extraction (Chunk ${chunkIdx + 1} of ${textChunks.length}) [Resume]`,
+          });
+
+          if (result.ok && (result.data as { success: boolean }).success) {
+            const d = (result.data as { data: { items?: unknown[]; detectedLevels?: { depth: number; name: string }[] } }).data;
+            if (d.items?.length) {
+              allItems = [...allItems, ...d.items];
+            }
+            if (d.detectedLevels?.length && detectedLevels.length === 0) {
+              detectedLevels = d.detectedLevels;
+            }
+          } else {
+            console.warn(`[process-plan] Resume: Text chunk ${chunkIdx + 1} failed:`, (result.data as { error?: string }).error);
+          }
+
+          const isLastChunk = chunkIdx === textChunks.length - 1;
+          await updateSessionProgress(sessionId, {
+            current_step: "extracting",
+            step_results: {
+              extraction: {
+                items: allItems,
+                detectedLevels,
+                batches_completed: chunkIdx + 1,
+                batches_total: textChunks.length,
+                completed_at: isLastChunk ? new Date().toISOString() : null,
+              },
+              classification,
+              pipelineContext: { ...pipeCtx },
+            },
+          });
+          console.log(`[process-plan] Resume: Text chunk ${chunkIdx + 1}/${textChunks.length} persisted (${allItems.length} cumulative items)`);
+        }
+
+        // Run dedup
+        const dedupStart = Date.now();
+        const beforeDedupCount = countAllItems(allItems);
+        const dedupResult = deduplicateItems(allItems);
+        const dedupDuration = Date.now() - dedupStart;
+        const dedupedItems = dedupResult.items;
+        const dedupedItemCount = countAllItems(dedupedItems);
+
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "dedup-merge",
+          step_label: "Step 1.5: Dedup & Merge (Resume)",
+          status: "success",
+          input_tokens: 0,
+          output_tokens: 0,
+          duration_ms: dedupDuration,
+          request_payload: { input_count: beforeDedupCount, output_count: dedupedItemCount, duplicates_removed: dedupResult.removedDetails.length },
+          response_payload: { removed_items: dedupResult.removedDetails },
+        });
+
+        await updateSessionProgress(sessionId, {
+          current_step: "extraction_complete",
+          step_results: {
+            extraction: { items: dedupedItems, detectedLevels, completed_at: new Date().toISOString() },
+            classification,
+            pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
+          },
+        });
+
+        if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, pipelineRunId);
+        return;
+      }
+
+      // ==============================
+      // VISION EXTRACTION RESUME PATH (original)
+      // ==============================
       // Download images from storage
       const allImages = await loadPageImages(sessionId, totalFilteredImages);
       if (allImages.length === 0) {
