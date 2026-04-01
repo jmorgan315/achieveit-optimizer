@@ -71,6 +71,7 @@ export function FileUploadStep({
   const [visionError, setVisionError] = useState<string | null>(null);
   const [pasteMode, setPasteMode] = useState(false);
   const [pastedText, setPastedText] = useState('');
+  const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
