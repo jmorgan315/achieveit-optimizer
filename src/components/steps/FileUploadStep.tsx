@@ -808,6 +808,7 @@ export function FileUploadStep({
     setProcessingStatus('');
     setUseVisionAI(false);
     setVisionError(null);
+    setPageCountError(null);
     setPasteMode(false);
     setPastedText('');
     resetProgress();
