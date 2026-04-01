@@ -85,6 +85,40 @@ function countAllItems(items: unknown[]): number {
   return count;
 }
 
+// Split text into chunks at paragraph boundaries (~25K chars each)
+const TEXT_CHUNK_SIZE = 25000;
+function splitDocumentIntoChunks(text: string, maxChunkSize: number = TEXT_CHUNK_SIZE): string[] {
+  if (text.length <= maxChunkSize) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxChunkSize) {
+      chunks.push(remaining);
+      break;
+    }
+
+    let splitAt = maxChunkSize;
+    const lastDoubleNewline = remaining.lastIndexOf('\n\n', maxChunkSize);
+    if (lastDoubleNewline > maxChunkSize * 0.5) {
+      splitAt = lastDoubleNewline + 2;
+    } else {
+      const lastNewline = remaining.lastIndexOf('\n', maxChunkSize);
+      if (lastNewline > maxChunkSize * 0.5) {
+        splitAt = lastNewline + 1;
+      }
+    }
+
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
+  }
+
+  return chunks;
+}
+
 // Collect all item names (lowercased) from nested tree into a Set
 function collectItemNameSet(items: unknown[]): Set<string> {
   const names = new Set<string>();
