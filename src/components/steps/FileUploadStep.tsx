@@ -50,6 +50,7 @@ const INITIAL_PROGRESS: ProgressState = {
 };
 
 const CHARS_PER_PAGE_THRESHOLD = 200;
+const MAX_PDF_PAGES = 250;
 
 export function FileUploadStep({
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
