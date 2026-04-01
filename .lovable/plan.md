@@ -1,40 +1,25 @@
 
 
-# Fix: Re-advancing from Upload Plan step after Back navigation
+# Redeploy Edge Functions to Match Rolled-Back Repo
 
-## Root Cause
+## Situation
 
-Two separate issues depending on import path:
+The Lovable rollback restored the frontend code but edge functions deploy independently — the deployed versions on the server still have Phase 1 large-document changes (multi-entity prompts, chunked classification, pipeline_run_id, retry logic).
 
-**PDF path**: `extractedItems`, `fileContent`, and `detectedLevels` are all lifted state and persist across navigation. The Continue button (`disabled={(!fileContent.trim() && !extractedItems) || isLoading}`) should remain enabled. However, `handleContinue` calls `onAIExtraction` which re-opens the Level Verification modal — this works but is slightly redundant.
+The repo files are already correct (pre-Phase 1). I verified: no matches for `pipeline_run_id`, `multi-entity`, or `chunked classif` in the current `supabase/functions/` directory.
 
-**Spreadsheet path** (likely the actual bug): `spreadsheetFile` is **local state** (line 63), not lifted. When the user navigates away and back, it resets to `null`. The component then renders the main upload UI instead of `SpreadsheetImportStep`. The file status shows "Document processed" (because `uploadedFile` is lifted), but `extractedItems` is `null` and `fileContent` is empty (spreadsheet flow never sets these) → **Continue button is disabled**.
+## Fix
 
-## Fix — `src/components/steps/FileUploadStep.tsx`
+Redeploy these four edge functions from the current repo state:
 
-1. **Add an `alreadyProcessed` prop** (or similar boolean) passed from Index.tsx indicating that `state.items.length > 0` — meaning this step was already completed.
+1. **extract-plan-vision** — overwrites deployed version that has multi-entity prompt additions
+2. **extract-plan-items** — overwrites deployed version that has multi-entity prompt additions  
+3. **validate-hierarchy** — overwrites deployed version that has multi-entity prompt additions
+4. **process-plan** — overwrites deployed version that has chunked classification and pipeline_run_id
 
-2. **Alternative simpler approach**: Add a `onContinueWithExisting` callback prop. In `FileUploadStep`, if `uploadedFile` is set and `extractedItems` is null and the parent already has items, show a "Continue with existing data" button that skips re-processing.
+No code changes needed — just a deploy of the existing repo files to sync the server with the rolled-back codebase.
 
-**Simplest approach (preferred)**: Lift `spreadsheetFile` to Index.tsx like all other file state, so the spreadsheet UI re-renders correctly on Back navigation. But this still won't help since the spreadsheet `onComplete` flow skips `extractedItems` entirely.
+## Technical Detail
 
-**Actual simplest fix**: Change the Continue button logic to also accept a new prop `hasExistingItems: boolean`. When true and `uploadedFile` is set, the button is enabled and calls a simple advance callback instead of re-triggering extraction.
-
-## Changes
-
-### `src/components/steps/FileUploadStep.tsx`
-- Add prop `hasExistingItems?: boolean` and `onAdvanceExisting?: () => void`
-- Update button disabled logic: `disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading}`
-- In `handleContinue`, if `hasExistingItems` and no `extractedItems`, call `onAdvanceExisting()` to skip re-extraction and advance directly
-
-### `src/pages/Index.tsx`
-- Pass `hasExistingItems={state.items.length > 0}` to `FileUploadStep`
-- Pass `onAdvanceExisting` callback that advances to step 2 or 3 (depending on whether people mappings exist), skipping the level modal since levels are already confirmed
-
-## Files
-
-| File | Change |
-|------|--------|
-| `src/components/steps/FileUploadStep.tsx` | Add `hasExistingItems` prop, update disabled logic and handleContinue |
-| `src/pages/Index.tsx` | Pass `hasExistingItems` and `onAdvanceExisting` props |
+Will call `supabase--deploy_edge_functions` with all four function names simultaneously, then verify via logs that the deployed versions are running correctly.
 
