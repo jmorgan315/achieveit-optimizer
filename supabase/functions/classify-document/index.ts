@@ -10,6 +10,8 @@ const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const ANTHROPIC_MAX_RETRIES = 4;
 const ANTHROPIC_BASE_DELAY_MS = 3000;
 const RETRYABLE_ANTHROPIC_STATUSES = new Set([429, 500, 502, 503, 529]);
+const CLASSIFICATION_CHUNK_SIZE = 25;
+const CLASSIFICATION_CHUNK_THRESHOLD = 50;
 
 function createSafeError(status: number, publicMessage: string, internalDetails?: unknown): Response {
   if (internalDetails) {
@@ -188,6 +190,28 @@ function buildUserPrompt(
   return prompt;
 }
 
+function buildImageContent(pageImages: string[]): Array<Record<string, unknown>> {
+  const content: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < pageImages.length; i++) {
+    let base64Data = pageImages[i];
+    let mediaType = "image/png";
+    const match = base64Data.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    if (match) {
+      mediaType = match[1];
+      base64Data = match[2];
+    }
+    content.push({
+      type: "image",
+      source: {
+        type: "base64",
+        media_type: mediaType,
+        data: base64Data,
+      },
+    });
+  }
+  return content;
+}
+
 function buildFallbackClassification(pageCount: number): Record<string, unknown> {
   return {
     document_type: "text_heavy",
@@ -224,6 +248,205 @@ function buildFallbackClassification(pageCount: number): Record<string, unknown>
       metadata_columns: [],
     },
     _fallback: true,
+  };
+}
+
+function buildFallbackAnnotationsForPages(startPage: number, endPage: number): Array<Record<string, unknown>> {
+  const annotations: Array<Record<string, unknown>> = [];
+  for (let p = startPage; p <= endPage; p++) {
+    annotations.push({
+      page: p,
+      classification: "plan_content",
+      contains_plan_items: true,
+      notes: "Chunk classification failed — conservatively marked as plan content",
+    });
+  }
+  return annotations;
+}
+
+async function classifyChunk(
+  chunkImages: string[],
+  chunkIndex: number,
+  pageOffset: number,
+  totalPages: number,
+  apiKey: string,
+  baseUserPrompt: string,
+  sessionId: string,
+): Promise<{ classification: Record<string, unknown>; inputTokens: number; outputTokens: number } | null> {
+  const startPage = pageOffset + 1;
+  const endPage = pageOffset + chunkImages.length;
+
+  const chunkPrompt = `${baseUserPrompt}\n\nNote: These are pages ${startPage}-${endPage} of ${totalPages} total pages. Return page numbers using the original document numbering (starting from ${startPage}).`;
+
+  const userContent: Array<Record<string, unknown>> = [
+    { type: "text", text: chunkPrompt },
+    ...buildImageContent(chunkImages),
+  ];
+
+  const requestBody = {
+    model: "claude-opus-4-6",
+    max_tokens: 4096,
+    system: CLASSIFICATION_SYSTEM_PROMPT,
+    messages: [{ role: "user", content: userContent }],
+  };
+
+  const startTime = Date.now();
+  const response = await callAnthropicWithRetry(apiKey, requestBody);
+  const durationMs = Date.now() - startTime;
+  const logPayload = truncateImagePayload(requestBody as Record<string, unknown>);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[classify-document] Chunk ${chunkIndex} (pages ${startPage}-${endPage}) failed: ${response.status}`, errorText.slice(0, 500));
+    await logApiCall({
+      session_id: sessionId,
+      edge_function: "classify-document",
+      step_label: `Step 0: Classification chunk ${chunkIndex} (pages ${startPage}-${endPage})`,
+      model: "claude-opus-4-6",
+      request_payload: logPayload,
+      response_payload: { status: response.status, error: errorText.slice(0, 2000) },
+      duration_ms: durationMs,
+      status: "error",
+      error_message: `Claude API ${response.status}: ${errorText.slice(0, 500)}`,
+    });
+    return null;
+  }
+
+  const responseData = await response.json();
+  const tokenUsage = extractTokenUsage(responseData as Record<string, unknown>);
+
+  let responseText = "";
+  if (responseData.content && Array.isArray(responseData.content)) {
+    for (const block of responseData.content) {
+      if (block.type === "text") responseText += block.text;
+    }
+  }
+
+  let classification: Record<string, unknown>;
+  try {
+    let jsonStr = responseText.trim();
+    if (jsonStr.startsWith("```")) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+    }
+    classification = JSON.parse(jsonStr);
+  } catch (parseError) {
+    console.error(`[classify-document] Chunk ${chunkIndex} JSON parse failed:`, parseError);
+    await logApiCall({
+      session_id: sessionId,
+      edge_function: "classify-document",
+      step_label: `Step 0: Classification chunk ${chunkIndex} (pages ${startPage}-${endPage})`,
+      model: "claude-opus-4-6",
+      request_payload: logPayload,
+      response_payload: { raw_response: responseText.slice(0, 5000), parse_error: String(parseError) },
+      input_tokens: tokenUsage.input_tokens,
+      output_tokens: tokenUsage.output_tokens,
+      duration_ms: durationMs,
+      status: "error",
+      error_message: `JSON parse failed: ${String(parseError).slice(0, 200)}`,
+    });
+    return null;
+  }
+
+  await logApiCall({
+    session_id: sessionId,
+    edge_function: "classify-document",
+    step_label: `Step 0: Classification chunk ${chunkIndex} (pages ${startPage}-${endPage})`,
+    model: "claude-opus-4-6",
+    request_payload: logPayload,
+    response_payload: classification,
+    input_tokens: tokenUsage.input_tokens,
+    output_tokens: tokenUsage.output_tokens,
+    duration_ms: durationMs,
+    status: "success",
+  });
+
+  console.log(`[classify-document] Chunk ${chunkIndex} (pages ${startPage}-${endPage}) classified: type=${classification.document_type}, confidence=${classification.confidence}`);
+  return { classification, inputTokens: tokenUsage.input_tokens ?? 0, outputTokens: tokenUsage.output_tokens ?? 0 };
+}
+
+function mergeClassifications(results: Array<Record<string, unknown>>): Record<string, unknown> {
+  if (results.length === 1) return results[0];
+
+  // page_annotations: concatenate
+  const allAnnotations: unknown[] = [];
+  const allPlanPages: number[] = [];
+  const allSkipPages: number[] = [];
+
+  // document_type majority vote
+  const typeCounts: Record<string, number> = {};
+  let totalConfidence = 0;
+  let highestConfidenceIdx = 0;
+  let highestConfidence = -1;
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    const annotations = (r.page_annotations as unknown[]) || [];
+    allAnnotations.push(...annotations);
+    const planPages = (r.plan_content_pages as number[]) || [];
+    allPlanPages.push(...planPages);
+    const skipPages = (r.skip_pages as number[]) || [];
+    allSkipPages.push(...skipPages);
+
+    const dt = (r.document_type as string) || "text_heavy";
+    typeCounts[dt] = (typeCounts[dt] || 0) + 1;
+
+    const conf = (r.confidence as number) || 0;
+    totalConfidence += conf;
+    if (conf > highestConfidence) {
+      highestConfidence = conf;
+      highestConfidenceIdx = i;
+    }
+  }
+
+  // Majority vote for document_type
+  let majorityType = "text_heavy";
+  let maxCount = 0;
+  for (const [type, count] of Object.entries(typeCounts)) {
+    if (count > maxCount) { maxCount = count; majorityType = type; }
+  }
+
+  // table_structure: first non-null
+  let tableStructure = null;
+  for (const r of results) {
+    if (r.table_structure) { tableStructure = r.table_structure; break; }
+  }
+
+  // non_plan_content: OR-merge booleans, concat metadata_columns
+  const nonPlan: Record<string, unknown> = {
+    has_vision_mission: false,
+    has_values_principles: false,
+    has_swot: false,
+    has_kpis_metrics: false,
+    has_gap_analysis: false,
+    has_action_items_with_metadata: false,
+    metadata_columns: [] as string[],
+  };
+  for (const r of results) {
+    const np = r.non_plan_content as Record<string, unknown> | undefined;
+    if (!np) continue;
+    for (const key of ["has_vision_mission", "has_values_principles", "has_swot", "has_kpis_metrics", "has_gap_analysis", "has_action_items_with_metadata"]) {
+      if (np[key]) nonPlan[key] = true;
+    }
+    const cols = (np.metadata_columns as string[]) || [];
+    (nonPlan.metadata_columns as string[]).push(...cols);
+  }
+  // dedupe metadata_columns
+  nonPlan.metadata_columns = [...new Set(nonPlan.metadata_columns as string[])];
+
+  const best = results[highestConfidenceIdx];
+
+  return {
+    document_type: majorityType,
+    confidence: results.length > 0 ? totalConfidence / results.length : 0,
+    plan_content_pages: [...new Set(allPlanPages)].sort((a, b) => a - b),
+    skip_pages: [...new Set(allSkipPages)].sort((a, b) => a - b),
+    page_annotations: allAnnotations,
+    hierarchy_pattern: best.hierarchy_pattern || results[0].hierarchy_pattern,
+    table_structure: tableStructure,
+    extraction_recommendations: best.extraction_recommendations || results[0].extraction_recommendations,
+    non_plan_content: nonPlan,
+    _chunked: true,
+    _chunk_count: results.length,
   };
 }
 
@@ -266,52 +489,82 @@ serve(async (req) => {
 
     const sessionId = await ensureSession(incomingSessionId);
     const pageCount = pageImages.length;
-
-    // Build user prompt
     const userPrompt = buildUserPrompt(orgName, industry, userPlanLevels, pageRange, additionalNotes);
 
-    // Build multipart content: text prompt + all page images
-    const userContent: Array<Record<string, unknown>> = [
-      { type: "text", text: userPrompt },
-    ];
-    for (let i = 0; i < pageImages.length; i++) {
-      let base64Data = pageImages[i];
-      let mediaType = "image/png";
+    // ── Single-request path (≤ threshold) ──
+    if (pageCount <= CLASSIFICATION_CHUNK_THRESHOLD) {
+      const userContent: Array<Record<string, unknown>> = [
+        { type: "text", text: userPrompt },
+        ...buildImageContent(pageImages),
+      ];
 
-      // Strip data URL prefix if present (e.g., "data:image/jpeg;base64,...")
-      const match = base64Data.match(/^data:(image\/[^;]+);base64,(.+)$/);
-      if (match) {
-        mediaType = match[1];
-        base64Data = match[2];
+      const requestBody = {
+        model: "claude-opus-4-6",
+        max_tokens: 4096,
+        system: CLASSIFICATION_SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userContent }],
+      };
+
+      const startTime = Date.now();
+      const response = await callAnthropicWithRetry(ANTHROPIC_API_KEY, requestBody);
+      const durationMs = Date.now() - startTime;
+      const logPayload = truncateImagePayload(requestBody as Record<string, unknown>);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("[classify-document] Claude API error:", response.status, errorText);
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "classify-document",
+          step_label: "Step 0: Document Classification",
+          model: "claude-opus-4-6",
+          request_payload: logPayload,
+          response_payload: { status: response.status, error: errorText.slice(0, 2000) },
+          duration_ms: durationMs,
+          status: "error",
+          error_message: `Claude API ${response.status}: ${errorText.slice(0, 500)}`,
+        });
+        const fallback = buildFallbackClassification(pageCount);
+        return new Response(
+          JSON.stringify({ success: true, classification: fallback }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
-      userContent.push({
-        type: "image",
-        source: {
-          type: "base64",
-          media_type: mediaType,
-          data: base64Data,
-        },
-      });
-    }
+      const responseData = await response.json();
+      const tokenUsage = extractTokenUsage(responseData as Record<string, unknown>);
 
-    const requestBody = {
-      model: "claude-opus-4-6",
-      max_tokens: 4096,
-      system: CLASSIFICATION_SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userContent }],
-    };
+      let responseText = "";
+      if (responseData.content && Array.isArray(responseData.content)) {
+        for (const block of responseData.content) {
+          if (block.type === "text") responseText += block.text;
+        }
+      }
 
-    const startTime = Date.now();
-    const response = await callAnthropicWithRetry(ANTHROPIC_API_KEY, requestBody);
-    const durationMs = Date.now() - startTime;
-
-    // Build log-safe payload (truncate images)
-    const logPayload = truncateImagePayload(requestBody as Record<string, unknown>);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[classify-document] Claude API error:", response.status, errorText);
+      let classification: Record<string, unknown>;
+      try {
+        let jsonStr = responseText.trim();
+        if (jsonStr.startsWith("```")) {
+          jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+        }
+        classification = JSON.parse(jsonStr);
+      } catch (parseError) {
+        console.error("[classify-document] JSON parse failed:", parseError, "Raw response:", responseText.slice(0, 1000));
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "classify-document",
+          step_label: "Step 0: Document Classification",
+          model: "claude-opus-4-6",
+          request_payload: logPayload,
+          response_payload: { raw_response: responseText.slice(0, 5000), parse_error: String(parseError) },
+          input_tokens: tokenUsage.input_tokens,
+          output_tokens: tokenUsage.output_tokens,
+          duration_ms: durationMs,
+          status: "error",
+          error_message: `JSON parse failed: ${String(parseError).slice(0, 200)}`,
+        });
+        classification = buildFallbackClassification(pageCount);
+      }
 
       await logApiCall({
         session_id: sessionId,
@@ -319,79 +572,94 @@ serve(async (req) => {
         step_label: "Step 0: Document Classification",
         model: "claude-opus-4-6",
         request_payload: logPayload,
-        response_payload: { status: response.status, error: errorText.slice(0, 2000) },
+        response_payload: classification,
+        input_tokens: tokenUsage.input_tokens,
+        output_tokens: tokenUsage.output_tokens,
         duration_ms: durationMs,
-        status: "error",
-        error_message: `Claude API ${response.status}: ${errorText.slice(0, 500)}`,
+        status: "success",
       });
 
-      // Return fallback classification instead of error
-      const fallback = buildFallbackClassification(pageCount);
+      console.log("[classify-document] Classification complete:", classification.document_type, "confidence:", classification.confidence);
+
       return new Response(
-        JSON.stringify({ success: true, classification: fallback }),
+        JSON.stringify({ success: true, classification }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const responseData = await response.json();
-    const tokenUsage = extractTokenUsage(responseData as Record<string, unknown>);
+    // ── Chunked path (> threshold) ──
+    const chunks: string[][] = [];
+    for (let i = 0; i < pageCount; i += CLASSIFICATION_CHUNK_SIZE) {
+      chunks.push(pageImages.slice(i, i + CLASSIFICATION_CHUNK_SIZE));
+    }
 
-    // Extract text content from Claude response
-    let responseText = "";
-    if (responseData.content && Array.isArray(responseData.content)) {
-      for (const block of responseData.content) {
-        if (block.type === "text") {
-          responseText += block.text;
-        }
+    console.log(`[classify-document] Chunked classification: ${chunks.length} chunks of ${CLASSIFICATION_CHUNK_SIZE} for ${pageCount} pages`);
+
+    const chunkResults: Array<Record<string, unknown>> = [];
+    let succeededChunks = 0;
+    let failedChunks = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    const chunkedStartTime = Date.now();
+
+    for (let ci = 0; ci < chunks.length; ci++) {
+      const chunkImages = chunks[ci];
+      const pageOffset = ci * CLASSIFICATION_CHUNK_SIZE;
+      const startPage = pageOffset + 1;
+      const endPage = pageOffset + chunkImages.length;
+
+      const result = await classifyChunk(
+        chunkImages, ci, pageOffset, pageCount,
+        ANTHROPIC_API_KEY, userPrompt, sessionId,
+      );
+
+      if (result) {
+        chunkResults.push(result.classification);
+        totalInputTokens += result.inputTokens;
+        totalOutputTokens += result.outputTokens;
+        succeededChunks++;
+      } else {
+        console.warn(`[classify-document] Chunk ${ci} (pages ${startPage}-${endPage}) failed — using conservative fallback for those pages`);
+        failedChunks++;
+        // Build a minimal classification with fallback annotations for this chunk's pages
+        chunkResults.push({
+          document_type: "text_heavy",
+          confidence: 0.0,
+          plan_content_pages: Array.from({ length: chunkImages.length }, (_, j) => startPage + j),
+          skip_pages: [],
+          page_annotations: buildFallbackAnnotationsForPages(startPage, endPage),
+          hierarchy_pattern: null,
+          table_structure: null,
+          extraction_recommendations: null,
+          non_plan_content: null,
+        });
       }
     }
 
-    // Parse JSON response — strip markdown fencing if present
-    let classification: Record<string, unknown>;
-    try {
-      let jsonStr = responseText.trim();
-      if (jsonStr.startsWith("```")) {
-        jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
-      }
-      classification = JSON.parse(jsonStr);
-    } catch (parseError) {
-      console.error("[classify-document] JSON parse failed:", parseError, "Raw response:", responseText.slice(0, 1000));
+    const totalDurationMs = Date.now() - chunkedStartTime;
+    console.log(`[classify-document] Chunked classification complete: ${succeededChunks}/${chunks.length} chunks succeeded, ${failedChunks} failed, in ${totalDurationMs}ms`);
 
-      await logApiCall({
-        session_id: sessionId,
-        edge_function: "classify-document",
-        step_label: "Step 0: Document Classification",
-        model: "claude-opus-4-6",
-        request_payload: logPayload,
-        response_payload: { raw_response: responseText.slice(0, 5000), parse_error: String(parseError) },
-        input_tokens: tokenUsage.input_tokens,
-        output_tokens: tokenUsage.output_tokens,
-        duration_ms: durationMs,
-        status: "error",
-        error_message: `JSON parse failed: ${String(parseError).slice(0, 200)}`,
-      });
+    const mergedClassification = mergeClassifications(chunkResults);
 
-      classification = buildFallbackClassification(pageCount);
-    }
-
-    // Log success
+    // Log the merged result
     await logApiCall({
       session_id: sessionId,
       edge_function: "classify-document",
-      step_label: "Step 0: Document Classification",
+      step_label: "Step 0: Document Classification (merged)",
       model: "claude-opus-4-6",
-      request_payload: logPayload,
-      response_payload: classification,
-      input_tokens: tokenUsage.input_tokens,
-      output_tokens: tokenUsage.output_tokens,
-      duration_ms: durationMs,
-      status: "success",
+      request_payload: { chunked: true, chunk_count: chunks.length, page_count: pageCount, succeeded: succeededChunks, failed: failedChunks },
+      response_payload: mergedClassification,
+      input_tokens: totalInputTokens,
+      output_tokens: totalOutputTokens,
+      duration_ms: totalDurationMs,
+      status: failedChunks === chunks.length ? "error" : "success",
+      error_message: failedChunks > 0 ? `${failedChunks}/${chunks.length} chunks failed` : undefined,
     });
 
-    console.log("[classify-document] Classification complete:", classification.document_type, "confidence:", classification.confidence);
+    console.log("[classify-document] Merged classification:", mergedClassification.document_type, "confidence:", mergedClassification.confidence);
 
     return new Response(
-      JSON.stringify({ success: true, classification }),
+      JSON.stringify({ success: true, classification: mergedClassification }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
