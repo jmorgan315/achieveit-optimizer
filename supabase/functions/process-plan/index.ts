@@ -777,6 +777,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       }
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        // Ownership check before each extraction batch
+        if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
         const batch = batches[batchIdx];
 
         if (batchIdx > 0) {
