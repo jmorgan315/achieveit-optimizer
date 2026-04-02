@@ -519,7 +519,7 @@ export function UploadIdentifyStep({
                 <p className="text-sm text-muted-foreground">This usually takes 10-30 seconds</p>
               </div>
               <div className="space-y-3">
-                {(['lookup', 'parse', 'classify'] as ScanOp[]).map((op) => {
+                {(['lookup', 'classify'] as ScanOp[]).map((op) => {
                   const status = scanStatuses[op];
                   if (status === 'skipped') return null;
                   return (
