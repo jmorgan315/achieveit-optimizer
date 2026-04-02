@@ -1104,7 +1104,7 @@ export function FileUploadStep({
 
           <Button
             onClick={handleContinue}
-            disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems) || isLoading || !!pageCountError}
+            disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems && !uploadedFile) || isLoading || !!pageCountError}
             className="w-full h-12 text-base font-medium"
           >
             {isLoading ? (
