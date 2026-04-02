@@ -68,9 +68,19 @@ export function UploadIdentifyStep({
   });
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const safeSet = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T | ((prev: T) => T)) => {
+    if (mountedRef.current) setter(value as any);
+  };
 
   const updateStatus = useCallback((op: ScanOp, status: ScanStatus) => {
-    setScanStatuses(prev => ({ ...prev, [op]: status }));
+    safeSet(setScanStatuses, (prev: Record<ScanOp, ScanStatus>) => ({ ...prev, [op]: status }));
   }, []);
 
   const isPdf = (file: File) => file.name.toLowerCase().endsWith('.pdf');
