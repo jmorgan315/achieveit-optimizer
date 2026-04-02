@@ -239,7 +239,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
 
     const requestBody = {
       model: "claude-sonnet-4-20250514",
-      max_tokens: 16384,
+      max_tokens: 32768,
       system: VALIDATION_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
       tools: [{
