@@ -662,6 +662,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       pageImages,
       planLevels,
       pageRange,
+      classificationResult: preClassification,
     } = body;
 
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
@@ -673,7 +674,25 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     let classification: Record<string, unknown> | null = null;
     let extractionMode: "standard" | "table" | "presentation" = "standard";
 
-    if (useVision) {
+    if (preClassification && typeof preClassification === "object") {
+      // Use classification from quick scan — skip Agent 0
+      classification = preClassification as Record<string, unknown>;
+      console.log("[process-plan] Using pre-computed classification, skipping Agent 0. document_type:", classification.document_type);
+
+      const docType = classification.document_type as string;
+      const tableStructure = classification.table_structure;
+      if (docType === "tabular" && tableStructure) {
+        extractionMode = "table";
+      } else if (docType === "presentation" || docType === "mixed") {
+        extractionMode = "presentation";
+      }
+      console.log("[process-plan] Extraction mode:", extractionMode);
+
+      await updateSessionProgress(sessionId, {
+        document_type: classification.document_type || null,
+        classification_result: classification,
+      });
+    } else if (useVision) {
       console.log("[process-plan] Starting Step 0 (document classification)");
       await updateSessionProgress(sessionId, { current_step: "classifying" });
 
@@ -701,7 +720,6 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
           }
           console.log("[process-plan] Extraction mode:", extractionMode);
 
-          // Save classification to session
           await updateSessionProgress(sessionId, {
             document_type: classification?.document_type || null,
             classification_result: classification,

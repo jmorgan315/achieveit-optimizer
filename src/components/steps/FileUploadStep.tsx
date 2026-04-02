@@ -474,6 +474,7 @@ export function FileUploadStep({
           documentHints: orgProfile?.documentHints,
           planLevels: orgProfile?.planLevels,
           pageRange: orgProfile?.pageRange,
+          classificationResult,
           sessionId,
         }),
       });
