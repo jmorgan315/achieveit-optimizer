@@ -148,7 +148,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
+    const { extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels, globalContext } = body;
 
     if (!extractedItems) {
       return new Response(JSON.stringify({ success: false, error: "extractedItems required" }), {
@@ -231,7 +231,9 @@ CRITICAL: Never create levels beyond what the user defined. If the user said ${p
     }
 
 
-    const userMessage = `${contextPrefix}=== EXTRACTED ITEMS ===
+    const globalContextBlock = globalContext ? `=== DOCUMENT CONTEXT ===\n${globalContext}\n\n` : "";
+
+    const userMessage = `${globalContextBlock}${contextPrefix}=== EXTRACTED ITEMS ===
 
 ${itemListing}
 ${auditSection}${levelsSection}${levelEnforcementSection}
