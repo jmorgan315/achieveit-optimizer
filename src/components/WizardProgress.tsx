@@ -16,50 +16,51 @@ interface WizardProgressProps {
 
 export function WizardProgress({ steps, currentStep, completedStep = -1, onStepClick }: WizardProgressProps) {
   return (
-    <div className="w-full py-6">
-      <div className="flex items-center justify-between max-w-3xl mx-auto">
+    <div className="w-full py-2">
+      <div className="flex items-center justify-between max-w-3xl mx-auto relative">
+        {/* Background track */}
+        <div className="absolute top-3 left-0 right-0 h-1 bg-muted rounded-full" />
+        {/* Completed track */}
+        {completedStep >= 0 && (
+          <div
+            className="absolute top-3 left-0 h-1 bg-primary rounded-full transition-all duration-300"
+            style={{ width: `${(completedStep / (steps.length - 1)) * 100}%` }}
+          />
+        )}
+
         {steps.map((step, index) => {
           const isComplete = index <= completedStep;
           const isCurrent = index === currentStep;
           const isClickable = isComplete && !isCurrent && onStepClick;
 
           return (
-            <div key={step.id} className="flex items-center">
-              <div className="flex flex-col items-center">
-                <div
-                  className={cn(
-                    'h-10 w-10 rounded-full flex items-center justify-center font-semibold text-sm transition-colors',
-                    isComplete && !isCurrent
-                      ? 'bg-primary text-primary-foreground'
-                      : isCurrent
-                      ? 'bg-primary text-primary-foreground ring-4 ring-primary/20'
-                      : 'bg-muted text-muted-foreground',
-                    isClickable && 'cursor-pointer hover:ring-4 hover:ring-primary/20'
-                  )}
-                  onClick={() => isClickable && onStepClick?.(index)}
-                >
-                  {isComplete && !isCurrent ? <Check className="h-5 w-5" /> : index + 1}
-                </div>
-                <div className="mt-2 text-center">
-                  <p
-                    className={cn(
-                      'text-sm font-medium',
-                      isCurrent ? 'text-foreground' : isComplete ? 'text-foreground' : 'text-muted-foreground'
-                    )}
-                  >
-                    {step.title}
-                  </p>
-                </div>
+            <div
+              key={step.id}
+              className="flex flex-col items-center relative z-10"
+              style={{ flex: index === 0 || index === steps.length - 1 ? '0 0 auto' : '1 1 0' }}
+            >
+              <div
+                className={cn(
+                  'h-6 w-6 rounded-full flex items-center justify-center text-xs font-semibold transition-colors',
+                  isComplete && !isCurrent
+                    ? 'bg-primary text-primary-foreground'
+                    : isCurrent
+                    ? 'bg-primary text-primary-foreground ring-2 ring-primary/30 ring-offset-1 ring-offset-background'
+                    : 'bg-muted text-muted-foreground border border-border',
+                  isClickable && 'cursor-pointer hover:ring-2 hover:ring-primary/30'
+                )}
+                onClick={() => isClickable && onStepClick?.(index)}
+              >
+                {isComplete && !isCurrent ? <Check className="h-3 w-3" /> : index + 1}
               </div>
-
-              {index < steps.length - 1 && (
-                <div
-                  className={cn(
-                    'h-0.5 w-16 md:w-24 mx-2',
-                    index <= completedStep ? 'bg-primary' : 'bg-muted'
-                  )}
-                />
-              )}
+              <p
+                className={cn(
+                  'text-xs mt-1 whitespace-nowrap',
+                  isCurrent ? 'font-medium text-foreground' : isComplete ? 'text-foreground' : 'text-muted-foreground'
+                )}
+              >
+                {step.title}
+              </p>
             </div>
           );
         })}

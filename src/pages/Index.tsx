@@ -29,7 +29,7 @@ import {
 
 const WIZARD_STEPS = [
   { id: 'upload-identify', title: 'Upload & Identify' },
-  { id: 'configure', title: 'Configure' },
+  { id: 'configure', title: 'Review & Configure' },
   { id: 'process', title: 'Process' },
   { id: 'people', title: 'Map People' },
   { id: 'review', title: 'Review & Export' },
