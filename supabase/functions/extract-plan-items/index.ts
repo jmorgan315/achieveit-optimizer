@@ -472,7 +472,7 @@ Document section:\n\n${chunkText}`;
     logApiCall({
       session_id: sessionId,
       edge_function: "extract-plan-items",
-      step_label: `Chunk ${chunkIndex + 1}/${totalChunks} Extraction`,
+      step_label: batchLabel ? `${batchLabel}` : `Chunk ${chunkIndex + 1}/${totalChunks} Extraction`,
       model: "claude-opus-4-6",
       request_payload: requestBody as unknown as Record<string, unknown>,
       response_payload: aiResponse as Record<string, unknown>,
@@ -569,7 +569,7 @@ Look carefully at every bullet point, numbered item, and sub-item. If any are no
     logApiCall({
       session_id: sessionId,
       edge_function: "extract-plan-items",
-      step_label: `Chunk ${chunkIndex + 1}/${totalChunks} Verification`,
+      step_label: batchLabel ? `${batchLabel} (Verification)` : `Chunk ${chunkIndex + 1}/${totalChunks} Verification`,
       model: "claude-opus-4-6",
       request_payload: requestBody as unknown as Record<string, unknown>,
       response_payload: aiResponse as Record<string, unknown>,
@@ -639,7 +639,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { documentText, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId } = body;
+    const { documentText, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId, batchLabel } = body;
 
     console.log('[extract-plan-items] Received sessionId:', incomingSessionId);
 
