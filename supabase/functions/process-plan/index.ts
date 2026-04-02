@@ -1378,8 +1378,8 @@ async function runResume(sessionId: string): Promise<void> {
           },
         });
 
-        // Now run Agents 2+3 via the existing post-extraction resume path
-        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, pipelineRunId);
+        // Agent 2 will be picked up by next resume cycle (stall detector fires in ~20s)
+        console.log("[process-plan] Resume: extraction complete, returning for Agent 2 in next cycle");
         return;
       }
 
