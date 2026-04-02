@@ -901,6 +901,7 @@ export function FileUploadStep({
   };
 
   const isLoading = isProcessing || isExtracting;
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // Spreadsheet import path — render SpreadsheetImportStep instead of main UI
   if (spreadsheetFile && sessionId && onSpreadsheetComplete) {
@@ -914,8 +915,6 @@ export function FileUploadStep({
       </div>
     );
   }
-
-  const [previewOpen, setPreviewOpen] = useState(false);
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-4">
