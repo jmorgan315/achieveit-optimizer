@@ -246,8 +246,13 @@ export function UploadIdentifyStep({
         updateStatus('lookup', 'done');
       })(),
 
-      // Op 2: Parse PDF for text
+      // Op 2: Parse PDF for text (skip for large files — edge function has 10MB limit)
       (async () => {
+        if (uploadedFile.size > MAX_TEXT_EXTRACTION_SIZE) {
+          console.log(`[QuickScan] Skipping parse-pdf: file ${(uploadedFile.size / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_EXTRACTION_SIZE / 1024 / 1024}MB limit`);
+          updateStatus('parse', 'skipped');
+          return;
+        }
         updateStatus('parse', 'running');
         const formData = new FormData();
         formData.append('file', uploadedFile);
