@@ -1730,6 +1730,28 @@ async function runAgent2Only(
   });
 }
 
+/** Group top-level items into batches of ~BATCH_THRESHOLD total items */
+function groupIntoBatches(topLevelItems: unknown[], threshold: number): unknown[][] {
+  const batches: unknown[][] = [];
+  let currentBatch: unknown[] = [];
+  let currentCount = 0;
+
+  for (const item of topLevelItems) {
+    const subtreeSize = countAllItems([item]);
+    if (currentBatch.length > 0 && currentCount + subtreeSize > threshold) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentCount = 0;
+    }
+    currentBatch.push(item);
+    currentCount += subtreeSize;
+  }
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+  return batches;
+}
+
 /** Run Agent 3 (validate-hierarchy) only, then merge/confidence/complete */
 async function runAgent3Only(
   sessionId: string,
@@ -1741,15 +1763,20 @@ async function runAgent3Only(
   planLevels: unknown[] | undefined,
   extractionMethod: string,
   auditFindings: AuditFindings | null,
-  pipelineRunId: string
+  pipelineRunId: string,
+  existingStepResults?: Record<string, unknown>
 ): Promise<void> {
   const agent1NameSet = collectItemNameSet(agent1Items);
-  console.log(`[process-plan] Running Agent 3 only (${countAllItems(agent1Items)} items)`);
+  const totalItems = countAllItems(agent1Items);
+  const BATCH_THRESHOLD = 75;
+  const shouldBatch = totalItems > BATCH_THRESHOLD;
+
+  console.log(`[process-plan] Running Agent 3 only (${totalItems} items, batch=${shouldBatch})`);
 
   await logApiCall({
     session_id: sessionId,
     edge_function: "process-plan",
-    step_label: "Starting Agent 3 (validate-hierarchy)",
+    step_label: `Starting Agent 3 (validate-hierarchy)${shouldBatch ? ` — batched, ${totalItems} items` : ''}`,
     status: "success",
   });
 
@@ -1758,27 +1785,143 @@ async function runAgent3Only(
   await updateSessionProgress(sessionId, { current_step: "validating" });
 
   let validationResult: ValidationResult | null = null;
-  try {
-    const result = await callEdgeFunction("validate-hierarchy", {
-      extractedItems: agent1Items,
-      auditFindings: auditFindings || null,
-      detectedLevels: agent1DetectedLevels,
-      sessionId,
-      organizationName,
-      industry,
-      planLevels,
-    });
-    if (result.ok && (result.data as { success: boolean }).success) {
-      validationResult = (result.data as { data: ValidationResult }).data;
-      console.log("[process-plan] Agent 3 complete:", validationResult?.corrections?.length || 0, "corrections");
-    } else {
-      console.warn("[process-plan] Agent 3 failed (non-fatal):", JSON.stringify(result.data));
+
+  if (!shouldBatch) {
+    // === Single-call path (≤75 items) — unchanged ===
+    try {
+      const result = await callEdgeFunction("validate-hierarchy", {
+        extractedItems: agent1Items,
+        auditFindings: auditFindings || null,
+        detectedLevels: agent1DetectedLevels,
+        sessionId,
+        organizationName,
+        industry,
+        planLevels,
+      });
+      if (result.ok && (result.data as { success: boolean }).success) {
+        validationResult = (result.data as { data: ValidationResult }).data;
+        console.log("[process-plan] Agent 3 complete:", validationResult?.corrections?.length || 0, "corrections");
+      } else {
+        console.warn("[process-plan] Agent 3 failed (non-fatal):", JSON.stringify(result.data));
+      }
+    } catch (err) {
+      console.error("[process-plan] Agent 3 exception:", err);
     }
-  } catch (err) {
-    console.error("[process-plan] Agent 3 exception:", err);
+  } else {
+    // === Batched path (>75 items) ===
+    const batches = groupIntoBatches(agent1Items, BATCH_THRESHOLD);
+    console.log(`[process-plan] Agent 3 batching: ${batches.length} batches from ${totalItems} items`);
+
+    // Build global context for cross-batch consistency
+    const globalContext = `This document contains ${agent1Items.length} top-level items (${totalItems} total including children). Full list of top-level items and their types:\n${(agent1Items as { levelType?: string; name?: string }[]).map(item => `- (${item.levelType || '?'}) ${item.name || '(unnamed)'}`).join('\n')}\n\nYou are validating a subset of these. Use consistent level type assignments across all items.`;
+
+    // Read already-completed batches from step_results for resume support
+    const stepResults = existingStepResults || {};
+    const completedBatches: Record<string, { correctedItems: unknown[]; corrections: unknown[] }> = 
+      (stepResults.validationBatches || {}) as Record<string, { correctedItems: unknown[]; corrections: unknown[] }>;
+
+    for (let i = 0; i < batches.length; i++) {
+      // Skip already-completed batches (resume support)
+      if (completedBatches[String(i)]) {
+        console.log(`[process-plan] Agent 3 batch ${i + 1}/${batches.length} already complete, skipping`);
+        continue;
+      }
+
+      if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
+      const batchItems = batches[i];
+      const batchItemCount = countAllItems(batchItems);
+      console.log(`[process-plan] Agent 3 batch ${i + 1}/${batches.length}: ${batchItemCount} items`);
+
+      await logApiCall({
+        session_id: sessionId,
+        edge_function: "process-plan",
+        step_label: `Starting Agent 3 batch ${i + 1} of ${batches.length} (${batchItemCount} items)`,
+        status: "success",
+      });
+
+      try {
+        const result = await callEdgeFunction("validate-hierarchy", {
+          extractedItems: batchItems,
+          auditFindings: auditFindings || null,
+          detectedLevels: agent1DetectedLevels,
+          sessionId,
+          organizationName,
+          industry,
+          planLevels,
+          globalContext,
+        });
+
+        if (result.ok && (result.data as { success: boolean }).success) {
+          const batchResult = (result.data as { data: { correctedItems: unknown[]; corrections: unknown[] } }).data;
+          completedBatches[String(i)] = batchResult;
+          console.log(`[process-plan] Agent 3 batch ${i + 1} complete: ${batchResult.correctedItems?.length || 0} items, ${batchResult.corrections?.length || 0} corrections`);
+
+          // Persist batch result immediately for resume support
+          // Re-read current step_results to avoid overwriting other fields
+          const client = getServiceClient();
+          const { data: currentSession } = await client.from("processing_sessions")
+            .select("step_results").eq("id", sessionId).single();
+          const currentStepResults = ((currentSession as Record<string, unknown>)?.step_results || {}) as Record<string, unknown>;
+          
+          await updateSessionProgress(sessionId, {
+            step_results: {
+              ...currentStepResults,
+              validationBatches: completedBatches,
+            },
+          });
+
+          await logApiCall({
+            session_id: sessionId,
+            edge_function: "process-plan",
+            step_label: `Agent 3 batch ${i + 1} of ${batches.length} complete, persisted`,
+            status: "success",
+          });
+        } else {
+          console.warn(`[process-plan] Agent 3 batch ${i + 1} failed (non-fatal):`, JSON.stringify(result.data));
+        }
+      } catch (err) {
+        console.error(`[process-plan] Agent 3 batch ${i + 1} exception:`, err);
+      }
+    }
+
+    // Merge all batch results
+    const allCorrectedItems: unknown[] = [];
+    const allCorrections: unknown[] = [];
+    let allDetectedLevels: { depth: number; name: string }[] = agent1DetectedLevels;
+
+    for (let i = 0; i < batches.length; i++) {
+      const batchResult = completedBatches[String(i)];
+      if (batchResult) {
+        allCorrectedItems.push(...(batchResult.correctedItems || []));
+        allCorrections.push(...(batchResult.corrections || []));
+        // Use detectedLevels from first batch that has them
+        if (!allDetectedLevels.length && (batchResult as unknown as ValidationResult).detectedLevels?.length) {
+          allDetectedLevels = (batchResult as unknown as ValidationResult).detectedLevels;
+        }
+      }
+    }
+
+    if (allCorrectedItems.length > 0) {
+      validationResult = {
+        correctedItems: allCorrectedItems,
+        corrections: allCorrections as ValidationResult["corrections"],
+        detectedLevels: allDetectedLevels,
+      };
+      console.log(`[process-plan] Agent 3 all ${batches.length} batches complete, merged: ${allCorrectedItems.length} items, ${allCorrections.length} corrections`);
+    } else {
+      console.warn("[process-plan] Agent 3 batched: no corrected items from any batch");
+    }
+
+    await logApiCall({
+      session_id: sessionId,
+      edge_function: "process-plan",
+      step_label: `Agent 3 all batches complete, merging results (${allCorrectedItems.length} items)`,
+      status: "success",
+    });
   }
 
-  // Merge & confidence scoring
+  // Merge & confidence scoring (unchanged)
   let finalItems: unknown[];
   let finalLevels: { depth: number; name: string }[];
   let corrections: { itemId: string; type: string; description: string }[] = [];
