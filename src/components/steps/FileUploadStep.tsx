@@ -55,6 +55,7 @@ const CHARS_PER_PAGE_THRESHOLD = 200;
 const MAX_PDF_PAGES = 250;
 
 export function FileUploadStep({
+  autoStart,
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
   hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
@@ -76,6 +77,7 @@ export function FileUploadStep({
   const [pastedText, setPastedText] = useState('');
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasAutoStarted = useRef(false);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
 
