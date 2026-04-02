@@ -865,6 +865,7 @@ export function FileUploadStep({
   };
 
   const clearFile = () => {
+    hasAutoStarted.current = false;
     setUploadedFile(null);
     setFileContent('');
     setExtractedItems(null);
