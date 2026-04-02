@@ -30,7 +30,7 @@ const INDUSTRIES = [
 ];
 
 const MAX_PDF_PAGES = 250;
-const MAX_TEXT_EXTRACTION_SIZE = 8 * 1024 * 1024; // 8MB — skip parse-pdf for larger files
+
 
 export interface QuickScanResults {
   lookupResult: LookupResult | null;
@@ -51,7 +51,7 @@ interface UploadIdentifyStepProps {
   uploadedFile: File | null; setUploadedFile: (v: File | null) => void;
 }
 
-type ScanOp = 'lookup' | 'parse' | 'classify';
+type ScanOp = 'lookup' | 'classify';
 type ScanStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
 
 export function UploadIdentifyStep({
@@ -64,7 +64,7 @@ export function UploadIdentifyStep({
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatuses, setScanStatuses] = useState<Record<ScanOp, ScanStatus>>({
-    lookup: 'pending', parse: 'pending', classify: 'pending',
+    lookup: 'pending', classify: 'pending',
   });
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -156,7 +156,7 @@ export function UploadIdentifyStep({
 
       // For spreadsheets: only org lookup, then advance
       if (isSpreadsheet(uploadedFile)) {
-        safeSet(setScanStatuses, { lookup: 'running', parse: 'skipped', classify: 'skipped' });
+        safeSet(setScanStatuses, { lookup: 'running', classify: 'skipped' });
 
         let lookupResult: LookupResult | null = null;
         try {
@@ -186,7 +186,7 @@ export function UploadIdentifyStep({
 
       // For text files: read content, org lookup only
       if (isTextFile(uploadedFile)) {
-        safeSet(setScanStatuses, { lookup: 'running', parse: 'skipped', classify: 'skipped' });
+        safeSet(setScanStatuses, { lookup: 'running', classify: 'skipped' });
 
         let lookupResult: LookupResult | null = null;
         let textContent: string | null = null;
@@ -226,11 +226,10 @@ export function UploadIdentifyStep({
         return;
       }
 
-      // PDF path: run all 3 in parallel
-      safeSet(setScanStatuses, { lookup: 'running', parse: 'running', classify: 'running' });
+      // PDF path: run lookup + classify in parallel
+      safeSet(setScanStatuses, { lookup: 'running', classify: 'running' });
 
       let lookupResult: LookupResult | null = null;
-      let parsedText: string | null = null;
       let pageCount: number | null = pdfPageCount;
       let classificationResult: Record<string, unknown> | null = null;
       let pageImageUrls: string[] | null = null;
@@ -261,34 +260,7 @@ export function UploadIdentifyStep({
           updateStatus('lookup', 'done');
         })(),
 
-        // Op 2: Parse PDF for text
-        (async () => {
-          if (uploadedFile.size > MAX_TEXT_EXTRACTION_SIZE) {
-            console.log(`[QuickScan] Skipping parse-pdf: file ${(uploadedFile.size / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_EXTRACTION_SIZE / 1024 / 1024}MB limit`);
-            updateStatus('parse', 'skipped');
-            return;
-          }
-          updateStatus('parse', 'running');
-          const formData = new FormData();
-          formData.append('file', uploadedFile);
-          formData.append('sessionId', sid);
-
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-pdf`, {
-            method: 'POST',
-            body: formData,
-          });
-          if (!response.ok) {
-            const err = await safeParseJson(response);
-            throw new Error(err.error || 'Failed to parse PDF');
-          }
-          const result = await safeParseJson(response);
-          if (!result.success) throw new Error(result.error || 'PDF parsing failed');
-          parsedText = result.text;
-          pageCount = result.pageCount || pageCount;
-          updateStatus('parse', 'done');
-        })(),
-
-        // Op 3: Render images + classify
+        // Op 2: Render images + classify
         (async () => {
           updateStatus('classify', 'running');
           const renderResult = await renderPDFToImages(uploadedFile, 250, 0.75);
@@ -325,7 +297,7 @@ export function UploadIdentifyStep({
       let hitPageLimit = false;
       results.forEach((r, idx) => {
         if (r.status === 'rejected') {
-          const opNames: ScanOp[] = ['lookup', 'parse', 'classify'];
+          const opNames: ScanOp[] = ['lookup', 'classify'];
           const op = opNames[idx];
           const msg = r.reason?.message || String(r.reason);
 
@@ -346,7 +318,7 @@ export function UploadIdentifyStep({
 
       onComplete({
         lookupResult,
-        parsedText,
+        parsedText: null,
         pageCount,
         classificationResult,
         pageImages: pageImageUrls,
@@ -366,7 +338,6 @@ export function UploadIdentifyStep({
   const statusLabel = (op: ScanOp): string => {
     const labels: Record<ScanOp, string> = {
       lookup: 'Looking up organization…',
-      parse: 'Extracting text…',
       classify: 'Classifying document structure…',
     };
     return labels[op];
@@ -548,7 +519,7 @@ export function UploadIdentifyStep({
                 <p className="text-sm text-muted-foreground">This usually takes 10-30 seconds</p>
               </div>
               <div className="space-y-3">
-                {(['lookup', 'parse', 'classify'] as ScanOp[]).map((op) => {
+                {(['lookup', 'classify'] as ScanOp[]).map((op) => {
                   const status = scanStatuses[op];
                   if (status === 'skipped') return null;
                   return (

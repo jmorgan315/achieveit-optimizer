@@ -173,7 +173,6 @@ const Index = () => {
     // Store scan results
     setLookupResult(results.lookupResult);
     setClassificationResult(results.classificationResult);
-    setParsedText(results.parsedText);
     setDocumentPageCount(results.pageCount);
     setPageImages(results.pageImages);
     setScanErrors(results.scanErrors);
@@ -187,11 +186,6 @@ const Index = () => {
       confirmed: true,
     };
     setOrgProfile(profile);
-
-    // Pre-populate fileContent for the bridge (FileUploadStep)
-    if (results.parsedText) {
-      setFileContent(results.parsedText);
-    }
 
     // For spreadsheets, the FileUploadStep will detect the file type and route to SpreadsheetImportStep
     advanceToStep(1);
