@@ -1,56 +1,37 @@
 
 
-# Hardening UploadIdentifyStep Error Boundaries
+# Fix: handleContinue does nothing when only uploadedFile is present
 
-## Changes — single file: `src/components/steps/UploadIdentifyStep.tsx`
+## Problem
+`handleContinue` has three conditional branches, all requiring either `extractedItems`, `hasExistingItems`, or `fileContent` to be populated. When the user arrives from Screen 1 with only `uploadedFile` set (parse-pdf was skipped or failed), no branch matches and the click is silently ignored.
 
-### 1. Add mounted ref guard
-- Add `useEffect` that sets a `mountedRef` to true on mount, false on cleanup
-- Wrap all `setScanStatuses`, `setIsScanning`, `setPageCountError` calls to check `mountedRef.current` first
-- Create a small helper: `const safeSetState = <T>(setter: (v: T) => void, v: T) => { if (mountedRef.current) setter(v) }`
+## Solution
+Add a fourth branch: when `uploadedFile` is present but no text/items exist yet, trigger the extraction pipeline (the same `handleFileUpload` flow that normally runs after a file is selected on this screen).
 
-### 2. Wrap `handleContinue` in top-level try/catch/finally
+### File: `src/components/steps/FileUploadStep.tsx`
+
+**Change `handleContinue`** (lines 844–852) to add a fallback branch:
+
 ```typescript
-const handleContinue = async () => {
-  if (!uploadedFile || !orgName.trim() || !industry) return;
-  setIsScanning(true);
-  setPageCountError(null);
-  try {
-    // ... existing logic (ensureSessionId, upsert, spreadsheet/text/PDF paths)
-  } catch (err: any) {
-    console.error('[UploadIdentify] Unexpected error:', err);
-    toast({ title: 'Something went wrong', description: 'Please try again.', variant: 'destructive' });
-  } finally {
-    if (mountedRef.current) setIsScanning(false);
+const handleContinue = () => {
+  if (extractedItems && extractedMappings && detectedLevels && onAIExtraction) {
+    onAIExtraction(extractedItems, extractedMappings, detectedLevels);
+  } else if (hasExistingItems && onAdvanceExisting) {
+    onAdvanceExisting();
+  } else if (fileContent.trim() && fileContent !== '__VISION_EXTRACTED__') {
+    onTextSubmit(fileContent);
+  } else if (uploadedFile) {
+    // File present but no extracted content yet — run the extraction pipeline
+    handleFileUpload(uploadedFile);
   }
 };
 ```
-- Remove all individual `setIsScanning(false)` calls scattered before each `return` — the `finally` handles it.
 
-### 3. Await the session upsert inside the try block
-Change the fire-and-forget `.then()` pattern to:
-```typescript
-const { error: upsertError } = await supabase.from('processing_sessions').upsert({...}, { onConflict: 'id' });
-if (upsertError) console.error('[UploadIdentify] Session update error:', upsertError);
-```
-
-### 4. Defensive `response.json()` parsing
-Create a helper used by both parse-pdf and classify-document response handling:
-```typescript
-async function safeParseJson(response: Response): Promise<any> {
-  try {
-    return await response.json();
-  } catch {
-    const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
-  }
-}
-```
-Replace all `await response.json()` calls (4 occurrences in the PDF path) with `await safeParseJson(response)`.
+This reuses the existing `handleFileUpload` function which already handles PDF parsing, vision fallback, spreadsheet detection, and all error states. No other changes needed.
 
 ### What stays the same
-- `Promise.allSettled` pattern and overall flow unchanged
-- Props interface unchanged
-- Scanning overlay UI unchanged
-- Spreadsheet and text file paths get the outer try/catch/finally but no structural changes
+- Button disabled condition (already updated)
+- All existing branches unchanged
+- `handleFileUpload` logic unchanged
+- No new state or props
 
