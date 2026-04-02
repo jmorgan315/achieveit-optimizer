@@ -1637,7 +1637,7 @@ async function runResume(sessionId: string): Promise<void> {
       // Agent 2 done, Agent 3 hasn't finished — run (or re-run) Agent 3
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 3`);
       const auditFindings = (stepResults.audit || null) as AuditFindings | null;
-      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, pipelineRunId);
+      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, pipelineRunId, stepResults);
     }
 
   } catch (error) {
