@@ -30,7 +30,7 @@ const INDUSTRIES = [
 ];
 
 const MAX_PDF_PAGES = 250;
-const MAX_TEXT_EXTRACTION_SIZE = 8 * 1024 * 1024; // 8MB — skip parse-pdf for larger files
+
 
 export interface QuickScanResults {
   lookupResult: LookupResult | null;
