@@ -33,6 +33,7 @@ interface FileUploadStepProps {
   detectedLevels: PlanLevel[] | null; setDetectedLevels: (v: PlanLevel[] | null) => void;
   useVisionAI: boolean; setUseVisionAI: (v: boolean) => void;
   dedupResults: DedupRemovedDetail[]; setDedupResults: (v: DedupRemovedDetail[]) => void;
+  pageImages?: string[] | null; setPageImages?: (v: string[] | null) => void;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -62,6 +63,7 @@ export function FileUploadStep({
   detectedLevels, setDetectedLevels,
   useVisionAI, setUseVisionAI,
   dedupResults, setDedupResults,
+  pageImages, setPageImages,
 }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -410,7 +412,22 @@ export function FileUploadStep({
 
     try {
       const pageRange = orgProfile?.pageRange;
-      const { images, pageCount } = await renderPDFToImages(file, 250, 0.75, pageRange);
+      let images: { dataUrl: string; pageNumber: number; width: number; height: number }[];
+      let pageCount: number;
+
+      // Use pre-rendered images from quick scan if available
+      if (pageImages && pageImages.length > 0) {
+        images = pageImages.map((url, idx) => ({ dataUrl: url, pageNumber: idx + 1, width: 0, height: 0 }));
+        pageCount = pageImages.length;
+        console.log(`[Vision] Using ${images.length} pre-rendered images from quick scan`);
+      } else {
+        const rendered = await renderPDFToImages(file, 250, 0.75, pageRange);
+        images = rendered.images;
+        pageCount = rendered.pageCount;
+        if (setPageImages) {
+          setPageImages(images.map(i => i.dataUrl));
+        }
+      }
 
       // Check page count limit
       if (pageCount > MAX_PDF_PAGES) {

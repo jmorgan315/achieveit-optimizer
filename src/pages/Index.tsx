@@ -2,8 +2,9 @@ import { useState, useRef, useCallback } from 'react';
 import { Header } from '@/components/Header';
 import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
+import { UploadIdentifyStep, QuickScanResults } from '@/components/steps/UploadIdentifyStep';
 import { FileUploadStep } from '@/components/steps/FileUploadStep';
-import { OrgProfileStep, LookupResult } from '@/components/steps/OrgProfileStep';
+import { LookupResult } from '@/components/steps/OrgProfileStep';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
@@ -26,14 +27,10 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const WIZARD_STEPS = [
-  { id: 'org', title: 'Organization' },
-  { id: 'upload', title: 'Upload Plan' },
+  { id: 'upload-identify', title: 'Upload & Identify' },
+  { id: 'configure', title: 'Configure' },
   { id: 'people', title: 'Map People' },
-  { id: 'optimize', title: 'Review & Export' },
-];
-
-const DEFAULT_LEVEL_NAMES = [
-  'Strategic Priority', 'Objective', 'Goal', 'Strategy', 'KPI', 'Action Item', 'Sub-Action',
+  { id: 'review', title: 'Review & Export' },
 ];
 
 const Index = () => {
@@ -46,25 +43,34 @@ const Index = () => {
     personMappings: PersonMapping[];
   } | null>(null);
 
-  // === Lifted OrgProfileStep state ===
+  // === Screen 1 state (UploadIdentifyStep) ===
   const [orgName, setOrgName] = useState('');
   const [industry, setIndustry] = useState('');
-  const [documentHints, setDocumentHints] = useState('');
-  const [knowsLevels, setKnowsLevels] = useState(false);
-  const [levelCount, setLevelCount] = useState(3);
-  const [levelNames, setLevelNames] = useState<string[]>(DEFAULT_LEVEL_NAMES.slice(0, 3));
-  const [startPage, setStartPage] = useState('');
-  const [endPage, setEndPage] = useState('');
-  const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
-
-  // === Lifted FileUploadStep state ===
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+
+  // === Quick scan results ===
+  const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
+  const [classificationResult, setClassificationResult] = useState<Record<string, unknown> | null>(null);
+  const [parsedText, setParsedText] = useState<string | null>(null);
+  const [documentPageCount, setDocumentPageCount] = useState<number | null>(null);
+  const [pageImages, setPageImages] = useState<string[] | null>(null);
+  const [scanErrors, setScanErrors] = useState<Record<string, string>>({});
+
+  // === Legacy lifted state for FileUploadStep (bridge) ===
   const [fileContent, setFileContent] = useState('');
   const [extractedItems, setExtractedItems] = useState<PlanItem[] | null>(null);
   const [extractedMappings, setExtractedMappings] = useState<PersonMapping[] | null>(null);
   const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
   const [useVisionAI, setUseVisionAI] = useState(false);
   const [dedupResults, setDedupResults] = useState<DedupRemovedDetail[]>([]);
+
+  // === Legacy OrgProfileStep state (kept for future screens) ===
+  const [documentHints, setDocumentHints] = useState('');
+  const [knowsLevels, setKnowsLevels] = useState(false);
+  const [levelCount, setLevelCount] = useState(3);
+  const [levelNames, setLevelNames] = useState<string[]>(['Strategic Priority', 'Objective', 'Goal']);
+  const [startPage, setStartPage] = useState('');
+  const [endPage, setEndPage] = useState('');
 
   const {
     state,
@@ -124,24 +130,31 @@ const Index = () => {
     sessionPromiseRef.current = null;
     resetState();
     setPendingAIData(null);
-    // Reset lifted OrgProfileStep state
+    // Reset Screen 1 state
     setOrgName('');
     setIndustry('');
-    setDocumentHints('');
-    setKnowsLevels(false);
-    setLevelCount(3);
-    setLevelNames(DEFAULT_LEVEL_NAMES.slice(0, 3));
-    setStartPage('');
-    setEndPage('');
-    setLookupResult(null);
-    // Reset lifted FileUploadStep state
     setUploadedFile(null);
+    // Reset quick scan results
+    setLookupResult(null);
+    setClassificationResult(null);
+    setParsedText(null);
+    setDocumentPageCount(null);
+    setPageImages(null);
+    setScanErrors({});
+    // Reset bridge state
     setFileContent('');
     setExtractedItems(null);
     setExtractedMappings(null);
     setDetectedLevels(null);
     setUseVisionAI(false);
     setDedupResults([]);
+    // Reset legacy state
+    setDocumentHints('');
+    setKnowsLevels(false);
+    setLevelCount(3);
+    setLevelNames(['Strategic Priority', 'Objective', 'Goal']);
+    setStartPage('');
+    setEndPage('');
     setHighestCompletedStep(-1);
     setCurrentStep(0);
   };
@@ -155,26 +168,36 @@ const Index = () => {
     goToStep(step);
   };
 
-  const handleOrgProfileComplete = async (profile: OrgProfile) => {
+  // === Screen 1 completion handler ===
+  const handleQuickScanComplete = (results: QuickScanResults) => {
+    // Store scan results
+    setLookupResult(results.lookupResult);
+    setClassificationResult(results.classificationResult);
+    setParsedText(results.parsedText);
+    setDocumentPageCount(results.pageCount);
+    setPageImages(results.pageImages);
+    setScanErrors(results.scanErrors);
+
+    // Build org profile from scan results
+    const profile: OrgProfile = {
+      organizationName: results.lookupResult?.name || orgName.trim(),
+      industry,
+      website: results.lookupResult?.website,
+      summary: results.lookupResult?.summary,
+      confirmed: true,
+    };
     setOrgProfile(profile);
-    const sid = await ensureSessionId();
-    supabase.from('processing_sessions').upsert({
-      id: sid,
-      org_name: profile.organizationName,
-      org_industry: profile.industry,
-    }, { onConflict: 'id' }).then(({ error }) => {
-      if (error) console.error('[Session] Failed to update session with org info:', error);
-      else console.log('[Session] Org info saved:', profile.organizationName);
-    });
+
+    // Pre-populate fileContent for the bridge (FileUploadStep)
+    if (results.parsedText) {
+      setFileContent(results.parsedText);
+    }
+
+    // For spreadsheets, the FileUploadStep will detect the file type and route to SpreadsheetImportStep
     advanceToStep(1);
   };
 
-  const handleOrgProfileSkip = async () => {
-    setOrgProfile(undefined);
-    await ensureSessionId();
-    advanceToStep(1);
-  };
-
+  // === Existing handlers (for FileUploadStep bridge) ===
   const handleTextSubmit = (text: string) => {
     setRawText(text);
     setPendingAIData(null);
@@ -209,8 +232,6 @@ const Index = () => {
   const handleSpreadsheetComplete = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
     setLevels(levels);
     setItems(items, personMappings);
-    // Skip level verification modal — levels come from user mapping
-    // Go to People Mapper if there are person mappings, otherwise straight to Review
     if (personMappings.length > 0) {
       advanceToStep(2);
     } else {
@@ -234,7 +255,6 @@ const Index = () => {
     const raw = detail.removed_item;
     const parentName = (raw.parent_name as string) || detail.removed_parent || '';
     
-    // Find parent by name
     let parentId: string | null = null;
     let parentDepth = 0;
     if (parentName) {
@@ -275,12 +295,9 @@ const Index = () => {
       confidence: 80,
     };
 
-    // Add to items
     const updatedItems = [...state.items, newItem];
     setItems(updatedItems, state.personMappings);
     updateLevelsAndRecalculate(state.levels);
-
-    // Remove from dedup results
     setDedupResults(prev => prev.filter(d => d !== detail));
 
     toast({
@@ -343,20 +360,13 @@ const Index = () => {
 
         <div className="mt-8">
           {currentStep === 0 && (
-            <OrgProfileStep
-              onComplete={handleOrgProfileComplete}
-              onSkip={handleOrgProfileSkip}
-              sessionId={state.sessionId ?? sessionIdRef.current ?? undefined}
+            <UploadIdentifyStep
+              onComplete={handleQuickScanComplete}
               ensureSessionId={ensureSessionId}
+              sessionId={state.sessionId ?? sessionIdRef.current ?? undefined}
               orgName={orgName} setOrgName={setOrgName}
               industry={industry} setIndustry={setIndustry}
-              documentHints={documentHints} setDocumentHints={setDocumentHints}
-              knowsLevels={knowsLevels} setKnowsLevels={setKnowsLevels}
-              levelCount={levelCount} setLevelCount={setLevelCount}
-              levelNames={levelNames} setLevelNames={setLevelNames}
-              startPage={startPage} setStartPage={setStartPage}
-              endPage={endPage} setEndPage={setEndPage}
-              lookupResult={lookupResult} setLookupResult={setLookupResult}
+              uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
             />
           )}
 
@@ -382,6 +392,7 @@ const Index = () => {
               detectedLevels={detectedLevels} setDetectedLevels={setDetectedLevels}
               useVisionAI={useVisionAI} setUseVisionAI={setUseVisionAI}
               dedupResults={dedupResults} setDedupResults={setDedupResults}
+              pageImages={pageImages} setPageImages={setPageImages}
             />
           )}
 
