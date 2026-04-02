@@ -405,7 +405,8 @@ async function processChunk(
   previousContext: { detectedLevels: { depth: number; name: string }[]; extractedItemNames: string[] } | null,
   apiKey: string,
   orgContext?: { organizationName?: string; industry?: string; documentHints?: string; planLevels?: Array<{ depth: number; name: string }>; pageRange?: { startPage: number; endPage: number } },
-  sessionId?: string
+  sessionId?: string,
+  batchLabel?: string
 ): Promise<ExtractedChunkResult> {
   const bulletCount = countBulletMarkers(chunkText);
   console.log(`Chunk ${chunkIndex + 1}: detected ~${bulletCount} bullet markers in text`);
@@ -680,7 +681,7 @@ serve(async (req) => {
       } : null;
 
       try {
-        const result = await processChunk(chunks[i], i, chunks.length, previousContext, ANTHROPIC_API_KEY, { organizationName, industry, documentHints, planLevels, pageRange }, sessionId);
+        const result = await processChunk(chunks[i], i, chunks.length, previousContext, ANTHROPIC_API_KEY, { organizationName, industry, documentHints, planLevels, pageRange }, sessionId, batchLabel);
 
         if (result.items?.length > 0) {
           allItems = [...allItems, ...result.items];

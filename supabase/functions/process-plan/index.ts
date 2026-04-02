@@ -715,8 +715,11 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     }
 
     // ==============================
-    // TEXT_HEAVY OVERRIDE: Use text extraction instead of vision
+    // AGENT 1: Extraction
     // ==============================
+    let extractionMethod: "vision" | "text" = "text";
+
+    // TEXT_HEAVY OVERRIDE: Use text extraction instead of vision
     if (useVision && classification?.document_type === "text_heavy" && hasDocumentText) {
       console.log("[process-plan] Document classified as text_heavy — using text extraction instead of vision");
       useVision = false;
@@ -730,13 +733,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       });
     }
 
-    // ==============================
-    // AGENT 1: Extraction
-    // ==============================
     await updateSessionProgress(sessionId, { current_step: "extracting" });
 
     let agent1Data: { items: unknown[]; detectedLevels: { depth: number; name: string }[] } | null = null;
-    let extractionMethod = "text";
     let agent1Error: string | null = null;
 
     if (useVision) {
