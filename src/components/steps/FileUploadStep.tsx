@@ -23,6 +23,7 @@ interface FileUploadStepProps {
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
+  classificationResult?: Record<string, unknown> | null;
   sessionId?: string;
   hasExistingItems?: boolean;
   onAdvanceExisting?: () => void;
