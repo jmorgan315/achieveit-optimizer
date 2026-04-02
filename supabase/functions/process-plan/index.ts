@@ -1740,7 +1740,6 @@ async function runAgent3Only(
   industry: string | undefined,
   planLevels: unknown[] | undefined,
   extractionMethod: string,
-  sourceText: string,
   auditFindings: AuditFindings | null,
   pipelineRunId: string
 ): Promise<void> {
