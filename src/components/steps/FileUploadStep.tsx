@@ -848,6 +848,8 @@ export function FileUploadStep({
       onAdvanceExisting();
     } else if (fileContent.trim() && fileContent !== '__VISION_EXTRACTED__') {
       onTextSubmit(fileContent);
+    } else if (uploadedFile) {
+      handleFileUpload(uploadedFile);
     }
   };
 
