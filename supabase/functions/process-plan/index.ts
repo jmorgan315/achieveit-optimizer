@@ -1478,8 +1478,8 @@ async function runResume(sessionId: string): Promise<void> {
           },
         });
 
-        if (!(await checkOwnership(sessionId, pipelineRunId))) return;
-        await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, pipelineRunId);
+        // Agent 2 will be picked up by next resume cycle (stall detector fires in ~20s)
+        console.log("[process-plan] Resume: text extraction complete, returning for Agent 2 in next cycle");
         return;
       }
 
