@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
   Building2, CheckCircle2, XCircle, Globe, Layers, FileText,
-  Plus, Trash2, Clock, ArrowRight, Info,
+  Plus, Trash2, Clock, ArrowRight, Info, ArrowUp,
 } from 'lucide-react';
 import { OrgProfile } from '@/types/plan';
 import { LookupResult } from '@/components/steps/OrgProfileStep';
@@ -226,28 +226,23 @@ export function ScanResultsStep({
   };
 
   const canStart = orgReady && !scopeError;
+  const showOrgHint = lookupResult !== null && orgConfirmed === null;
 
-  return (
-    <div className="w-full max-w-2xl mx-auto space-y-6">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold">Configure Extraction</h2>
-        <p className="text-muted-foreground">
-          Review the scan results and adjust settings before processing your document.
-        </p>
-      </div>
-
-      {/* Section 1: Organization Match */}
+  // Left column content
+  const leftColumn = (
+    <>
+      {/* Organization Match */}
       {showOrgMatch && (
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-primary" />
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <CheckCircle2 className="h-4 w-4 text-primary" />
               Is this your organization?
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="p-4 rounded-lg bg-primary/5 border border-primary/20 space-y-2">
-              <h3 className="font-semibold text-lg">{lookupResult!.name}</h3>
+          <CardContent className="space-y-3">
+            <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 space-y-1.5">
+              <h3 className="font-semibold">{lookupResult!.name}</h3>
               {lookupResult!.website && (
                 <p className="text-sm text-muted-foreground flex items-center gap-1">
                   <Globe className="h-3 w-3" />
@@ -255,16 +250,16 @@ export function ScanResultsStep({
                 </p>
               )}
               <p className="text-sm">{lookupResult!.summary}</p>
-              <p className="text-xs text-muted-foreground mt-2">Industry: {industry}</p>
+              <p className="text-xs text-muted-foreground mt-1">Industry: {industry}</p>
             </div>
-            <div className="flex gap-3">
-              <Button onClick={() => setOrgConfirmed(true)} className="flex-1">
-                <CheckCircle2 className="h-4 w-4 mr-2" />
-                Yes, this is correct
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => setOrgConfirmed(true)} className="flex-1">
+                <CheckCircle2 className="h-4 w-4 mr-1.5" />
+                Yes, correct
               </Button>
-              <Button variant="outline" onClick={() => setOrgConfirmed(false)}>
-                <XCircle className="h-4 w-4 mr-2" />
-                No, try again
+              <Button size="sm" variant="outline" onClick={() => setOrgConfirmed(false)}>
+                <XCircle className="h-4 w-4 mr-1.5" />
+                No
               </Button>
             </div>
           </CardContent>
@@ -273,7 +268,7 @@ export function ScanResultsStep({
 
       {orgConfirmed === true && lookupResult && (
         <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="py-4 flex items-center gap-3">
+          <CardContent className="py-3 flex items-center gap-3">
             <CheckCircle2 className="h-5 w-5 text-primary shrink-0" />
             <div>
               <p className="font-medium">{lookupResult.name}</p>
@@ -292,20 +287,20 @@ export function ScanResultsStep({
         </Alert>
       )}
 
-      {/* Section 2: Plan Structure */}
+      {/* Plan Structure */}
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base">
             <Layers className="h-4 w-4 text-primary" />
             Plan Structure
           </CardTitle>
           <CardDescription className="text-sm">
             {detectedLevels.length > 0
-              ? `Our AI detected ${detectedLevels.length} hierarchy levels in your document. You can customize them below.`
-              : 'Define your plan\'s hierarchy levels, or let AI detect them automatically during processing.'}
+              ? `AI detected ${detectedLevels.length} hierarchy levels. Customize below.`
+              : 'Define hierarchy levels, or let AI detect them automatically.'}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           <div className="flex items-center gap-2">
             <Checkbox
               id="knowsLevels"
@@ -318,8 +313,8 @@ export function ScanResultsStep({
           </div>
 
           {knowsLevels && (
-            <div className="space-y-3 pl-6 border-l-2 border-primary/20">
-              <div className="space-y-2">
+            <div className="space-y-2 pl-6 border-l-2 border-primary/20">
+              <div className="space-y-1.5">
                 {levelNames.map((name, idx) => (
                   <div key={idx} className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground w-24 flex-shrink-0">
@@ -360,21 +355,26 @@ export function ScanResultsStep({
           )}
         </CardContent>
       </Card>
+    </>
+  );
 
-      {/* Section 3: Document Scope */}
+  // Right column content
+  const rightColumn = (
+    <>
+      {/* Document Scope */}
       {pageCount !== null && (
         <Card>
-          <CardHeader className="pb-3">
+          <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <FileText className="h-4 w-4 text-primary" />
               Document Scope
             </CardTitle>
             <CardDescription className="text-sm">
-              Document has {pageCount} page{pageCount !== 1 ? 's' : ''}. Specify which pages contain your plan.
+              {pageCount} page{pageCount !== 1 ? 's' : ''}. Specify which pages contain your plan.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-2">
+          <CardContent className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="scopeInput" className="text-sm">Page ranges</Label>
               <Input
                 id="scopeInput"
@@ -394,10 +394,10 @@ export function ScanResultsStep({
         </Card>
       )}
 
-      {/* Section 4: Time Estimate */}
+      {/* Time Estimate */}
       {timeEstimate && (
         <Card className="bg-muted/50">
-          <CardContent className="py-4 flex items-center gap-3">
+          <CardContent className="py-3 flex items-center gap-3">
             <Clock className="h-5 w-5 text-muted-foreground shrink-0" />
             <div>
               <p className="text-sm font-medium">Estimated processing time: {timeEstimate}</p>
@@ -409,9 +409,9 @@ export function ScanResultsStep({
         </Card>
       )}
 
-      {/* Section 5: Additional Notes */}
+      {/* Additional Notes */}
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 text-base">
             <Info className="h-4 w-4 text-primary" />
             Additional Notes
@@ -428,6 +428,23 @@ export function ScanResultsStep({
           />
         </CardContent>
       </Card>
+    </>
+  );
+
+  return (
+    <div className="w-full max-w-5xl mx-auto space-y-4">
+      <div className="text-center space-y-1">
+        <h2 className="text-2xl font-bold">Review & Configure</h2>
+        <p className="text-muted-foreground">
+          Confirm your organization and adjust settings before processing.
+        </p>
+      </div>
+
+      {/* Two-column grid on wide screens */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-4">{leftColumn}</div>
+        <div className="space-y-4">{rightColumn}</div>
+      </div>
 
       {/* Scan errors */}
       {Object.keys(scanErrors).length > 0 && (
@@ -436,6 +453,14 @@ export function ScanResultsStep({
             Some scan operations had issues: {Object.values(scanErrors).join('; ')}. You can still proceed.
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Inline hint when button is disabled due to org confirmation */}
+      {showOrgHint && (
+        <p className="text-sm text-muted-foreground text-center flex items-center justify-center gap-1.5">
+          <ArrowUp className="h-3.5 w-3.5" />
+          Please confirm your organization above to continue
+        </p>
       )}
 
       {/* Start Processing button */}
