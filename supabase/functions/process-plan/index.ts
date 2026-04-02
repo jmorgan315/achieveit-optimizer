@@ -1198,184 +1198,74 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     console.log(`[process-plan] Extraction checkpoint persisted (${agent1ItemCount} items), proceeding to Agents 2+3`);
 
     // ==============================
-    // STEPS 2 & 3: Audit + Validation (PARALLEL)
+    // STEP 2: Audit Completeness ONLY — Agent 3 runs in next resume cycle
     // ==============================
-    // Ownership check before Agents 2+3
     if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
-    await updateSessionProgress(sessionId, { current_step: "validating" });
-    console.log("[process-plan] Starting Steps 2 & 3 in parallel (audit + validation)");
+    await updateSessionProgress(sessionId, { current_step: "auditing" });
+    console.log("[process-plan] Starting Step 2 (audit-completeness) — Agent 3 will run in next resume cycle");
 
     const sourceForAudit = (documentText as string) || "";
     const hasSourceText = sourceForAudit.length > 100;
 
-    // Build audit payload
-    const auditPayload: Record<string, unknown> = {
-      extractedItems: agent1Data.items,
-      sessionId,
-      organizationName,
-      industry,
-      planLevels,
-      classification: classification || null,
-    };
+    let auditFindings: AuditFindings | null = null;
 
-    if (hasSourceText) {
-      auditPayload.sourceText = sourceForAudit;
-      console.log("[process-plan] Step 2: text-based audit");
-    } else if (useVision && pageImages) {
-      const images = pageImages as string[];
-      const auditImages = images.length <= 10 ? images : selectAuditImages(images);
-      auditPayload.pageImages = auditImages;
-      console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
-    }
+    if (hasSourceText || (useVision && pageImages)) {
+      const auditPayload: Record<string, unknown> = {
+        extractedItems: agent1Data.items,
+        sessionId,
+        organizationName,
+        industry,
+        planLevels,
+        classification: classification || null,
+      };
 
-    const shouldRunAudit = hasSourceText || (useVision && !!pageImages);
-
-    // Run both in parallel
-    const [auditSettled, validateSettled] = await Promise.allSettled([
-      // STEP 2: Completeness Audit
-      (async (): Promise<AuditFindings | null> => {
-        if (!shouldRunAudit) {
-          console.log("[process-plan] Step 2 skipped — no source text or images available");
-          return null;
-        }
-        try {
-          const auditResult = await callEdgeFunction("audit-completeness", auditPayload);
-          if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
-            const findings = (auditResult.data as { data: AuditFindings }).data;
-            console.log("[process-plan] Step 2 complete:", JSON.stringify(findings?.auditSummary || {}));
-            return findings;
-          } else {
-            console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
-            return null;
-          }
-        } catch (err) {
-          console.error("[process-plan] Step 2 exception:", err);
-          return null;
-        }
-      })(),
-
-      // STEP 3: Hierarchy Validation
-      (async (): Promise<ValidationResult | null> => {
-        try {
-          const validateResult = await callEdgeFunction("validate-hierarchy", {
-            sourceText: sourceForAudit,
-            extractedItems: agent1Data!.items,
-            auditFindings: null, // audit runs in parallel, so not available yet
-            detectedLevels: agent1Data!.detectedLevels,
-            sessionId,
-            organizationName,
-            industry,
-            planLevels,
-          });
-
-          if (validateResult.ok && (validateResult.data as { success: boolean }).success) {
-            const result = (validateResult.data as { data: ValidationResult }).data;
-            console.log("[process-plan] Step 3 complete:", result.corrections?.length || 0, "corrections");
-            return result;
-          } else {
-            console.error("[process-plan] Step 3 failed (non-fatal). Status:", validateResult.status, "Response:", JSON.stringify(validateResult.data));
-            return null;
-          }
-        } catch (err) {
-          console.error("[process-plan] Step 3 exception:", err);
-          return null;
-        }
-      })(),
-    ]);
-
-    const auditFindings = auditSettled.status === "fulfilled" ? auditSettled.value : null;
-    const validationResult = validateSettled.status === "fulfilled" ? validateSettled.value : null;
-
-    if (auditSettled.status === "rejected") {
-      console.error("[process-plan] Audit promise rejected:", auditSettled.reason);
-    }
-    if (validateSettled.status === "rejected") {
-      console.error("[process-plan] Validation promise rejected:", validateSettled.reason);
-    }
-
-    // ==============================
-    // MERGE & CONFIDENCE SCORING
-    // ==============================
-    let finalItems: unknown[];
-    let finalLevels: { depth: number; name: string }[];
-    let corrections: { itemId: string; type: string; description: string }[] = [];
-
-    if (validationResult?.correctedItems?.length > 0) {
-      finalItems = validationResult.correctedItems;
-      finalLevels = validationResult.detectedLevels?.length
-        ? validationResult.detectedLevels
-        : agent1Data.detectedLevels;
-      corrections = validationResult.corrections || [];
-    } else {
-      finalItems = agent1Data.items;
-      finalLevels = agent1Data.detectedLevels;
-    }
-
-    if (planLevels && Array.isArray(planLevels) && (planLevels as unknown[]).length > 0) {
-      const maxDepth = (planLevels as unknown[]).length;
-      enforceMaxDepth(finalItems, maxDepth, planLevels as { depth: number; name: string }[]);
-      console.log(`[process-plan] Post-validation: enforced max depth ${maxDepth}`);
-    }
-
-    // Apply rephrased corrections from Agent 2 (audit) — fix names back to original text
-    if (auditFindings?.rephrasedItems?.length) {
-      applyRephrasedCorrections(finalItems, auditFindings.rephrasedItems, corrections);
-      console.log(`[process-plan] Applied ${auditFindings.rephrasedItems.length} rephrased corrections from audit`);
-    }
-
-    calculateConfidence(finalItems, agent1NameSet, auditFindings, corrections);
-
-    const allConfidences: number[] = [];
-    function gatherConfidences(items: unknown[]) {
-      for (const item of items) {
-        const i = item as { confidence?: number; children?: unknown[] };
-        if (typeof i.confidence === "number") allConfidences.push(i.confidence);
-        if (i.children?.length) gatherConfidences(i.children);
+      if (hasSourceText) {
+        auditPayload.sourceText = sourceForAudit;
+        console.log("[process-plan] Step 2: text-based audit");
+      } else if (useVision && pageImages) {
+        const images = pageImages as string[];
+        const auditImages = images.length <= 10 ? images : selectAuditImages(images);
+        auditPayload.pageImages = auditImages;
+        console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
       }
+
+      try {
+        const auditResult = await callEdgeFunction("audit-completeness", auditPayload);
+        if (auditResult.ok && (auditResult.data as { success: boolean }).success) {
+          auditFindings = (auditResult.data as { data: AuditFindings }).data;
+          console.log("[process-plan] Step 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
+        } else {
+          console.error("[process-plan] Step 2 failed (non-fatal):", JSON.stringify(auditResult.data));
+        }
+      } catch (err) {
+        console.error("[process-plan] Step 2 exception:", err);
+      }
+    } else {
+      console.log("[process-plan] Step 2 skipped — no source text or images available");
     }
-    gatherConfidences(finalItems);
-    const sessionConfidence = allConfidences.length > 0
-      ? Math.round(allConfidences.reduce((a, b) => a + b, 0) / allConfidences.length)
-      : 0;
 
-    const finalItemCount = countAllItems(finalItems);
-    console.log(`[process-plan] Pipeline complete: ${finalItemCount} items, ${corrections.length} corrections, confidence=${sessionConfidence}%`);
-
-    // Write final results to DB
-    const finalResult = {
-      success: true,
-      data: {
-        items: finalItems,
-        detectedLevels: finalLevels,
-      },
-      totalItems: finalItemCount,
-      corrections,
-      sessionConfidence,
-      auditSummary: auditFindings?.auditSummary || null,
-      extractionMethod,
-      pipelineComplete: true,
-      sessionId,
-      dedupResults: dedupResult.removedDetails,
-    };
-
-    // Ownership check before writing final results
+    // Persist audit results as "audited" — Agent 3 will be triggered by next resume
     if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
     await updateSessionProgress(sessionId, {
-      status: "completed",
-      current_step: "complete",
-      step_results: finalResult,
-      extraction_method: extractionMethod,
-      total_items_extracted: finalItemCount,
+      current_step: "audited",
+      step_results: {
+        ...extractionSnapshot,
+        audit: auditFindings,
+        pipelineContext: {
+          ...extractionSnapshot.pipelineContext,
+          documentText: sourceForAudit,
+        },
+      },
     });
+    console.log("[process-plan] Agent 2 complete, persisted as 'audited'. Agent 3 will run in next resume cycle.");
 
-    // Fire-and-forget cleanup of stored page images
+    // Fire-and-forget cleanup of stored page images (no longer needed after audit)
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Cleanup error:", e));
 
   } catch (error) {
     console.error("[process-plan] Pipeline error:", error);
-    // Guard: only write error status if this run still owns the session
     if (await checkOwnership(sessionId, pipelineRunId)) {
       await updateSessionProgress(sessionId, {
         status: "error",
