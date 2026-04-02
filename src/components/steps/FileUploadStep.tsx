@@ -915,230 +915,230 @@ export function FileUploadStep({
     );
   }
 
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   return (
-    <div className="w-full max-w-4xl mx-auto space-y-6">
-      <Card className="border-border/50 shadow-sm">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center gap-2 text-2xl text-foreground">
-            <Upload className="h-6 w-6 text-primary" />
-            Upload Your Strategic Plan
-          </CardTitle>
-          <CardDescription className="text-muted-foreground">
-            Upload your strategic plan document to get started. We support PDF, Word, Excel, and text files.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {!uploadedFile ? (
-            <>
-              <div
-                className={`relative border-2 border-dashed rounded-lg p-12 transition-all cursor-pointer ${
-                  isDragging 
-                    ? 'border-primary bg-primary/5 scale-[1.01]' 
-                    : 'border-border hover:border-primary/50 hover:bg-muted/30'
-                }`}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".txt,.pdf,.doc,.docx,.xlsx,.xls,.csv"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleFileUpload(file);
-                  }}
-                />
-                <div className="flex flex-col items-center gap-4 text-center">
-                  <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
-                    <FileText className="h-8 w-8 text-primary" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-lg text-foreground">
-                      Drag and drop your file here
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      or click to browse your computer
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap justify-center gap-2 mt-2">
-                    {['PDF', 'Word', 'Excel', 'CSV', 'Text'].map((format) => (
-                      <span
-                        key={format}
-                        className="px-3 py-1 text-xs font-medium rounded-full bg-secondary text-secondary-foreground"
-                      >
-                        {format}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="space-y-4">
-              {/* File status */}
-              <div className="flex items-center justify-between p-4 rounded-lg bg-success/10 border border-success/20">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-full bg-success/20 flex items-center justify-center">
-                    {isProcessing ? (
-                      <Loader2 className="h-5 w-5 text-success animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="h-5 w-5 text-success" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="font-medium text-foreground">{uploadedFile.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {isProcessing ? processingStatus || 'Processing...' : 'Document processed'}
-                    </p>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" onClick={clearFile} disabled={isLoading}>
-                  Remove
-                </Button>
-              </div>
-
-              {/* Page count error blocker */}
-              {pageCountError && (
-                <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
-                  <AlertTriangle className="h-5 w-5" />
-                  <AlertTitle>Document Too Large</AlertTitle>
-                  <AlertDescription>{pageCountError}</AlertDescription>
-                </Alert>
-              )}
-
-              {/* Processing Overlay */}
-              {isLoading && (
-                <ProcessingOverlay
-                  currentStep={progressState.currentStep}
-                  stepProgress={progressState.stepProgress}
-                  statusMessages={progressState.messages}
-                  orgName={orgProfile?.organizationName}
-                  industry={orgProfile?.industry}
-                />
-              )}
-
-              {/* Vision error with paste fallback */}
-              {!isLoading && visionError && !extractedItems && (
-                <div className="space-y-4">
-                  <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
-                      <div className="space-y-2">
-                        <p className="font-medium text-foreground">
-                          This document couldn't be processed automatically
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          Complex tables and merged cells can be difficult to extract. Try pasting the plan text directly, or re-save the PDF at a lower resolution.
-                        </p>
-                        {!pasteMode && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setPasteMode(true)}
-                            className="mt-2"
-                          >
-                            <ClipboardPaste className="h-4 w-4 mr-2" />
-                            Paste Text Instead
-                          </Button>
-                        )}
-                      </div>
+    <div className="w-full max-w-4xl mx-auto space-y-4">
+      {/* Hide upload chrome entirely when processing */}
+      {isLoading ? (
+        <ProcessingOverlay
+          currentStep={progressState.currentStep}
+          stepProgress={progressState.stepProgress}
+          statusMessages={progressState.messages}
+          orgName={orgProfile?.organizationName}
+          industry={orgProfile?.industry}
+        />
+      ) : (
+        <Card className="border-border/50 shadow-sm">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-2xl text-foreground">
+              <Upload className="h-6 w-6 text-primary" />
+              Upload Your Strategic Plan
+            </CardTitle>
+            <CardDescription className="text-muted-foreground">
+              Upload your strategic plan document to get started. We support PDF, Word, Excel, and text files.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {!uploadedFile ? (
+              <>
+                <div
+                  className={`relative border-2 border-dashed rounded-lg p-12 transition-all cursor-pointer ${
+                    isDragging 
+                      ? 'border-primary bg-primary/5 scale-[1.01]' 
+                      : 'border-border hover:border-primary/50 hover:bg-muted/30'
+                  }`}
+                  onDrop={handleDrop}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.pdf,.doc,.docx,.xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileUpload(file);
+                    }}
+                  />
+                  <div className="flex flex-col items-center gap-4 text-center">
+                    <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
+                      <FileText className="h-8 w-8 text-primary" />
                     </div>
-                  </div>
-
-                  {pasteMode && (
-                    <div className="space-y-3">
-                      <Textarea
-                        placeholder="Paste your strategic plan text here..."
-                        value={pastedText}
-                        onChange={(e) => setPastedText(e.target.value)}
-                        className="min-h-[200px] text-sm"
-                      />
-                      <div className="flex gap-2">
-                        <Button
-                          onClick={handlePasteSubmit}
-                          disabled={!pastedText.trim() || isExtracting}
-                          className="flex-1"
+                    <div>
+                      <p className="font-semibold text-lg text-foreground">
+                        Drag and drop your file here
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        or click to browse your computer
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2 mt-2">
+                      {['PDF', 'Word', 'Excel', 'CSV', 'Text'].map((format) => (
+                        <span
+                          key={format}
+                          className="px-3 py-1 text-xs font-medium rounded-full bg-secondary text-secondary-foreground"
                         >
-                          {isExtracting ? (
-                            <>
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                              Extracting...
-                            </>
-                          ) : (
-                            'Extract from Pasted Text'
-                          )}
-                        </Button>
-                        <Button variant="ghost" onClick={() => { setPasteMode(false); setPastedText(''); }}>
-                          Cancel
-                        </Button>
-                      </div>
+                          {format}
+                        </span>
+                      ))}
                     </div>
-                  )}
+                  </div>
                 </div>
-              )}
-
-              {/* Completed extraction status */}
-              {!isLoading && extractedItems && (
-                <div className="flex items-center justify-between p-4 rounded-lg border bg-success/10 border-success/20">
+              </>
+            ) : (
+              <div className="space-y-4">
+                {/* File status */}
+                <div className="flex items-center justify-between p-4 rounded-lg bg-success/10 border border-success/20">
                   <div className="flex items-center gap-3">
                     <div className="h-10 w-10 rounded-full bg-success/20 flex items-center justify-center">
                       <CheckCircle2 className="h-5 w-5 text-success" />
                     </div>
                     <div>
-                      <p className="font-medium text-foreground">Plan Items Found</p>
-                      <p className="text-sm text-muted-foreground">
-                        {countAllItems(extractedItems)} items extracted successfully
-                      </p>
+                      <p className="font-medium text-foreground">{uploadedFile.name}</p>
+                      <p className="text-sm text-muted-foreground">Document processed</p>
                     </div>
                   </div>
+                  <Button variant="ghost" size="sm" onClick={clearFile}>
+                    Remove
+                  </Button>
                 </div>
-              )}
 
-              {/* Preview of extracted items */}
-              {extractedItems && extractedItems.length > 0 && !isLoading && (
-                <div className="p-4 rounded-lg bg-muted/50 border border-border space-y-2">
-                  <p className="text-sm font-medium text-foreground">Preview of extracted items:</p>
-                  <ul className="text-sm text-muted-foreground space-y-1">
-                    {extractedItems.slice(0, 5).map((item) => (
-                      <li key={item.id} className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground/60">{item.order}</span>
-                        <span className="truncate">{item.name}</span>
-                      </li>
-                    ))}
-                    {extractedItems.length > 5 && (
-                      <li className="text-xs text-muted-foreground/60">
-                        ...and {extractedItems.length - 5} more items
-                      </li>
+                {/* Page count error blocker */}
+                {pageCountError && (
+                  <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
+                    <AlertTriangle className="h-5 w-5" />
+                    <AlertTitle>Document Too Large</AlertTitle>
+                    <AlertDescription>{pageCountError}</AlertDescription>
+                  </Alert>
+                )}
+
+                {/* Vision error with paste fallback */}
+                {visionError && !extractedItems && (
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
+                        <div className="space-y-2">
+                          <p className="font-medium text-foreground">
+                            This document couldn't be processed automatically
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            Complex tables and merged cells can be difficult to extract. Try pasting the plan text directly, or re-save the PDF at a lower resolution.
+                          </p>
+                          {!pasteMode && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setPasteMode(true)}
+                              className="mt-2"
+                            >
+                              <ClipboardPaste className="h-4 w-4 mr-2" />
+                              Paste Text Instead
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {pasteMode && (
+                      <div className="space-y-3">
+                        <Textarea
+                          placeholder="Paste your strategic plan text here..."
+                          value={pastedText}
+                          onChange={(e) => setPastedText(e.target.value)}
+                          className="min-h-[200px] text-sm"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={handlePasteSubmit}
+                            disabled={!pastedText.trim() || isExtracting}
+                            className="flex-1"
+                          >
+                            {isExtracting ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Extracting...
+                              </>
+                            ) : (
+                              'Extract from Pasted Text'
+                            )}
+                          </Button>
+                          <Button variant="ghost" onClick={() => { setPasteMode(false); setPastedText(''); }}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
                     )}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
+                  </div>
+                )}
 
-          <Button
-            onClick={handleContinue}
-            disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems && !uploadedFile) || isLoading || !!pageCountError}
-            className="w-full h-12 text-base font-medium"
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Analyzing...
-              </>
-            ) : extractedItems ? (
-              `Continue with ${extractedItems.length} Items`
-            ) : hasExistingItems ? (
-              'Continue with Existing Data'
-            ) : (
-              'Continue to Level Verification'
+                {/* Completed extraction status */}
+                {extractedItems && (
+                  <div className="flex items-center justify-between p-4 rounded-lg border bg-success/10 border-success/20">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-full bg-success/20 flex items-center justify-center">
+                        <CheckCircle2 className="h-5 w-5 text-success" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">Plan Items Found</p>
+                        <p className="text-sm text-muted-foreground">
+                          {countAllItems(extractedItems)} items extracted successfully
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Collapsible preview of extracted items */}
+                {extractedItems && extractedItems.length > 0 && (
+                  <Collapsible open={previewOpen} onOpenChange={setPreviewOpen}>
+                    <CollapsibleTrigger asChild>
+                      <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground w-full justify-start">
+                        <ChevronDown className={`h-4 w-4 transition-transform ${previewOpen ? 'rotate-180' : ''}`} />
+                        Preview extracted items
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="p-4 rounded-lg bg-muted/50 border border-border space-y-2">
+                        <ul className="text-sm text-muted-foreground space-y-1">
+                          {extractedItems.slice(0, 5).map((item) => (
+                            <li key={item.id} className="flex items-center gap-2">
+                              <span className="text-xs text-muted-foreground/60">{item.order}</span>
+                              <span className="truncate">{item.name}</span>
+                            </li>
+                          ))}
+                          {extractedItems.length > 5 && (
+                            <li className="text-xs text-muted-foreground/60">
+                              ...and {extractedItems.length - 5} more items
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                )}
+              </div>
             )}
-          </Button>
-        </CardContent>
-      </Card>
+
+            <Button
+              onClick={handleContinue}
+              disabled={(!fileContent.trim() && !extractedItems && !hasExistingItems && !uploadedFile) || !!pageCountError}
+              className="w-full h-12 text-base font-medium"
+            >
+              {extractedItems ? (
+                `Continue with ${extractedItems.length} Items`
+              ) : hasExistingItems ? (
+                'Continue with Existing Data'
+              ) : (
+                'Continue to Level Verification'
+              )}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
