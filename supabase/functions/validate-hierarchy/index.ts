@@ -148,7 +148,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
+    const { extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels, globalContext } = body;
 
     if (!extractedItems) {
       return new Response(JSON.stringify({ success: false, error: "extractedItems required" }), {
