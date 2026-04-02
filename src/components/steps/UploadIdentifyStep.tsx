@@ -226,11 +226,10 @@ export function UploadIdentifyStep({
         return;
       }
 
-      // PDF path: run all 3 in parallel
-      safeSet(setScanStatuses, { lookup: 'running', parse: 'running', classify: 'running' });
+      // PDF path: run lookup + classify in parallel
+      safeSet(setScanStatuses, { lookup: 'running', classify: 'running' });
 
       let lookupResult: LookupResult | null = null;
-      let parsedText: string | null = null;
       let pageCount: number | null = pdfPageCount;
       let classificationResult: Record<string, unknown> | null = null;
       let pageImageUrls: string[] | null = null;
