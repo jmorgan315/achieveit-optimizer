@@ -297,7 +297,7 @@ export function UploadIdentifyStep({
       let hitPageLimit = false;
       results.forEach((r, idx) => {
         if (r.status === 'rejected') {
-          const opNames: ScanOp[] = ['lookup', 'parse', 'classify'];
+          const opNames: ScanOp[] = ['lookup', 'classify'];
           const op = opNames[idx];
           const msg = r.reason?.message || String(r.reason);
 
