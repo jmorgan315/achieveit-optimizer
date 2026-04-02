@@ -260,34 +260,7 @@ export function UploadIdentifyStep({
           updateStatus('lookup', 'done');
         })(),
 
-        // Op 2: Parse PDF for text
-        (async () => {
-          if (uploadedFile.size > MAX_TEXT_EXTRACTION_SIZE) {
-            console.log(`[QuickScan] Skipping parse-pdf: file ${(uploadedFile.size / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_EXTRACTION_SIZE / 1024 / 1024}MB limit`);
-            updateStatus('parse', 'skipped');
-            return;
-          }
-          updateStatus('parse', 'running');
-          const formData = new FormData();
-          formData.append('file', uploadedFile);
-          formData.append('sessionId', sid);
-
-          const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-pdf`, {
-            method: 'POST',
-            body: formData,
-          });
-          if (!response.ok) {
-            const err = await safeParseJson(response);
-            throw new Error(err.error || 'Failed to parse PDF');
-          }
-          const result = await safeParseJson(response);
-          if (!result.success) throw new Error(result.error || 'PDF parsing failed');
-          parsedText = result.text;
-          pageCount = result.pageCount || pageCount;
-          updateStatus('parse', 'done');
-        })(),
-
-        // Op 3: Render images + classify
+        // Op 2: Render images + classify
         (async () => {
           updateStatus('classify', 'running');
           const renderResult = await renderPDFToImages(uploadedFile, 250, 0.75);
