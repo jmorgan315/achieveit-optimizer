@@ -1605,16 +1605,17 @@ async function runResume(sessionId: string): Promise<void> {
     }
 
     // ==============================
-    // PATH B: Resume post-extraction (current_step === "extraction_complete")
+    // PATH B: Resume post-extraction states
     // ==============================
-    if (currentStep !== "extraction_complete") {
+    const postExtractionStates = ["extraction_complete", "auditing", "audited", "validating"];
+    if (!postExtractionStates.includes(currentStep)) {
       console.error("[process-plan] Resume: unexpected current_step:", currentStep);
       return;
     }
 
     const extraction = stepResults?.extraction as Record<string, unknown> | undefined;
     if (!extraction || !Array.isArray(extraction.items) || extraction.items.length === 0) {
-      console.error("[process-plan] Resume: no extraction items in step_results");
+      console.error("[process-plan] Resume: no extraction items in step_results for state:", currentStep);
       return;
     }
 
@@ -1628,10 +1629,17 @@ async function runResume(sessionId: string): Promise<void> {
     const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
     const sourceText = (pipeCtx.documentText || "") as string;
 
-    await runPostExtractionResume(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, pipelineRunId);
-
-    // Cleanup images (may or may not exist)
-    cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
+    if (currentStep === "extraction_complete" || currentStep === "auditing") {
+      // Agent 2 hasn't finished — run (or re-run) Agent 2
+      console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 2`);
+      await runAgent2Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, pipelineRunId, stepResults);
+      cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
+    } else if (currentStep === "audited" || currentStep === "validating") {
+      // Agent 2 done, Agent 3 hasn't finished — run (or re-run) Agent 3
+      console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 3`);
+      const auditFindings = (stepResults.audit || null) as AuditFindings | null;
+      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, auditFindings, pipelineRunId);
+    }
 
   } catch (error) {
     console.error("[process-plan] Resume error:", error);
