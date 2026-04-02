@@ -6,11 +6,11 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const MAX_SOURCE_LENGTH = 180000;
+
 
 const VALIDATION_SYSTEM_PROMPT = `You are a hierarchy and structure validator for strategic plan extractions. Your job is to produce a CORRECTED version of the extracted plan items by:
 
-1. Verifying parent-child relationships match the document's structure (indentation, numbering, section nesting)
+1. Verifying parent-child relationships match the extracted hierarchy's structure (nesting, section grouping)
 2. Verifying level assignments make sense (e.g., a KPI should not be parent of a Strategic Priority)
 3. Checking that ordering within each parent matches the document order
 4. Incorporating missing items (from the audit) into the correct positions in the hierarchy
@@ -148,7 +148,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
+    const { extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
 
     if (!extractedItems) {
       return new Response(JSON.stringify({ success: false, error: "extractedItems required" }), {
@@ -159,11 +159,6 @@ serve(async (req) => {
     const sessionId = await ensureSession(incomingSessionId);
     console.log("[validate-hierarchy] sessionId:", sessionId);
 
-    let truncatedText = sourceText;
-    if (sourceText.length > MAX_SOURCE_LENGTH) {
-      truncatedText = sourceText.slice(0, MAX_SOURCE_LENGTH);
-      console.log(`[validate-hierarchy] Source truncated from ${sourceText.length} to ${MAX_SOURCE_LENGTH}`);
-    }
 
     const itemListing = flattenItems(extractedItems).join("\n");
 
@@ -235,22 +230,16 @@ CRITICAL: Never create levels beyond what the user defined. If the user said ${p
       levelsSection = `\nDETECTED HIERARCHY LEVELS:\n${detectedLevels.map((l: { depth: number; name: string }) => `  Depth ${l.depth}: ${l.name}`).join("\n")}\n`;
     }
 
-    let sourceSection = "";
-    if (truncatedText && truncatedText.length > 50) {
-      sourceSection = `\n=== SOURCE DOCUMENT ===\n\n${truncatedText}\n`;
-    } else {
-      sourceSection = `\n=== NOTE ===\nNo source text available (vision-only extraction). Validate hierarchy structure and level assignments based on the extracted items alone.\n`;
-    }
 
     const userMessage = `${contextPrefix}=== EXTRACTED ITEMS ===
 
 ${itemListing}
-${auditSection}${levelsSection}${levelEnforcementSection}${sourceSection}
+${auditSection}${levelsSection}${levelEnforcementSection}
 Please validate and correct the hierarchy. Output the COMPLETE corrected items tree incorporating all audit findings. Document every correction.`;
 
     const requestBody = {
       model: "claude-sonnet-4-20250514",
-      max_tokens: 16384,
+      max_tokens: 32768,
       system: VALIDATION_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
       tools: [{
@@ -309,10 +298,12 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
 
     const toolUse = aiResponse.content?.find((b: { type: string }) => b.type === "tool_use");
 
+    const itemCount = toolUse?.input?.correctedItems?.length || 0;
+    const corrCount = toolUse?.input?.corrections?.length || 0;
     logApiCall({
       session_id: sessionId,
       edge_function: "validate-hierarchy",
-      step_label: "Step 3: Structure Validation",
+      step_label: `Step 3: Structure Validation (${itemCount} items, ${corrCount} corrections)`,
       model: "claude-sonnet-4-20250514",
       request_payload: logPayload,
       response_payload: aiResponse,

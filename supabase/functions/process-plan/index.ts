@@ -1637,7 +1637,7 @@ async function runResume(sessionId: string): Promise<void> {
       // Agent 2 done, Agent 3 hasn't finished — run (or re-run) Agent 3
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 3`);
       const auditFindings = (stepResults.audit || null) as AuditFindings | null;
-      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, auditFindings, pipelineRunId);
+      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, pipelineRunId);
     }
 
   } catch (error) {
@@ -1740,7 +1740,6 @@ async function runAgent3Only(
   industry: string | undefined,
   planLevels: unknown[] | undefined,
   extractionMethod: string,
-  sourceText: string,
   auditFindings: AuditFindings | null,
   pipelineRunId: string
 ): Promise<void> {
@@ -1761,7 +1760,6 @@ async function runAgent3Only(
   let validationResult: ValidationResult | null = null;
   try {
     const result = await callEdgeFunction("validate-hierarchy", {
-      sourceText,
       extractedItems: agent1Items,
       auditFindings: auditFindings || null,
       detectedLevels: agent1DetectedLevels,
