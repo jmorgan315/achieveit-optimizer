@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const VALIDATION_SYSTEM_PROMPT = `You are a hierarchy and structure validator for strategic plan extractions. Your job is to produce a CORRECTED version of the extracted plan items by:
 
-1. Verifying parent-child relationships match the document's structure (indentation, numbering, section nesting)
+1. Verifying parent-child relationships match the extracted hierarchy's structure (nesting, section grouping)
 2. Verifying level assignments make sense (e.g., a KPI should not be parent of a Strategic Priority)
 3. Checking that ordering within each parent matches the document order
 4. Incorporating missing items (from the audit) into the correct positions in the hierarchy
