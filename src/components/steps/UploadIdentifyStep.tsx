@@ -51,7 +51,7 @@ interface UploadIdentifyStepProps {
   uploadedFile: File | null; setUploadedFile: (v: File | null) => void;
 }
 
-type ScanOp = 'lookup' | 'parse' | 'classify';
+type ScanOp = 'lookup' | 'classify';
 type ScanStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
 
 export function UploadIdentifyStep({
