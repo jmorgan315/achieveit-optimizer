@@ -33,6 +33,7 @@ interface FileUploadStepProps {
   detectedLevels: PlanLevel[] | null; setDetectedLevels: (v: PlanLevel[] | null) => void;
   useVisionAI: boolean; setUseVisionAI: (v: boolean) => void;
   dedupResults: DedupRemovedDetail[]; setDedupResults: (v: DedupRemovedDetail[]) => void;
+  pageImages?: string[] | null; setPageImages?: (v: string[] | null) => void;
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
