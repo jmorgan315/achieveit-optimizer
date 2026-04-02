@@ -246,6 +246,8 @@ export function FileUploadStep({
 
       if (step && step !== lastReportedStep) {
         lastReportedStep = step;
+        // Reset post-extraction stall timer on any step transition
+        extractionCompleteAt = null;
         if (step === 'classifying') {
           setStepProgressHWM('classify', 50);
           addMessage('Classifying document structure...');
@@ -254,10 +256,16 @@ export function FileUploadStep({
           addMessage('Extracting plan items...');
         } else if (step === 'extraction_complete') {
           setStepProgressHWM('extract', 100);
-          addMessage('Extraction complete, running validation...');
-        } else if (step === 'validating') {
+          addMessage('Extraction complete, starting audit...');
+        } else if (step === 'auditing') {
+          setStepProgressHWM('validate', 25);
+          addMessage('Running completeness audit...');
+        } else if (step === 'audited') {
           setStepProgressHWM('validate', 50);
-          addMessage('Auditing and validating...');
+          addMessage('Audit complete, starting validation...');
+        } else if (step === 'validating') {
+          setStepProgressHWM('validate', 75);
+          addMessage('Validating hierarchy...');
         }
       }
 
