@@ -64,7 +64,7 @@ export function UploadIdentifyStep({
   const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanStatuses, setScanStatuses] = useState<Record<ScanOp, ScanStatus>>({
-    lookup: 'pending', parse: 'pending', classify: 'pending',
+    lookup: 'pending', classify: 'pending',
   });
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
