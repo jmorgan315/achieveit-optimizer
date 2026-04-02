@@ -1,89 +1,30 @@
 
 
-# Updated Plan: Screen 2 — ScanResultsStep (Configure)
+# Bug: classificationResult is wrapped in `{ success, classification }` envelope
 
-This is the same plan as previously approved, with two targeted additions.
+## Root Cause
 
----
-
-## Addition 1: Skip LevelVerificationModal when levels already configured
-
-**Problem:** If the user configures plan levels on Screen 2 (ScanResultsStep), `handleAIExtraction` and `handleTextSubmit` in Index.tsx unconditionally set `setShowLevelModal(true)`, forcing a redundant confirmation.
-
-**Fix in `src/pages/Index.tsx`:**
-
-In `handleAIExtraction` and `handleTextSubmit`, check if `processingConfig.planLevels` is non-empty. If so, skip the modal and apply levels + advance directly:
-
+In `UploadIdentifyStep.tsx` line 290:
 ```typescript
-const handleAIExtraction = (items, personMappings, levels) => {
-  setLevels(levels);
-  setPendingAIData({ items, personMappings });
-
-  if (processingConfig?.planLevels?.length) {
-    // User already configured levels on Screen 2 — skip modal
-    const configuredLevels = processingConfig.planLevels.map((name, i) => ({
-      depth: i, name
-    }));
-    setLevels(configuredLevels);
-    setItems(items, personMappings);
-    updateLevelsAndRecalculate(configuredLevels);
-    setPendingAIData(null);
-    advanceToStep(3); // skip to people/review
-  } else {
-    setShowLevelModal(true);
-  }
-};
-
-const handleTextSubmit = (text: string) => {
-  setRawText(text);
-  setPendingAIData(null);
-
-  if (processingConfig?.planLevels?.length) {
-    processText();
-    advanceToStep(3);
-  } else {
-    setShowLevelModal(true);
-  }
-};
+classificationResult = result;  // result = { success: true, classification: { document_type, hierarchy_pattern, ... } }
 ```
 
-Same logic: if `processingConfig.planLevels` has entries, the user already made their choice — proceed directly. If empty, show the modal as before.
+The entire API response is stored, but `ScanResultsStep` reads fields directly off the object (e.g., `result.document_type`, `result.hierarchy_pattern`). Those fields live one level deeper at `result.classification.document_type`.
 
----
+## Fix
 
-## Addition 2: useRef guard for autoStart instead of empty dependency array
+**File: `src/components/steps/UploadIdentifyStep.tsx`** — line 290
 
-**Problem:** An empty `useEffect` dependency array triggers ESLint `react-hooks/exhaustive-deps` warnings and is fragile.
-
-**Fix in `src/components/steps/FileUploadStep.tsx`:**
-
+Change:
 ```typescript
-const hasAutoStarted = useRef(false);
-
-useEffect(() => {
-  if (autoStart && uploadedFile && !hasAutoStarted.current && !extractedItems) {
-    hasAutoStarted.current = true;
-    handleFileUpload(uploadedFile);
-  }
-}, [autoStart, uploadedFile, extractedItems]);
+classificationResult = result;
+```
+To:
+```typescript
+classificationResult = result.classification;
 ```
 
-The ref ensures the extraction fires exactly once even if dependencies re-evaluate during processing. Reset the ref in the existing `clearFile` function so re-uploads work:
+This unwraps the envelope so `ScanResultsStep` receives the actual classification object with `document_type`, `hierarchy_pattern`, `plan_content_pages`, etc. at the top level.
 
-```typescript
-const clearFile = () => {
-  hasAutoStarted.current = false;
-  // ... existing clear logic
-};
-```
-
----
-
-## Everything else from the approved plan remains unchanged
-
-- New `ScanResultsStep.tsx` component with 5 sections (Org Match, Plan Structure, Document Scope, Time Estimate, Additional Notes)
-- Index.tsx routing: Step 0 → UploadIdentifyStep, Step 1 → ScanResultsStep, Step 2 → FileUploadStep (processing bridge)
-- `handleStartProcessing` handler storing `ProcessingConfig` in state
-- Spreadsheet bypass logic
-- No edge function or pipeline changes
+One-line fix. No other files need changes — `ScanResultsStep`'s field access paths are already correct for the unwrapped shape.
 
