@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Upload, FileText, Building2, Loader2, X, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { renderPDFToImages } from '@/utils/pdfToImages';
 import { LookupResult } from '@/components/steps/OrgProfileStep';
