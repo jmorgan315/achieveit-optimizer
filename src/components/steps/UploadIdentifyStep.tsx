@@ -186,7 +186,7 @@ export function UploadIdentifyStep({
 
       // For text files: read content, org lookup only
       if (isTextFile(uploadedFile)) {
-        safeSet(setScanStatuses, { lookup: 'running', parse: 'skipped', classify: 'skipped' });
+        safeSet(setScanStatuses, { lookup: 'running', classify: 'skipped' });
 
         let lookupResult: LookupResult | null = null;
         let textContent: string | null = null;
