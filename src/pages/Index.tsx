@@ -3,6 +3,7 @@ import { Header } from '@/components/Header';
 import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
 import { UploadIdentifyStep, QuickScanResults } from '@/components/steps/UploadIdentifyStep';
+import { ScanResultsStep, ProcessingConfig } from '@/components/steps/ScanResultsStep';
 import { FileUploadStep } from '@/components/steps/FileUploadStep';
 import { LookupResult } from '@/components/steps/OrgProfileStep';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
@@ -29,6 +30,7 @@ import {
 const WIZARD_STEPS = [
   { id: 'upload-identify', title: 'Upload & Identify' },
   { id: 'configure', title: 'Configure' },
+  { id: 'process', title: 'Process' },
   { id: 'people', title: 'Map People' },
   { id: 'review', title: 'Review & Export' },
 ];
@@ -55,6 +57,9 @@ const Index = () => {
   const [documentPageCount, setDocumentPageCount] = useState<number | null>(null);
   const [pageImages, setPageImages] = useState<string[] | null>(null);
   const [scanErrors, setScanErrors] = useState<Record<string, string>>({});
+
+  // === Processing config from ScanResultsStep ===
+  const [processingConfig, setProcessingConfig] = useState<ProcessingConfig | null>(null);
 
   // === Legacy lifted state for FileUploadStep (bridge) ===
   const [fileContent, setFileContent] = useState('');
@@ -130,6 +135,7 @@ const Index = () => {
     sessionPromiseRef.current = null;
     resetState();
     setPendingAIData(null);
+    setProcessingConfig(null);
     // Reset Screen 1 state
     setOrgName('');
     setIndustry('');
@@ -187,21 +193,73 @@ const Index = () => {
     };
     setOrgProfile(profile);
 
-    // For spreadsheets, the FileUploadStep will detect the file type and route to SpreadsheetImportStep
-    advanceToStep(1);
+    // Check if spreadsheet — skip ScanResultsStep and go directly to processing
+    const fileName = uploadedFile?.name?.toLowerCase() || '';
+    const isSpreadsheet = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv');
+    if (isSpreadsheet) {
+      advanceToStep(2); // Skip configure, go to processing (FileUploadStep handles spreadsheet routing)
+    } else {
+      advanceToStep(1); // Go to ScanResultsStep
+    }
+  };
+
+  // === Screen 2 completion handler ===
+  const handleStartProcessing = (config: ProcessingConfig) => {
+    setProcessingConfig(config);
+    setOrgProfile(config.orgProfile);
+
+    // If user defined plan levels, set them now
+    if (config.planLevels.length > 0) {
+      const configuredLevels: PlanLevel[] = config.planLevels.map((name, i) => ({
+        id: String(i + 1),
+        name,
+        depth: i + 1,
+      }));
+      setLevels(configuredLevels);
+    }
+
+    advanceToStep(2); // Go to processing step (FileUploadStep with autoStart)
   };
 
   // === Existing handlers (for FileUploadStep bridge) ===
   const handleTextSubmit = (text: string) => {
     setRawText(text);
     setPendingAIData(null);
-    setShowLevelModal(true);
+
+    if (processingConfig?.planLevels?.length) {
+      // User already configured levels on Screen 2 — skip modal
+      processText();
+      if (state.personMappings.length > 0) {
+        advanceToStep(3);
+      } else {
+        advanceToStep(4);
+      }
+    } else {
+      setShowLevelModal(true);
+    }
   };
 
   const handleAIExtraction = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
-    setLevels(levels);
-    setPendingAIData({ items, personMappings });
-    setShowLevelModal(true);
+    if (processingConfig?.planLevels?.length) {
+      // User already configured levels on Screen 2 — skip modal
+      const configuredLevels: PlanLevel[] = processingConfig.planLevels.map((name, i) => ({
+        id: String(i + 1),
+        name,
+        depth: i + 1,
+      }));
+      setLevels(configuredLevels);
+      setItems(items, personMappings);
+      updateLevelsAndRecalculate(configuredLevels);
+      if (personMappings.length > 0) {
+        advanceToStep(3);
+      } else {
+        advanceToStep(4);
+      }
+    } else {
+      setLevels(levels);
+      setPendingAIData({ items, personMappings });
+      setShowLevelModal(true);
+    }
   };
 
   const handleLevelConfirm = (levels: PlanLevel[]) => {
@@ -211,25 +269,29 @@ const Index = () => {
       setItems(pendingAIData.items, pendingAIData.personMappings);
       updateLevelsAndRecalculate(levels);
       setPendingAIData(null);
+      if (pendingAIData.personMappings.length > 0) {
+        advanceToStep(3);
+      } else {
+        advanceToStep(4);
+      }
     } else {
       processText();
+      advanceToStep(3);
     }
-    
-    advanceToStep(2);
   };
 
   const handlePeopleMappingComplete = () => {
     applyPersonMappingsToItems();
-    advanceToStep(3);
+    advanceToStep(4);
   };
 
   const handleSpreadsheetComplete = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
     setLevels(levels);
     setItems(items, personMappings);
     if (personMappings.length > 0) {
-      advanceToStep(2);
-    } else {
       advanceToStep(3);
+    } else {
+      advanceToStep(4);
     }
   };
 
@@ -341,7 +403,7 @@ const Index = () => {
             </Button>
 
             <div className="flex items-center gap-3">
-              {currentStep === 3 && (
+              {currentStep === 4 && (
                 <Button onClick={handleExport} size="sm">
                   <Download className="h-4 w-4 mr-2" />
                   Download AchieveIt Import File
@@ -365,7 +427,21 @@ const Index = () => {
           )}
 
           {currentStep === 1 && (
+            <ScanResultsStep
+              lookupResult={lookupResult}
+              classificationResult={classificationResult}
+              pageCount={documentPageCount}
+              scanErrors={scanErrors}
+              orgName={orgName}
+              industry={industry}
+              onStartProcessing={handleStartProcessing}
+              onBack={handleBack}
+            />
+          )}
+
+          {currentStep === 2 && (
             <FileUploadStep
+              autoStart
               onTextSubmit={handleTextSubmit}
               onAIExtraction={handleAIExtraction}
               onSpreadsheetComplete={handleSpreadsheetComplete}
@@ -374,9 +450,9 @@ const Index = () => {
               hasExistingItems={state.items.length > 0}
               onAdvanceExisting={() => {
                 if (state.personMappings.length > 0) {
-                  advanceToStep(2);
-                } else {
                   advanceToStep(3);
+                } else {
+                  advanceToStep(4);
                 }
               }}
               uploadedFile={uploadedFile} setUploadedFile={setUploadedFile}
@@ -390,7 +466,7 @@ const Index = () => {
             />
           )}
 
-          {currentStep === 2 && (
+          {currentStep === 3 && (
             <PeopleMapperStep
               personMappings={state.personMappings}
               onUpdateMapping={updatePersonMapping}
@@ -399,7 +475,7 @@ const Index = () => {
             />
           )}
 
-          {currentStep === 3 && (
+          {currentStep === 4 && (
             <PlanOptimizerStep
               items={state.items}
               levels={state.levels}

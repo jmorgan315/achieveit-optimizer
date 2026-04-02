@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { DedupRemovedDetail } from '@/types/plan';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +18,7 @@ import { OrgProfile } from '@/types/plan';
 import { SpreadsheetImportStep } from './SpreadsheetImportStep';
 
 interface FileUploadStepProps {
+  autoStart?: boolean;
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
@@ -54,6 +55,7 @@ const CHARS_PER_PAGE_THRESHOLD = 200;
 const MAX_PDF_PAGES = 250;
 
 export function FileUploadStep({
+  autoStart,
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
   hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
@@ -75,6 +77,7 @@ export function FileUploadStep({
   const [pastedText, setPastedText] = useState('');
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const hasAutoStarted = useRef(false);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
 
@@ -97,6 +100,14 @@ export function FileUploadStep({
   const resetProgress = useCallback(() => {
     setProgressState(INITIAL_PROGRESS);
   }, []);
+
+  // Auto-start extraction when mounting with autoStart + uploadedFile
+  useEffect(() => {
+    if (autoStart && uploadedFile && !hasAutoStarted.current && !extractedItems && !isProcessing) {
+      hasAutoStarted.current = true;
+      handleFileUpload(uploadedFile);
+    }
+  }, [autoStart, uploadedFile, extractedItems, isProcessing]);
 
   const updateSessionRow = async (updates: Record<string, unknown>) => {
     if (!sessionId) return;
@@ -854,6 +865,7 @@ export function FileUploadStep({
   };
 
   const clearFile = () => {
+    hasAutoStarted.current = false;
     setUploadedFile(null);
     setFileContent('');
     setExtractedItems(null);
