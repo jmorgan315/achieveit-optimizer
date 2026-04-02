@@ -315,16 +315,20 @@ export function FileUploadStep({
           }
         }
 
-        // Post-extraction stall detection: if stuck at extraction_complete for >20s, fire resume
-        if (step === 'extraction_complete') {
+        // Post-extraction stall detection: covers all states after extraction
+        const postExtractionStallStates = ['extraction_complete', 'auditing', 'audited', 'validating'];
+        if (postExtractionStallStates.includes(step)) {
           if (!extractionCompleteAt) {
             extractionCompleteAt = Date.now();
           }
+          // 120s for states where an agent is actively running, 20s for idle states
+          const agentRunning = step === 'auditing' || step === 'validating';
+          const threshold = agentRunning ? 120000 : 20000;
           const stallDuration = Date.now() - extractionCompleteAt;
-          if (stallDuration > 20000 && resumeCount < MAX_RESUMES) {
+          if (stallDuration > threshold && resumeCount < MAX_RESUMES) {
             resumeCount++;
             extractionCompleteAt = null; // re-arm stall timer
-            console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES} — post-extraction stall (${Math.round(stallDuration / 1000)}s)`);
+            console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES} — post-extraction stall at '${step}' (${Math.round(stallDuration / 1000)}s)`);
             addMessage(`Finalizing analysis... (continuation ${resumeCount})`);
             try {
               await fetch(`${SUPABASE_URL}/functions/v1/process-plan`, {
@@ -336,7 +340,7 @@ export function FileUploadStep({
               console.error('[Polling] Resume call failed:', resumeErr);
             }
           }
-        } else {
+        } else if (step !== 'extracting') {
           extractionCompleteAt = null;
         }
 

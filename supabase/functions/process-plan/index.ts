@@ -1656,8 +1656,8 @@ async function runResume(sessionId: string): Promise<void> {
   }
 }
 
-/** Shared logic: run Agents 2+3 after extraction is complete */
-async function runPostExtractionResume(
+/** Run Agent 2 (audit-completeness) only, persist as "audited" */
+async function runAgent2Only(
   sessionId: string,
   agent1Items: unknown[],
   agent1DetectedLevels: { depth: number; name: string }[],
@@ -1667,91 +1667,121 @@ async function runPostExtractionResume(
   planLevels: unknown[] | undefined,
   extractionMethod: string,
   sourceText: string,
-  pipelineRunId: string
+  pipelineRunId: string,
+  existingStepResults: Record<string, unknown>
 ): Promise<void> {
-  const agent1NameSet = collectItemNameSet(agent1Items);
-  const agent1ItemCount = countAllItems(agent1Items);
-
-  console.log(`[process-plan] Resume: ${agent1ItemCount} items, running Agents 2+3`);
+  console.log(`[process-plan] Running Agent 2 only (${countAllItems(agent1Items)} items)`);
 
   await logApiCall({
     session_id: sessionId,
     edge_function: "process-plan",
-    step_label: "Resume: starting Agents 2+3",
+    step_label: "Starting Agent 2 (audit-completeness)",
     status: "success",
   });
 
-  // Ownership check before Agents 2+3 in resume
+  if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
+  await updateSessionProgress(sessionId, { current_step: "auditing" });
+
+  const hasSourceText = sourceText.length > 100;
+  let auditFindings: AuditFindings | null = null;
+
+  if (hasSourceText) {
+    const auditPayload: Record<string, unknown> = {
+      extractedItems: agent1Items,
+      sessionId,
+      organizationName,
+      industry,
+      planLevels,
+      classification,
+      sourceText,
+    };
+
+    try {
+      const result = await callEdgeFunction("audit-completeness", auditPayload);
+      if (result.ok && (result.data as { success: boolean }).success) {
+        auditFindings = (result.data as { data: AuditFindings }).data;
+        console.log("[process-plan] Agent 2 complete:", JSON.stringify(auditFindings?.auditSummary || {}));
+      } else {
+        console.warn("[process-plan] Agent 2 failed (non-fatal):", JSON.stringify(result.data));
+      }
+    } catch (err) {
+      console.error("[process-plan] Agent 2 exception:", err);
+    }
+  } else {
+    console.log("[process-plan] Agent 2 skipped — no source text available");
+  }
+
+  if (!(await checkOwnership(sessionId, pipelineRunId))) return;
+
+  await updateSessionProgress(sessionId, {
+    current_step: "audited",
+    step_results: {
+      ...existingStepResults,
+      audit: auditFindings,
+    },
+  });
+  console.log("[process-plan] Agent 2 persisted as 'audited'. Agent 3 will run in next resume cycle.");
+
+  await logApiCall({
+    session_id: sessionId,
+    edge_function: "process-plan",
+    step_label: "Agent 2 complete — awaiting Agent 3 resume",
+    status: "success",
+  });
+}
+
+/** Run Agent 3 (validate-hierarchy) only, then merge/confidence/complete */
+async function runAgent3Only(
+  sessionId: string,
+  agent1Items: unknown[],
+  agent1DetectedLevels: { depth: number; name: string }[],
+  classification: Record<string, unknown> | null,
+  organizationName: string | undefined,
+  industry: string | undefined,
+  planLevels: unknown[] | undefined,
+  extractionMethod: string,
+  sourceText: string,
+  auditFindings: AuditFindings | null,
+  pipelineRunId: string
+): Promise<void> {
+  const agent1NameSet = collectItemNameSet(agent1Items);
+  console.log(`[process-plan] Running Agent 3 only (${countAllItems(agent1Items)} items)`);
+
+  await logApiCall({
+    session_id: sessionId,
+    edge_function: "process-plan",
+    step_label: "Starting Agent 3 (validate-hierarchy)",
+    status: "success",
+  });
+
   if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
   await updateSessionProgress(sessionId, { current_step: "validating" });
 
-  // Run Agents 2+3 in parallel
-  const hasSourceText = sourceText.length > 100;
-  const auditPayload: Record<string, unknown> = {
-    extractedItems: agent1Items,
-    sessionId,
-    organizationName,
-    industry,
-    planLevels,
-    classification,
-  };
-  if (hasSourceText) {
-    auditPayload.sourceText = sourceText;
+  let validationResult: ValidationResult | null = null;
+  try {
+    const result = await callEdgeFunction("validate-hierarchy", {
+      sourceText,
+      extractedItems: agent1Items,
+      auditFindings: auditFindings || null,
+      detectedLevels: agent1DetectedLevels,
+      sessionId,
+      organizationName,
+      industry,
+      planLevels,
+    });
+    if (result.ok && (result.data as { success: boolean }).success) {
+      validationResult = (result.data as { data: ValidationResult }).data;
+      console.log("[process-plan] Agent 3 complete:", validationResult?.corrections?.length || 0, "corrections");
+    } else {
+      console.warn("[process-plan] Agent 3 failed (non-fatal):", JSON.stringify(result.data));
+    }
+  } catch (err) {
+    console.error("[process-plan] Agent 3 exception:", err);
   }
 
-  const [auditSettled, validateSettled] = await Promise.allSettled([
-    // Audit (only if we have source text — images aren't available in resume)
-    (async (): Promise<AuditFindings | null> => {
-      if (!hasSourceText) {
-        console.log("[process-plan] Resume: audit skipped (no source text available)");
-        return null;
-      }
-      try {
-        const result = await callEdgeFunction("audit-completeness", auditPayload);
-        if (result.ok && (result.data as { success: boolean }).success) {
-          const findings = (result.data as { data: AuditFindings }).data;
-          console.log("[process-plan] Resume: audit complete:", JSON.stringify(findings?.auditSummary || {}));
-          return findings;
-        }
-        console.warn("[process-plan] Resume: audit failed (non-fatal)");
-        return null;
-      } catch (err) {
-        console.error("[process-plan] Resume: audit error:", err);
-        return null;
-      }
-    })(),
-    // Validation
-    (async (): Promise<ValidationResult | null> => {
-      try {
-        const result = await callEdgeFunction("validate-hierarchy", {
-          sourceText,
-          extractedItems: agent1Items,
-          auditFindings: null,
-          detectedLevels: agent1DetectedLevels,
-          sessionId,
-          organizationName,
-          industry,
-          planLevels,
-        });
-        if (result.ok && (result.data as { success: boolean }).success) {
-          const vr = (result.data as { data: ValidationResult }).data;
-          console.log("[process-plan] Resume: validation complete:", vr.corrections?.length || 0, "corrections");
-          return vr;
-        }
-        console.warn("[process-plan] Resume: validation failed (non-fatal)");
-        return null;
-      } catch (err) {
-        console.error("[process-plan] Resume: validation error:", err);
-        return null;
-      }
-    })(),
-  ]);
-
-  const auditFindings = auditSettled.status === "fulfilled" ? auditSettled.value : null;
-  const validationResult = validateSettled.status === "fulfilled" ? validateSettled.value : null;
-
-  // Merge & confidence scoring (same logic as normal path)
+  // Merge & confidence scoring
   let finalItems: unknown[];
   let finalLevels: { depth: number; name: string }[];
   let corrections: { itemId: string; type: string; description: string }[] = [];
@@ -1789,9 +1819,8 @@ async function runPostExtractionResume(
     : 0;
 
   const finalItemCount = countAllItems(finalItems);
-  console.log(`[process-plan] Resume complete: ${finalItemCount} items, confidence=${sessionConfidence}%`);
+  console.log(`[process-plan] Pipeline complete: ${finalItemCount} items, confidence=${sessionConfidence}%`);
 
-  // Ownership check before writing final resume results
   if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
   await updateSessionProgress(sessionId, {
@@ -1814,7 +1843,7 @@ async function runPostExtractionResume(
   await logApiCall({
     session_id: sessionId,
     edge_function: "process-plan",
-    step_label: "Resume: completed successfully",
+    step_label: "Pipeline completed successfully",
     status: "success",
   });
 }
