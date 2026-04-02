@@ -159,11 +159,6 @@ serve(async (req) => {
     const sessionId = await ensureSession(incomingSessionId);
     console.log("[validate-hierarchy] sessionId:", sessionId);
 
-    let truncatedText = sourceText;
-    if (sourceText.length > MAX_SOURCE_LENGTH) {
-      truncatedText = sourceText.slice(0, MAX_SOURCE_LENGTH);
-      console.log(`[validate-hierarchy] Source truncated from ${sourceText.length} to ${MAX_SOURCE_LENGTH}`);
-    }
 
     const itemListing = flattenItems(extractedItems).join("\n");
 
