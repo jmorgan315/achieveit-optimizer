@@ -338,7 +338,6 @@ export function UploadIdentifyStep({
   const statusLabel = (op: ScanOp): string => {
     const labels: Record<ScanOp, string> = {
       lookup: 'Looking up organization…',
-      parse: 'Extracting text…',
       classify: 'Classifying document structure…',
     };
     return labels[op];
