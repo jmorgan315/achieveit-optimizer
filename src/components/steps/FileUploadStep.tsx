@@ -23,6 +23,7 @@ interface FileUploadStepProps {
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   orgProfile?: OrgProfile;
+  classificationResult?: Record<string, unknown> | null;
   sessionId?: string;
   hasExistingItems?: boolean;
   onAdvanceExisting?: () => void;
@@ -56,7 +57,7 @@ const MAX_PDF_PAGES = 250;
 
 export function FileUploadStep({
   autoStart,
-  onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
+  onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, classificationResult, sessionId,
   hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
   fileContent, setFileContent,
@@ -473,6 +474,7 @@ export function FileUploadStep({
           documentHints: orgProfile?.documentHints,
           planLevels: orgProfile?.planLevels,
           pageRange: orgProfile?.pageRange,
+          classificationResult,
           sessionId,
         }),
       });

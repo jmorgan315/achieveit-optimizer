@@ -446,6 +446,7 @@ const Index = () => {
               onAIExtraction={handleAIExtraction}
               onSpreadsheetComplete={handleSpreadsheetComplete}
               orgProfile={state.orgProfile}
+              classificationResult={classificationResult}
               sessionId={state.sessionId ?? sessionIdRef.current ?? ''}
               hasExistingItems={state.items.length > 0}
               onAdvanceExisting={() => {
