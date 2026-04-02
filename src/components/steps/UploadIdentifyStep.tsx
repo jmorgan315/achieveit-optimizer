@@ -318,7 +318,7 @@ export function UploadIdentifyStep({
 
       onComplete({
         lookupResult,
-        parsedText,
+        parsedText: null,
         pageCount,
         classificationResult,
         pageImages: pageImageUrls,
