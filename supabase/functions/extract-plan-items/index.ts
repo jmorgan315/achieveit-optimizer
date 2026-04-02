@@ -681,7 +681,7 @@ serve(async (req) => {
       } : null;
 
       try {
-        const result = await processChunk(chunks[i], i, chunks.length, previousContext, ANTHROPIC_API_KEY, { organizationName, industry, documentHints, planLevels, pageRange }, sessionId);
+        const result = await processChunk(chunks[i], i, chunks.length, previousContext, ANTHROPIC_API_KEY, { organizationName, industry, documentHints, planLevels, pageRange }, sessionId, batchLabel);
 
         if (result.items?.length > 0) {
           allItems = [...allItems, ...result.items];
