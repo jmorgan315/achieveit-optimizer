@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -11,7 +11,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Upload, FileText, Building2, Loader2, X, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { toast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { renderPDFToImages } from '@/utils/pdfToImages';
 import { LookupResult } from '@/components/steps/OrgProfileStep';
@@ -68,9 +68,19 @@ export function UploadIdentifyStep({
   });
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const safeSet = <T,>(setter: React.Dispatch<React.SetStateAction<T>>, value: T | ((prev: T) => T)) => {
+    if (mountedRef.current) setter(value as any);
+  };
 
   const updateStatus = useCallback((op: ScanOp, status: ScanStatus) => {
-    setScanStatuses(prev => ({ ...prev, [op]: status }));
+    safeSet(setScanStatuses, (prev: Record<ScanOp, ScanStatus>) => ({ ...prev, [op]: status }));
   }, []);
 
   const isPdf = (file: File) => file.name.toLowerCase().endsWith('.pdf');
@@ -127,234 +137,228 @@ export function UploadIdentifyStep({
   const handleContinue = async () => {
     if (!uploadedFile || !orgName.trim() || !industry) return;
 
-    setIsScanning(true);
-    setPageCountError(null);
+    safeSet(setIsScanning, true);
+    safeSet(setPageCountError, null);
     const errors: Record<string, string> = {};
 
-    const sid = await ensureSessionId();
+    try {
+      const sid = await ensureSessionId();
 
-    // Update session with org info + document info
-    supabase.from('processing_sessions').upsert({
-      id: sid,
-      org_name: orgName.trim(),
-      org_industry: industry,
-      document_name: uploadedFile.name,
-      document_size_bytes: uploadedFile.size,
-    }, { onConflict: 'id' }).then(({ error }) => {
-      if (error) console.error('[UploadIdentify] Session update error:', error);
-    });
+      // Await session upsert inside try block
+      const { error: upsertError } = await supabase.from('processing_sessions').upsert({
+        id: sid,
+        org_name: orgName.trim(),
+        org_industry: industry,
+        document_name: uploadedFile.name,
+        document_size_bytes: uploadedFile.size,
+      }, { onConflict: 'id' });
+      if (upsertError) console.error('[UploadIdentify] Session update error:', upsertError);
 
-    // For spreadsheets: only org lookup, then advance
-    if (isSpreadsheet(uploadedFile)) {
-      setScanStatuses({ lookup: 'running', parse: 'skipped', classify: 'skipped' });
+      // For spreadsheets: only org lookup, then advance
+      if (isSpreadsheet(uploadedFile)) {
+        safeSet(setScanStatuses, { lookup: 'running', parse: 'skipped', classify: 'skipped' });
 
-      let lookupResult: LookupResult | null = null;
-      try {
-        const { data, error } = await supabase.functions.invoke('lookup-organization', {
-          body: { organizationName: orgName.trim(), industry, sessionId: sid },
+        let lookupResult: LookupResult | null = null;
+        try {
+          const { data, error } = await supabase.functions.invoke('lookup-organization', {
+            body: { organizationName: orgName.trim(), industry, sessionId: sid },
+          });
+          if (error) throw error;
+          if (data?.success && data?.result) lookupResult = data.result;
+          updateStatus('lookup', 'done');
+        } catch (e: any) {
+          console.error('Org lookup error:', e);
+          errors.lookup = e.message || 'Lookup failed';
+          updateStatus('lookup', 'error');
+        }
+
+        onComplete({
+          lookupResult,
+          parsedText: null,
+          pageCount: null,
+          classificationResult: null,
+          pageImages: null,
+          scanErrors: errors,
+          isSpreadsheet: true,
         });
-        if (error) throw error;
-        if (data?.success && data?.result) lookupResult = data.result;
-        updateStatus('lookup', 'done');
-      } catch (e: any) {
-        console.error('Org lookup error:', e);
-        errors.lookup = e.message || 'Lookup failed';
-        updateStatus('lookup', 'error');
+        return;
       }
 
-      setIsScanning(false);
-      onComplete({
-        lookupResult,
-        parsedText: null,
-        pageCount: null,
-        classificationResult: null,
-        pageImages: null,
-        scanErrors: errors,
-        isSpreadsheet: true,
+      // For text files: read content, org lookup only
+      if (isTextFile(uploadedFile)) {
+        safeSet(setScanStatuses, { lookup: 'running', parse: 'skipped', classify: 'skipped' });
+
+        let lookupResult: LookupResult | null = null;
+        let textContent: string | null = null;
+
+        try {
+          textContent = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target?.result as string || '');
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsText(uploadedFile);
+          });
+        } catch (e: any) {
+          errors.parse = e.message;
+        }
+
+        try {
+          const { data, error } = await supabase.functions.invoke('lookup-organization', {
+            body: { organizationName: orgName.trim(), industry, sessionId: sid },
+          });
+          if (error) throw error;
+          if (data?.success && data?.result) lookupResult = data.result;
+          updateStatus('lookup', 'done');
+        } catch (e: any) {
+          errors.lookup = e.message || 'Lookup failed';
+          updateStatus('lookup', 'error');
+        }
+
+        onComplete({
+          lookupResult,
+          parsedText: textContent,
+          pageCount: null,
+          classificationResult: null,
+          pageImages: null,
+          scanErrors: errors,
+          isSpreadsheet: false,
+        });
+        return;
+      }
+
+      // PDF path: run all 3 in parallel
+      safeSet(setScanStatuses, { lookup: 'running', parse: 'running', classify: 'running' });
+
+      let lookupResult: LookupResult | null = null;
+      let parsedText: string | null = null;
+      let pageCount: number | null = pdfPageCount;
+      let classificationResult: Record<string, unknown> | null = null;
+      let pageImageUrls: string[] | null = null;
+
+      // Defensive JSON parser — falls back to response.text() on parse failure
+      const safeParseJson = async (response: Response): Promise<any> => {
+        try {
+          return await response.json();
+        } catch {
+          const text = await response.text();
+          throw new Error(text || `HTTP ${response.status}`);
+        }
+      };
+
+      const results = await Promise.allSettled([
+        // Op 1: Org lookup
+        (async () => {
+          updateStatus('lookup', 'running');
+          const { data, error } = await supabase.functions.invoke('lookup-organization', {
+            body: { organizationName: orgName.trim(), industry, sessionId: sid },
+          });
+          if (error) throw error;
+          if (data?.success && data?.result) {
+            lookupResult = data.result;
+          } else {
+            lookupResult = { name: orgName.trim(), website: '', summary: `${industry} organization` };
+          }
+          updateStatus('lookup', 'done');
+        })(),
+
+        // Op 2: Parse PDF for text
+        (async () => {
+          if (uploadedFile.size > MAX_TEXT_EXTRACTION_SIZE) {
+            console.log(`[QuickScan] Skipping parse-pdf: file ${(uploadedFile.size / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_EXTRACTION_SIZE / 1024 / 1024}MB limit`);
+            updateStatus('parse', 'skipped');
+            return;
+          }
+          updateStatus('parse', 'running');
+          const formData = new FormData();
+          formData.append('file', uploadedFile);
+          formData.append('sessionId', sid);
+
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-pdf`, {
+            method: 'POST',
+            body: formData,
+          });
+          if (!response.ok) {
+            const err = await safeParseJson(response);
+            throw new Error(err.error || 'Failed to parse PDF');
+          }
+          const result = await safeParseJson(response);
+          if (!result.success) throw new Error(result.error || 'PDF parsing failed');
+          parsedText = result.text;
+          pageCount = result.pageCount || pageCount;
+          updateStatus('parse', 'done');
+        })(),
+
+        // Op 3: Render images + classify
+        (async () => {
+          updateStatus('classify', 'running');
+          const renderResult = await renderPDFToImages(uploadedFile, 250, 0.75);
+          pageImageUrls = renderResult.images.map(img => img.dataUrl);
+          pageCount = renderResult.pageCount;
+
+          if (renderResult.pageCount > MAX_PDF_PAGES) {
+            throw new Error(`PAGE_LIMIT:${renderResult.pageCount}`);
+          }
+
+          const response = await fetch(`${SUPABASE_URL}/functions/v1/classify-document`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              pageImages: pageImageUrls,
+              orgName: orgName.trim(),
+              industry,
+              sessionId: sid,
+            }),
+          });
+          if (!response.ok) {
+            const err = await safeParseJson(response);
+            throw new Error(err.error || 'Classification failed');
+          }
+          const result = await safeParseJson(response);
+          if (result.success) {
+            classificationResult = result;
+          }
+          updateStatus('classify', 'done');
+        })(),
+      ]);
+
+      // Process errors
+      let hitPageLimit = false;
+      results.forEach((r, idx) => {
+        if (r.status === 'rejected') {
+          const opNames: ScanOp[] = ['lookup', 'parse', 'classify'];
+          const op = opNames[idx];
+          const msg = r.reason?.message || String(r.reason);
+
+          if (msg.startsWith('PAGE_LIMIT:')) {
+            const count = msg.split(':')[1];
+            safeSet(setPageCountError, `This document has ${count} pages. The current limit is ${MAX_PDF_PAGES} pages. Try uploading only the section that contains your strategic plan.`);
+            hitPageLimit = true;
+            return;
+          }
+
+          errors[op] = msg;
+          updateStatus(op, 'error');
+          console.error(`[QuickScan] ${op} failed:`, msg);
+        }
       });
-      return;
-    }
 
-    // For text files: read content, org lookup only
-    if (isTextFile(uploadedFile)) {
-      setScanStatuses({ lookup: 'running', parse: 'skipped', classify: 'skipped' });
+      if (hitPageLimit) return;
 
-      let lookupResult: LookupResult | null = null;
-      let textContent: string | null = null;
-
-      // Read text
-      try {
-        textContent = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target?.result as string || '');
-          reader.onerror = () => reject(new Error('Failed to read file'));
-          reader.readAsText(uploadedFile);
-        });
-      } catch (e: any) {
-        errors.parse = e.message;
-      }
-
-      // Org lookup
-      try {
-        const { data, error } = await supabase.functions.invoke('lookup-organization', {
-          body: { organizationName: orgName.trim(), industry, sessionId: sid },
-        });
-        if (error) throw error;
-        if (data?.success && data?.result) lookupResult = data.result;
-        updateStatus('lookup', 'done');
-      } catch (e: any) {
-        errors.lookup = e.message || 'Lookup failed';
-        updateStatus('lookup', 'error');
-      }
-
-      setIsScanning(false);
       onComplete({
         lookupResult,
-        parsedText: textContent,
-        pageCount: null,
-        classificationResult: null,
-        pageImages: null,
+        parsedText,
+        pageCount,
+        classificationResult,
+        pageImages: pageImageUrls,
         scanErrors: errors,
         isSpreadsheet: false,
       });
-      return;
+    } catch (err: any) {
+      console.error('[UploadIdentify] Unexpected error:', err);
+      toast.error('Something went wrong. Please try again.');
+    } finally {
+      safeSet(setIsScanning, false);
     }
-
-    // PDF path: run all 3 in parallel
-    setScanStatuses({ lookup: 'running', parse: 'running', classify: 'running' });
-
-    let lookupResult: LookupResult | null = null;
-    let parsedText: string | null = null;
-    let pageCount: number | null = pdfPageCount;
-    let classificationResult: Record<string, unknown> | null = null;
-    let pageImageUrls: string[] | null = null;
-
-    const results = await Promise.allSettled([
-      // Op 1: Org lookup
-      (async () => {
-        updateStatus('lookup', 'running');
-        const { data, error } = await supabase.functions.invoke('lookup-organization', {
-          body: { organizationName: orgName.trim(), industry, sessionId: sid },
-        });
-        if (error) throw error;
-        if (data?.success && data?.result) {
-          lookupResult = data.result;
-        } else {
-          // Fallback
-          lookupResult = { name: orgName.trim(), website: '', summary: `${industry} organization` };
-        }
-        updateStatus('lookup', 'done');
-      })(),
-
-      // Op 2: Parse PDF for text (skip for large files — edge function has 10MB limit)
-      (async () => {
-        if (uploadedFile.size > MAX_TEXT_EXTRACTION_SIZE) {
-          console.log(`[QuickScan] Skipping parse-pdf: file ${(uploadedFile.size / 1024 / 1024).toFixed(1)}MB exceeds ${MAX_TEXT_EXTRACTION_SIZE / 1024 / 1024}MB limit`);
-          updateStatus('parse', 'skipped');
-          return;
-        }
-        updateStatus('parse', 'running');
-        const formData = new FormData();
-        formData.append('file', uploadedFile);
-        formData.append('sessionId', sid);
-
-        const response = await fetch(`${SUPABASE_URL}/functions/v1/parse-pdf`, {
-          method: 'POST',
-          body: formData,
-        });
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error || 'Failed to parse PDF');
-        }
-        const result = await response.json();
-        if (!result.success) throw new Error(result.error || 'PDF parsing failed');
-        parsedText = result.text;
-        pageCount = result.pageCount || pageCount;
-        updateStatus('parse', 'done');
-      })(),
-
-      // Op 3: Render images + classify
-      (async () => {
-        updateStatus('classify', 'running');
-        // Render PDF to images client-side
-        const renderResult = await renderPDFToImages(uploadedFile, 250, 0.75);
-        pageImageUrls = renderResult.images.map(img => img.dataUrl);
-        pageCount = renderResult.pageCount;
-
-        // Check page limit
-        if (renderResult.pageCount > MAX_PDF_PAGES) {
-          throw new Error(`PAGE_LIMIT:${renderResult.pageCount}`);
-        }
-
-        // Call classify-document
-        const response = await fetch(`${SUPABASE_URL}/functions/v1/classify-document`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pageImages: pageImageUrls,
-            orgName: orgName.trim(),
-            industry,
-            sessionId: sid,
-          }),
-        });
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error || 'Classification failed');
-        }
-        const result = await response.json();
-        if (result.success) {
-          classificationResult = result;
-        }
-        updateStatus('classify', 'done');
-      })(),
-    ]);
-
-    // Process errors
-    results.forEach((r, idx) => {
-      if (r.status === 'rejected') {
-        const opNames: ScanOp[] = ['lookup', 'parse', 'classify'];
-        const op = opNames[idx];
-        const msg = r.reason?.message || String(r.reason);
-
-        // Check for page limit error
-        if (msg.startsWith('PAGE_LIMIT:')) {
-          const count = msg.split(':')[1];
-          setPageCountError(`This document has ${count} pages. The current limit is ${MAX_PDF_PAGES} pages. Try uploading only the section that contains your strategic plan.`);
-          setIsScanning(false);
-          return;
-        }
-
-        errors[op] = msg;
-        updateStatus(op, 'error');
-        console.error(`[QuickScan] ${op} failed:`, msg);
-      }
-    });
-
-    // If page count error was set, don't advance
-    if (pageCountError) {
-      setIsScanning(false);
-      return;
-    }
-
-    // Check if page limit error was just set in this run
-    const pageLimitError = results.find(r =>
-      r.status === 'rejected' && r.reason?.message?.startsWith('PAGE_LIMIT:')
-    );
-    if (pageLimitError) {
-      setIsScanning(false);
-      return;
-    }
-
-    setIsScanning(false);
-    onComplete({
-      lookupResult,
-      parsedText,
-      pageCount,
-      classificationResult,
-      pageImages: pageImageUrls,
-      scanErrors: errors,
-      isSpreadsheet: false,
-    });
   };
 
   const canContinue = orgName.trim() !== '' && industry !== '' && uploadedFile !== null;
