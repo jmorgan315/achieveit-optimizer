@@ -57,7 +57,7 @@ const MAX_PDF_PAGES = 250;
 
 export function FileUploadStep({
   autoStart,
-  onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, sessionId,
+  onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, classificationResult, sessionId,
   hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
   fileContent, setFileContent,
