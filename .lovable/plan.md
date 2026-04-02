@@ -1,62 +1,40 @@
 
 
-# Fix: `extractionMethod` used before declaration + `batchLabel` not passed to processChunk
+# Fix Agent 3 (validate-hierarchy) Timeout for Large Documents
 
-## Root Cause Analysis
+## Problem
+Agent 3 times out on large documents (287 items) because it includes the full source text (100-180K chars) in the prompt, pushing input to ~50-70K tokens and exceeding the 150s edge function limit. Additionally, `max_tokens: 16384` is too small for 287 items (~21K output tokens needed).
 
-There are **two code bugs** causing the cascading failure. The "stale batch 5" and out-of-order steps are symptoms, not separate issues.
+## Changes
 
-### Bug 1: `extractionMethod` referenced before declaration (process-plan)
+### 1. validate-hierarchy/index.ts — Remove sourceText, increase max_tokens, add item count to log
 
-```text
-Line 723:  extractionMethod = "text";        ← assignment
-Line 739:  let extractionMethod = "text";     ← declaration (with let)
-```
+- **Remove** `MAX_SOURCE_LENGTH` constant (line 9)
+- **Remove** `sourceText` from destructured request body (line 151) — no longer expected
+- **Remove** lines 162-166 (the `truncatedText` logic)
+- **Remove** lines 238-243 (the `sourceSection` block that builds `=== SOURCE DOCUMENT ===`)
+- **Remove** `${sourceSection}` from the user message template (line 248)
+- **Change** `max_tokens` from `16384` to `32768` (line 253)
+- In the success log (line 312), change `step_label` to include item count: `` `Step 3: Structure Validation (${result.correctedItems?.length || 0} items, ${result.corrections?.length || 0} corrections)` ``
+- In system prompt line 13, soften "match the document's structure" to "match the extracted hierarchy's structure" (since source text is no longer available)
 
-JavaScript's temporal dead zone means accessing a `let` variable before its declaration throws `ReferenceError: Cannot access 'extractionMethod' before initialization`. This is the exact error in the logs. The text_heavy override block (line 720-731) runs AFTER classification but BEFORE the `let extractionMethod` declaration at line 739.
+### 2. process-plan/index.ts — Remove sourceText from Agent 3 call
 
-**Result**: Pipeline crashes immediately after classifying as text_heavy. No extraction runs. The session is left in a broken state with `document_type: text_heavy` but no extraction data.
+- In `runAgent3Only` function signature (line 1743), remove the `sourceText` parameter
+- In the `callEdgeFunction("validate-hierarchy", ...)` payload (line 1763-1772), remove `sourceText`
+- At the call site (line 1640), remove `sourceText` from the arguments passed to `runAgent3Only`
 
-### Bug 2: `batchLabel` not passed to `processChunk` (extract-plan-items)
+### What stays the same
 
-The `batchLabel` variable is destructured from the request body at line 642, but `processChunk` (line 683) is never given it. Inside `processChunk`, the `logApiCall` calls at lines 475 and 572 reference `batchLabel` — which is a closure variable from the outer `serve` handler scope. **However**, `processChunk` is a standalone function defined at line 401, not a closure. So `batchLabel` is `ReferenceError: batchLabel is not defined` inside it.
+- System prompt logic (other than minor wording tweak)
+- Tool schema
+- Agent 2 (audit-completeness)
+- Extraction pipeline (Agents 0 and 1)
+- Resume cycling and stall detector thresholds
+- Post-Agent-3 merging logic (confidence scoring, enforceMaxDepth, etc.)
 
-This is the exact error repeated in the extract-plan-items logs: `"batchLabel is not defined"` at line 585.
-
-**Wait** — looking more carefully, `batchLabel` IS referenced at lines 475 and 572 inside `processChunk`. Since `processChunk` is defined outside the `serve` handler, `batchLabel` is not in scope. This means the `batchLabel` fix from the previous change was incomplete — it added the references inside `processChunk` but never passed `batchLabel` as a parameter.
-
-### The cascade
-
-1. Initial pipeline: classification succeeds → text_heavy override hits Bug 1 → `ReferenceError` → pipeline crashes
-2. Stall detector fires resume → resume finds session at `current_step: "extracting"` or broken state with stale `step_results` from the crash
-3. Resume tries to continue but extraction data is empty/corrupt → falls through to post-extraction path → sees no items → errors with "no extraction items"
-4. This loops ~20 times until MAX_POLLS expires
-
-## Fix
-
-### File: `supabase/functions/process-plan/index.ts`
-
-**Change 1**: Move the `let extractionMethod = "text"` declaration (line 739) to BEFORE the text_heavy override block. Place it right after the classification block ends (~line 715), before line 720.
-
-**Change 2**: Remove the duplicate `let` keyword. Line 739 should just become a conditional assignment inside the `if (useVision)` block: `extractionMethod = "vision"` (no `let`).
-
-### File: `supabase/functions/extract-plan-items/index.ts`
-
-**Change 1**: Add `batchLabel` as an optional parameter to the `processChunk` function signature (line 401-408).
-
-**Change 2**: Pass `batchLabel` from the `serve` handler call site (line 683) to `processChunk`.
-
-## Files changed
-
-| File | Change |
-|------|--------|
-| `supabase/functions/process-plan/index.ts` | Move `extractionMethod` declaration before the text_heavy override block |
-| `supabase/functions/extract-plan-items/index.ts` | Add `batchLabel` parameter to `processChunk` and pass it from caller |
-
-## What stays the same
-
-- All prompts, models, agent logic
-- Resume handler logic (it's correct — it just never gets good state because of the crash)
-- Frontend stall detector
-- Classification logic
+### Expected result
+- Prompt drops from ~50-70K tokens to ~10-15K tokens
+- Agent 3 completes in 30-60s instead of timing out at 150s
+- Output can be up to 32K tokens, sufficient for 400+ items
 
