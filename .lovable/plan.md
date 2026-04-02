@@ -1,37 +1,89 @@
 
 
-# Fix: handleContinue does nothing when only uploadedFile is present
+# Updated Plan: Screen 2 — ScanResultsStep (Configure)
 
-## Problem
-`handleContinue` has three conditional branches, all requiring either `extractedItems`, `hasExistingItems`, or `fileContent` to be populated. When the user arrives from Screen 1 with only `uploadedFile` set (parse-pdf was skipped or failed), no branch matches and the click is silently ignored.
+This is the same plan as previously approved, with two targeted additions.
 
-## Solution
-Add a fourth branch: when `uploadedFile` is present but no text/items exist yet, trigger the extraction pipeline (the same `handleFileUpload` flow that normally runs after a file is selected on this screen).
+---
 
-### File: `src/components/steps/FileUploadStep.tsx`
+## Addition 1: Skip LevelVerificationModal when levels already configured
 
-**Change `handleContinue`** (lines 844–852) to add a fallback branch:
+**Problem:** If the user configures plan levels on Screen 2 (ScanResultsStep), `handleAIExtraction` and `handleTextSubmit` in Index.tsx unconditionally set `setShowLevelModal(true)`, forcing a redundant confirmation.
+
+**Fix in `src/pages/Index.tsx`:**
+
+In `handleAIExtraction` and `handleTextSubmit`, check if `processingConfig.planLevels` is non-empty. If so, skip the modal and apply levels + advance directly:
 
 ```typescript
-const handleContinue = () => {
-  if (extractedItems && extractedMappings && detectedLevels && onAIExtraction) {
-    onAIExtraction(extractedItems, extractedMappings, detectedLevels);
-  } else if (hasExistingItems && onAdvanceExisting) {
-    onAdvanceExisting();
-  } else if (fileContent.trim() && fileContent !== '__VISION_EXTRACTED__') {
-    onTextSubmit(fileContent);
-  } else if (uploadedFile) {
-    // File present but no extracted content yet — run the extraction pipeline
-    handleFileUpload(uploadedFile);
+const handleAIExtraction = (items, personMappings, levels) => {
+  setLevels(levels);
+  setPendingAIData({ items, personMappings });
+
+  if (processingConfig?.planLevels?.length) {
+    // User already configured levels on Screen 2 — skip modal
+    const configuredLevels = processingConfig.planLevels.map((name, i) => ({
+      depth: i, name
+    }));
+    setLevels(configuredLevels);
+    setItems(items, personMappings);
+    updateLevelsAndRecalculate(configuredLevels);
+    setPendingAIData(null);
+    advanceToStep(3); // skip to people/review
+  } else {
+    setShowLevelModal(true);
+  }
+};
+
+const handleTextSubmit = (text: string) => {
+  setRawText(text);
+  setPendingAIData(null);
+
+  if (processingConfig?.planLevels?.length) {
+    processText();
+    advanceToStep(3);
+  } else {
+    setShowLevelModal(true);
   }
 };
 ```
 
-This reuses the existing `handleFileUpload` function which already handles PDF parsing, vision fallback, spreadsheet detection, and all error states. No other changes needed.
+Same logic: if `processingConfig.planLevels` has entries, the user already made their choice — proceed directly. If empty, show the modal as before.
 
-### What stays the same
-- Button disabled condition (already updated)
-- All existing branches unchanged
-- `handleFileUpload` logic unchanged
-- No new state or props
+---
+
+## Addition 2: useRef guard for autoStart instead of empty dependency array
+
+**Problem:** An empty `useEffect` dependency array triggers ESLint `react-hooks/exhaustive-deps` warnings and is fragile.
+
+**Fix in `src/components/steps/FileUploadStep.tsx`:**
+
+```typescript
+const hasAutoStarted = useRef(false);
+
+useEffect(() => {
+  if (autoStart && uploadedFile && !hasAutoStarted.current && !extractedItems) {
+    hasAutoStarted.current = true;
+    handleFileUpload(uploadedFile);
+  }
+}, [autoStart, uploadedFile, extractedItems]);
+```
+
+The ref ensures the extraction fires exactly once even if dependencies re-evaluate during processing. Reset the ref in the existing `clearFile` function so re-uploads work:
+
+```typescript
+const clearFile = () => {
+  hasAutoStarted.current = false;
+  // ... existing clear logic
+};
+```
+
+---
+
+## Everything else from the approved plan remains unchanged
+
+- New `ScanResultsStep.tsx` component with 5 sections (Org Match, Plan Structure, Document Scope, Time Estimate, Additional Notes)
+- Index.tsx routing: Step 0 → UploadIdentifyStep, Step 1 → ScanResultsStep, Step 2 → FileUploadStep (processing bridge)
+- `handleStartProcessing` handler storing `ProcessingConfig` in state
+- Spreadsheet bypass logic
+- No edge function or pipeline changes
 
