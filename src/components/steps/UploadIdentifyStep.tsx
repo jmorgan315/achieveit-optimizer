@@ -156,7 +156,7 @@ export function UploadIdentifyStep({
 
       // For spreadsheets: only org lookup, then advance
       if (isSpreadsheet(uploadedFile)) {
-        safeSet(setScanStatuses, { lookup: 'running', parse: 'skipped', classify: 'skipped' });
+        safeSet(setScanStatuses, { lookup: 'running', classify: 'skipped' });
 
         let lookupResult: LookupResult | null = null;
         try {
