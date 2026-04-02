@@ -287,7 +287,7 @@ export function UploadIdentifyStep({
           }
           const result = await safeParseJson(response);
           if (result.success) {
-            classificationResult = result;
+            classificationResult = result.classification;
           }
           updateStatus('classify', 'done');
         })(),
