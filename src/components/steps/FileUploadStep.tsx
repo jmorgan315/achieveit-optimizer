@@ -101,6 +101,14 @@ export function FileUploadStep({
     setProgressState(INITIAL_PROGRESS);
   }, []);
 
+  // Auto-start extraction when mounting with autoStart + uploadedFile
+  useEffect(() => {
+    if (autoStart && uploadedFile && !hasAutoStarted.current && !extractedItems && !isProcessing) {
+      hasAutoStarted.current = true;
+      handleFileUpload(uploadedFile);
+    }
+  }, [autoStart, uploadedFile, extractedItems, isProcessing]);
+
   const updateSessionRow = async (updates: Record<string, unknown>) => {
     if (!sessionId) return;
     try {
