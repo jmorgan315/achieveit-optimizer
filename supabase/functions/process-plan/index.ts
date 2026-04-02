@@ -1760,7 +1760,6 @@ async function runAgent3Only(
   let validationResult: ValidationResult | null = null;
   try {
     const result = await callEdgeFunction("validate-hierarchy", {
-      sourceText,
       extractedItems: agent1Items,
       auditFindings: auditFindings || null,
       detectedLevels: agent1DetectedLevels,

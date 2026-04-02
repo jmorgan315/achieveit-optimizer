@@ -298,10 +298,12 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
 
     const toolUse = aiResponse.content?.find((b: { type: string }) => b.type === "tool_use");
 
+    const itemCount = toolUse?.input?.correctedItems?.length || 0;
+    const corrCount = toolUse?.input?.corrections?.length || 0;
     logApiCall({
       session_id: sessionId,
       edge_function: "validate-hierarchy",
-      step_label: "Step 3: Structure Validation",
+      step_label: `Step 3: Structure Validation (${itemCount} items, ${corrCount} corrections)`,
       model: "claude-sonnet-4-20250514",
       request_payload: logPayload,
       response_payload: aiResponse,
