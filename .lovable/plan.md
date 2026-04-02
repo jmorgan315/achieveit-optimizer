@@ -1,40 +1,85 @@
 
 
-# Fix Agent 3 (validate-hierarchy) Timeout for Large Documents
+# Batch Agent 3 (validate-hierarchy) for Large Item Sets
 
-## Problem
-Agent 3 times out on large documents (287 items) because it includes the full source text (100-180K chars) in the prompt, pushing input to ~50-70K tokens and exceeding the 150s edge function limit. Additionally, `max_tokens: 16384` is too small for 287 items (~21K output tokens needed).
+## Summary
+
+Add batching to Agent 3 so documents with >75 items split into multiple validate-hierarchy calls, each completing within the 150s edge function timeout. Documents with ≤75 items use the existing single-call path unchanged.
 
 ## Changes
 
-### 1. validate-hierarchy/index.ts — Remove sourceText, increase max_tokens, add item count to log
+### 1. validate-hierarchy/index.ts — Add globalContext support
 
-- **Remove** `MAX_SOURCE_LENGTH` constant (line 9)
-- **Remove** `sourceText` from destructured request body (line 151) — no longer expected
-- **Remove** lines 162-166 (the `truncatedText` logic)
-- **Remove** lines 238-243 (the `sourceSection` block that builds `=== SOURCE DOCUMENT ===`)
-- **Remove** `${sourceSection}` from the user message template (line 248)
-- **Change** `max_tokens` from `16384` to `32768` (line 253)
-- In the success log (line 312), change `step_label` to include item count: `` `Step 3: Structure Validation (${result.correctedItems?.length || 0} items, ${result.corrections?.length || 0} corrections)` ``
-- In system prompt line 13, soften "match the document's structure" to "match the extracted hierarchy's structure" (since source text is no longer available)
+**Single change**: In the request body destructuring (line 151), add `globalContext`. If present, prepend it to the user message before the item listing.
 
-### 2. process-plan/index.ts — Remove sourceText from Agent 3 call
+```
+- const { extractedItems, auditFindings, ... } = body;
++ const { extractedItems, auditFindings, ..., globalContext } = body;
+```
 
-- In `runAgent3Only` function signature (line 1743), remove the `sourceText` parameter
-- In the `callEdgeFunction("validate-hierarchy", ...)` payload (line 1763-1772), remove `sourceText`
-- At the call site (line 1640), remove `sourceText` from the arguments passed to `runAgent3Only`
+In the user message assembly (line 234), prepend globalContext if present:
 
-### What stays the same
+```
+const globalContextBlock = globalContext ? `=== DOCUMENT CONTEXT ===\n${globalContext}\n\n` : "";
+const userMessage = `${globalContextBlock}${contextPrefix}=== EXTRACTED ITEMS === ...`
+```
 
-- System prompt logic (other than minor wording tweak)
-- Tool schema
-- Agent 2 (audit-completeness)
-- Extraction pipeline (Agents 0 and 1)
-- Resume cycling and stall detector thresholds
-- Post-Agent-3 merging logic (confidence scoring, enforceMaxDepth, etc.)
+No other changes to validate-hierarchy.
 
-### Expected result
-- Prompt drops from ~50-70K tokens to ~10-15K tokens
-- Agent 3 completes in 30-60s instead of timing out at 150s
-- Output can be up to 32K tokens, sufficient for 400+ items
+### 2. process-plan/index.ts — Batch orchestration in runAgent3Only
+
+Replace the single `callEdgeFunction` call (lines 1762-1776) with:
+
+**Step A — Threshold check:**
+```typescript
+const totalItems = countAllItems(agent1Items);
+const BATCH_THRESHOLD = 75;
+const shouldBatch = totalItems > BATCH_THRESHOLD;
+```
+
+**Step B — Single-call path (≤75 items):** Exact current behavior, no changes.
+
+**Step C — Batch grouping (>75 items):**
+- Iterate top-level items, count each subtree via `countAllItems([item])`
+- Accumulate into current batch until adding next item would exceed 75 (unless batch is empty)
+- Result: array of batches, each an array of top-level items with children intact
+
+**Step D — Resume support:**
+- Read `stepResults.validationBatches` (object keyed by batch index)
+- Skip completed batch indices
+
+**Step E — Sequential batch processing:**
+For each uncompleted batch:
+- Log timeline: `"Starting Agent 3 batch N of M"`
+- Call `callEdgeFunction("validate-hierarchy", { extractedItems: batchItems, auditFindings, detectedLevels, sessionId, organizationName, industry, planLevels, globalContext })` where `globalContext` is the top-level item summary
+- On success, persist to `stepResults.validationBatches[batchIndex]` via `updateSessionProgress`
+- Check ownership before next batch
+
+**Step F — Merge:**
+- Concatenate `correctedItems` and `corrections` from all batches in order
+- Construct `validationResult` and feed into existing post-Agent-3 logic (unchanged)
+
+### 3. Timeline logging
+
+- Each batch: validate-hierarchy's existing logging handles this (already includes item/correction counts)
+- process-plan: log `"Starting Agent 3 batch N of M"` and `"Agent 3 batch N complete"` and `"Agent 3 all batches complete, merging"`
+
+### 4. Resume state reading
+
+In `runResume` at the `"validating"` branch (line 1636-1640), pass `stepResults` to `runAgent3Only` so it can read `validationBatches`. Add `stepResults` parameter to `runAgent3Only` signature.
+
+## What stays the same
+
+- validate-hierarchy system prompt, tool schema, model, max_tokens
+- Agents 0, 1, 2
+- Resume cycling / stall detector thresholds
+- Post-Agent-3 logic (enforceMaxDepth, applyRephrasedCorrections, calculateConfidence, final persistence)
+- Single-call path for ≤75 items
+
+## Files changed
+
+| File | Change |
+|------|--------|
+| `supabase/functions/validate-hierarchy/index.ts` | Add `globalContext` to destructuring, prepend to user message |
+| `supabase/functions/process-plan/index.ts` | Batch orchestration in `runAgent3Only`, per-batch persistence, merge logic, pass `stepResults` |
 
