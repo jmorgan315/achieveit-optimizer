@@ -472,7 +472,7 @@ Document section:\n\n${chunkText}`;
     logApiCall({
       session_id: sessionId,
       edge_function: "extract-plan-items",
-      step_label: `Chunk ${chunkIndex + 1}/${totalChunks} Extraction`,
+      step_label: batchLabel ? `${batchLabel}` : `Chunk ${chunkIndex + 1}/${totalChunks} Extraction`,
       model: "claude-opus-4-6",
       request_payload: requestBody as unknown as Record<string, unknown>,
       response_payload: aiResponse as Record<string, unknown>,
