@@ -639,7 +639,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { documentText, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId } = body;
+    const { documentText, organizationName, industry, documentHints, planLevels, pageRange, sessionId: incomingSessionId, batchLabel } = body;
 
     console.log('[extract-plan-items] Received sessionId:', incomingSessionId);
 
