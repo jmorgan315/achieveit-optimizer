@@ -1598,13 +1598,8 @@ async function runResume(sessionId: string): Promise<void> {
         },
       });
 
-      // Ownership check before Agents 2+3
-      if (!(await checkOwnership(sessionId, pipelineRunId))) return;
-
-      // Run Agents 2+3
-      await runPostExtractionResume(sessionId, dedupedItems, detectedLevels, classification, organizationName, industry, planLevels, extractionMethod, documentText, pipelineRunId);
-
-      // Cleanup images
+      // Agent 2 will be picked up by next resume cycle (stall detector fires in ~20s)
+      console.log("[process-plan] Resume: vision extraction complete, returning for Agent 2 in next cycle");
       cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
       return;
     }
