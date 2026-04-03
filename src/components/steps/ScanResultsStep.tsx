@@ -268,12 +268,9 @@ export function ScanResultsStep({
 
       {orgConfirmed === true && lookupResult && (
         <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="py-3 flex items-center gap-3">
-            <CheckCircle2 className="h-5 w-5 text-primary shrink-0" />
-            <div>
-              <p className="font-medium">{lookupResult.name}</p>
-              <p className="text-sm text-muted-foreground">{industry}{lookupResult.website ? ` • ${lookupResult.website}` : ''}</p>
-            </div>
+          <CardContent className="py-2 flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+            <p className="text-sm font-medium">{lookupResult.name} <span className="text-muted-foreground font-normal">• {industry}{lookupResult.website ? ` • ${lookupResult.website}` : ''}</span></p>
           </CardContent>
         </Card>
       )}
