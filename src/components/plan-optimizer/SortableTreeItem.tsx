@@ -197,7 +197,7 @@ export function SortableTreeItem({
           {item.order}
         </Badge>
 
-        <Badge variant="secondary" className="text-xs">
+        <Badge variant="secondary" className="text-xs hidden sm:inline-flex">
           {item.levelName}
         </Badge>
 
