@@ -9,12 +9,14 @@ import { LookupResult } from '@/components/steps/OrgProfileStep';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
+import { RecentSessionsPage } from '@/components/RecentSessionsPage';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
+import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, RotateCcw, Download } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Download, List } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
