@@ -38,9 +38,11 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
+  const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
+  const [isHydrating, setIsHydrating] = useState(false);
 
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
