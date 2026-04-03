@@ -1325,10 +1325,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         },
       },
     });
-    console.log("[process-plan] Agent 2 complete, persisted as 'audited'. Agent 3 will run in next resume cycle.");
+    console.log("[process-plan] Agent 2 complete, persisted as 'audited'. Chaining to Agent 3.");
 
     // Fire-and-forget cleanup of stored page images (no longer needed after audit)
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Cleanup error:", e));
+
+    // Self-chain to run Agent 3 instead of waiting for browser stall detector
+    await dispatchChain(sessionId);
 
   } catch (error) {
     console.error("[process-plan] Pipeline error:", error);
