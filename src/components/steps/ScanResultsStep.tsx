@@ -391,21 +391,6 @@ export function ScanResultsStep({
         </Card>
       )}
 
-      {/* Time Estimate */}
-      {timeEstimate && (
-        <Card className="bg-muted/50">
-          <CardContent className="py-3 flex items-center gap-3">
-            <Clock className="h-5 w-5 text-muted-foreground shrink-0" />
-            <div>
-              <p className="text-sm font-medium">Estimated processing time: {timeEstimate}</p>
-              <p className="text-xs text-muted-foreground">
-                Processing {scopePageCount} page{scopePageCount !== 1 ? 's' : ''} • {docType.replace(/_/g, ' ')} document
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Additional Notes */}
       <Card>
         <CardHeader className="pb-2">
