@@ -1926,6 +1926,14 @@ async function runAgent3Only(
         continue;
       }
 
+      // Time check before each Agent 3 batch
+      if (startTime && shouldChain(startTime)) {
+        console.log(`[process-plan] Time limit approaching before Agent 3 batch ${i + 1}, chaining...`);
+        await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit, chaining before Agent 3 batch ${i + 1}`, status: "success" });
+        await dispatchChain(sessionId);
+        return;
+      }
+
       if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
       const batchItems = batches[i];
