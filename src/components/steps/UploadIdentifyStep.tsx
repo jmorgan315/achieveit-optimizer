@@ -510,7 +510,7 @@ export function UploadIdentifyStep({
 
       {/* Scanning Overlay */}
       {isScanning && (
-        <div className="absolute inset-0 bg-background/80 backdrop-blur-sm rounded-lg flex items-center justify-center z-10">
+        <div className="fixed inset-0 bg-background/80 flex items-center justify-center z-50">
           <Card className="w-full max-w-sm shadow-lg border-border">
             <CardContent className="pt-6 space-y-5">
               <div className="text-center space-y-2">

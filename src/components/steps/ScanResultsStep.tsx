@@ -268,12 +268,9 @@ export function ScanResultsStep({
 
       {orgConfirmed === true && lookupResult && (
         <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="py-3 flex items-center gap-3">
-            <CheckCircle2 className="h-5 w-5 text-primary shrink-0" />
-            <div>
-              <p className="font-medium">{lookupResult.name}</p>
-              <p className="text-sm text-muted-foreground">{industry}{lookupResult.website ? ` • ${lookupResult.website}` : ''}</p>
-            </div>
+          <CardContent className="py-2 flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
+            <p className="text-sm font-medium">{lookupResult.name} <span className="text-muted-foreground font-normal">• {industry}{lookupResult.website ? ` • ${lookupResult.website}` : ''}</span></p>
           </CardContent>
         </Card>
       )}
@@ -394,21 +391,6 @@ export function ScanResultsStep({
         </Card>
       )}
 
-      {/* Time Estimate */}
-      {timeEstimate && (
-        <Card className="bg-muted/50">
-          <CardContent className="py-3 flex items-center gap-3">
-            <Clock className="h-5 w-5 text-muted-foreground shrink-0" />
-            <div>
-              <p className="text-sm font-medium">Estimated processing time: {timeEstimate}</p>
-              <p className="text-xs text-muted-foreground">
-                Processing {scopePageCount} page{scopePageCount !== 1 ? 's' : ''} • {docType.replace(/_/g, ' ')} document
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Additional Notes */}
       <Card>
         <CardHeader className="pb-2">
@@ -453,6 +435,14 @@ export function ScanResultsStep({
             Some scan operations had issues: {Object.values(scanErrors).join('; ')}. You can still proceed.
           </AlertDescription>
         </Alert>
+      )}
+
+      {/* Time estimate inline */}
+      {timeEstimate && (
+        <p className="text-sm text-muted-foreground text-center flex items-center justify-center gap-1.5">
+          <Clock className="h-3.5 w-3.5" />
+          Estimated: {timeEstimate} • {scopePageCount} page{scopePageCount !== 1 ? 's' : ''} • {docType.replace(/_/g, ' ')} document
+        </p>
       )}
 
       {/* Inline hint when button is disabled due to org confirmation */}

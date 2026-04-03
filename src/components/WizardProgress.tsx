@@ -16,14 +16,14 @@ interface WizardProgressProps {
 
 export function WizardProgress({ steps, currentStep, completedStep = -1, onStepClick }: WizardProgressProps) {
   return (
-    <div className="w-full py-2">
+    <div className="w-full py-1">
       <div className="flex items-center justify-between max-w-3xl mx-auto relative">
         {/* Background track */}
-        <div className="absolute top-3 left-0 right-0 h-1 bg-muted rounded-full" />
+        <div className="absolute top-2 left-0 right-0 h-0.5 bg-muted rounded-full" />
         {/* Completed track */}
         {completedStep >= 0 && (
           <div
-            className="absolute top-3 left-0 h-1 bg-primary rounded-full transition-all duration-300"
+            className="absolute top-2 left-0 h-0.5 bg-primary rounded-full transition-all duration-300"
             style={{ width: `${(completedStep / (steps.length - 1)) * 100}%` }}
           />
         )}
@@ -41,7 +41,7 @@ export function WizardProgress({ steps, currentStep, completedStep = -1, onStepC
             >
               <div
                 className={cn(
-                  'h-6 w-6 rounded-full flex items-center justify-center text-xs font-semibold transition-colors',
+                  'h-4 w-4 rounded-full flex items-center justify-center transition-colors',
                   isComplete && !isCurrent
                     ? 'bg-primary text-primary-foreground'
                     : isCurrent
@@ -51,11 +51,11 @@ export function WizardProgress({ steps, currentStep, completedStep = -1, onStepC
                 )}
                 onClick={() => isClickable && onStepClick?.(index)}
               >
-                {isComplete && !isCurrent ? <Check className="h-3 w-3" /> : index + 1}
+                {isComplete && !isCurrent ? <Check className="h-2.5 w-2.5" /> : <span className={cn('block h-1.5 w-1.5 rounded-full', isCurrent ? 'bg-primary-foreground' : 'bg-current')} />}
               </div>
               <p
                 className={cn(
-                  'text-xs mt-1 whitespace-nowrap',
+                  'text-[10px] mt-0.5 whitespace-nowrap',
                   isCurrent ? 'font-medium text-foreground' : isComplete ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
