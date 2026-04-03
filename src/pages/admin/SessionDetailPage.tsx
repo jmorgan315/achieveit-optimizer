@@ -13,6 +13,18 @@ import { useToast } from '@/hooks/use-toast';
 import type { Json } from '@/integrations/supabase/types';
 import { ResultsPreviewTree } from '@/components/admin/ResultsPreviewTree';
 
+const MODEL_RATES: Record<string, { input: number; output: number }> = {
+  'claude-opus-4-6': { input: 15, output: 75 },
+  'claude-sonnet-4-20250514': { input: 3, output: 15 },
+};
+
+function calcCost(model: string | null, inputTokens: number | null, outputTokens: number | null): number | null {
+  if (!model || inputTokens == null || outputTokens == null) return null;
+  const rates = MODEL_RATES[model];
+  if (!rates) return null;
+  return (inputTokens * rates.input + outputTokens * rates.output) / 1_000_000;
+}
+
 interface Session {
   id: string;
   created_at: string;
