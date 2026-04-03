@@ -407,7 +407,7 @@ export function UploadIdentifyStep({
         <CardContent className="space-y-4">
           {!uploadedFile ? (
             <div
-              className={`relative border-2 border-dashed rounded-lg p-12 transition-all cursor-pointer ${
+              className={`relative border-2 border-dashed rounded-lg p-6 sm:p-12 transition-all cursor-pointer ${
                 isDragging
                   ? 'border-primary bg-primary/5 scale-[1.01]'
                   : 'border-border hover:border-primary/50 hover:bg-muted/30'
