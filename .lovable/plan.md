@@ -1,54 +1,39 @@
 
 
-# UI Polish — Compact Stepper, Two-Column Layout, Screen Cleanup
+# UI Tweaks Follow-Up
 
 ## Changes
 
-### 1. Compact Wizard Stepper (`WizardProgress.tsx`)
-Replace large circles + labels with a slim horizontal bar:
-- Thin `h-1` progress track with small `h-6 w-6` dots at each step position
-- Completed dots show a tiny checkmark, active dot has a ring highlight
-- Step labels rendered as small text below each dot
-- Total height ~40px, down from ~120px
-- Remove `py-6` → `py-2`
+### 1. Smaller Stepper Dots (`WizardProgress.tsx`)
+- Reduce dots from `h-6 w-6` → `h-4 w-4`
+- Reduce checkmark icon from `h-3 w-3` → `h-2.5 w-2.5`
+- Remove step number text inside dots (too small now) — completed dots get checkmark, others get a filled/empty dot
+- Change `py-2` → `py-1` to reduce top/bottom padding
+- Adjust track position from `top-3` → `top-2` to match new dot center
+- Header is 64px (`h-16`), stepper target ≤16px, total ≤80px
 
-### 2. Rename headings (`Index.tsx` + `ScanResultsStep.tsx`)
-- `WIZARD_STEPS[1].title`: `'Configure'` → `'Review & Configure'`
-- `ScanResultsStep` heading: `'Configure Extraction'` → `'Review & Configure'`
-- Subtitle: → `'Confirm your organization and adjust settings before processing.'`
+### 2. Full-Screen Scanning Overlay (`UploadIdentifyStep.tsx`, lines 512-538)
+- Change the overlay from `absolute inset-0 bg-background/80 backdrop-blur-sm rounded-lg` to `fixed inset-0 bg-background/80 z-50` (no backdrop-blur, no rounded corners)
+- This makes it a full-screen semi-transparent overlay that won't clip any content
+- Center the scan status card in the middle of the viewport
 
-### 3. Two-Column Layout for ScanResultsStep (`ScanResultsStep.tsx`)
-- Increase container from `max-w-2xl` → `max-w-5xl`
-- Wrap the 5 cards in a `grid grid-cols-1 lg:grid-cols-2 gap-4` layout
-- Left column: Org match card, Plan Structure card
-- Right column: Document Scope, Time Estimate, Additional Notes
-- "Start Processing" button spans full width below the grid
-- Reduce `space-y-6` → `space-y-4` throughout
+### 3. Move Time Estimate Inline Above Button (`ScanResultsStep.tsx`)
+- Remove the Time Estimate `<Card>` from `rightColumn` (lines 397-410)
+- Add an inline muted text line between the grid and the button area: `"Estimated: ~1-2 minutes • 9 pages • presentation document"` using `Clock` icon + muted styling
+- Right column becomes: Document Scope + Additional Notes only
 
-### 4. Inline Hint on Disabled Button (`ScanResultsStep.tsx`)
-- When `!orgReady` (org match pending), show a small muted message above the button:
-  `"↑ Please confirm your organization above to continue"`
-- Render conditionally: only when `lookupResult !== null && orgConfirmed === null`
-
-### 5. Hide File Upload Chrome During Processing (`FileUploadStep.tsx`)
-- When `isLoading` is true, hide the outer Card header ("Upload Your Strategic Plan"), the file status card, and the Continue button — show **only** the `ProcessingOverlay`
-- Optionally show file name as a subtitle inside the overlay area
-- When extraction is complete (`extractedItems` exists, not loading):
-  - Wrap the preview list in a collapsible section (collapsed by default) using `Collapsible` from shadcn
-  - Keep the summary line ("47 items extracted") and "Continue with X Items" button always visible
-
-### 6. Reduce Spacing
-- `ScanResultsStep`: `space-y-6` → `space-y-4`, card padding already compact
-- `FileUploadStep`: `space-y-6` → `space-y-4` in the outer wrapper
+### 4. Compact Confirmed Org State (`ScanResultsStep.tsx`)
+- The confirmed state card (lines 269-279) is already fairly compact with a one-line layout showing name + industry + checkmark
+- Review and ensure it's truly single-line: remove the `<div>` wrapper around name/industry, make it a single `<p>` with `{lookupResult.name} • {industry}` inline with the checkmark
+- Reduce padding: `py-3` → `py-2`
 
 ## Files to Modify
 
 | File | Changes |
 |------|---------|
-| `src/components/WizardProgress.tsx` | Full redesign to compact bar with small dots |
-| `src/components/steps/ScanResultsStep.tsx` | Two-column grid, rename heading/subtitle, disabled hint, tighter spacing |
-| `src/components/steps/FileUploadStep.tsx` | Hide upload chrome during processing, collapsible preview, tighter spacing |
-| `src/pages/Index.tsx` | Update `WIZARD_STEPS[1].title` to `'Review & Configure'` |
+| `src/components/WizardProgress.tsx` | Smaller dots (h-4 w-4), less padding (py-1), adjust track position |
+| `src/components/steps/UploadIdentifyStep.tsx` | Change scanning overlay to fixed full-screen semi-transparent |
+| `src/components/steps/ScanResultsStep.tsx` | Move time estimate inline above button; compact confirmed org card |
 
-No backend, edge function, or pipeline changes.
+No backend changes.
 
