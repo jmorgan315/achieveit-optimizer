@@ -354,8 +354,6 @@ export function UploadIdentifyStep({
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6 relative">
-      <div className="text-center space-y-2">
-      </div>
 
       {/* Card 1: Organization Details */}
       <Card className="border-border/50 shadow-sm">
