@@ -307,7 +307,7 @@ export function FileUploadStep({
                 batchStallStart = Date.now();
               }
               const stallDuration = Date.now() - batchStallStart;
-              if (stallDuration > 120000 && resumeCount < MAX_RESUMES) {
+              if (stallDuration > 300000 && resumeCount < MAX_RESUMES) {
                 resumeCount++;
                 batchStallStart = null; // re-arm stall timer
                 console.log(`[Polling] Resume attempt ${resumeCount} of ${MAX_RESUMES} — extraction stall (batch ${currentBatchCount} unchanged for ${Math.round(stallDuration / 1000)}s)`);
