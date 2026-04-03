@@ -1717,6 +1717,13 @@ async function runResume(sessionId: string): Promise<void> {
     const sourceText = (pipeCtx.documentText || "") as string;
 
     if (currentStep === "extraction_complete" || currentStep === "auditing") {
+      // Time check before Agent 2
+      if (shouldChain(startTime)) {
+        console.log("[process-plan] Resume: time limit before Agent 2, chaining...");
+        await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: "Time limit, chaining before Agent 2 (resume)", status: "success" });
+        await dispatchChain(sessionId);
+        return;
+      }
       // Agent 2 hasn't finished — run (or re-run) Agent 2
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 2`);
       await runAgent2Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, pipelineRunId, stepResults);
