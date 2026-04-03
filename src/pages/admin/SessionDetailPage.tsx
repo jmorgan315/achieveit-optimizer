@@ -241,6 +241,10 @@ export default function SessionDetailPage() {
             <div><span className="text-muted-foreground">API Calls:</span> {session.total_api_calls}</div>
             <div><span className="text-muted-foreground">Tokens:</span> {session.total_input_tokens.toLocaleString()} in / {session.total_output_tokens.toLocaleString()} out</div>
             <div><span className="text-muted-foreground">Duration:</span> {(session.total_duration_ms / 1000).toFixed(1)}s</div>
+            {(() => {
+              const totalCost = logs.reduce((sum, log) => sum + (calcCost(log.model, log.input_tokens, log.output_tokens) ?? 0), 0);
+              return totalCost > 0 ? <div><span className="text-muted-foreground">Cost:</span> ${totalCost.toFixed(2)}</div> : null;
+            })()}
           </div>
         </CardContent>
       </Card>
