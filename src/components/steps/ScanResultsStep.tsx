@@ -415,12 +415,6 @@ export function ScanResultsStep({
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-4">
-      <div className="text-center space-y-1">
-        <h2 className="text-2xl font-bold">Review & Configure</h2>
-        <p className="text-muted-foreground">
-          Confirm your organization and adjust settings before processing.
-        </p>
-      </div>
 
       {/* Two-column grid on wide screens */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -441,7 +435,7 @@ export function ScanResultsStep({
       {timeEstimate && (
         <p className="text-sm text-muted-foreground text-center flex items-center justify-center gap-1.5">
           <Clock className="h-3.5 w-3.5" />
-          Estimated: {timeEstimate} • {scopePageCount} page{scopePageCount !== 1 ? 's' : ''} • {docType.replace(/_/g, ' ')} document
+          Estimated: {timeEstimate} • {scopePageCount} page{scopePageCount !== 1 ? 's' : ''}
         </p>
       )}
 
