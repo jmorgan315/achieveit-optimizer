@@ -2106,7 +2106,8 @@ serve(async (req) => {
     // Resume mode: pick up from extracting or extraction_complete
     if (body.resume_session_id) {
       const resumeSessionId = body.resume_session_id as string;
-      console.log("[process-plan] Resume requested for session:", resumeSessionId);
+      const isChained = !!body.isChainedResume;
+      console.log(`[process-plan] ${isChained ? 'Chained' : 'Browser'} resume requested for session:`, resumeSessionId);
 
       runResume(resumeSessionId).catch((err) => {
         console.error("[process-plan] Resume fatal error:", err);
