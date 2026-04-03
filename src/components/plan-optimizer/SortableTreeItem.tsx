@@ -84,10 +84,15 @@ export function SortableTreeItem({
     isDragging,
   } = useSortable({ id: item.id, resizeObserverConfig: { disabled: true } });
 
+  // Reduce indent on mobile: smaller multiplier, capped depth
+  const indent = typeof window !== 'undefined' && window.innerWidth < 640
+    ? Math.min(depth, 3) * 16 + 8
+    : depth * 24 + 16;
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    paddingLeft: `${depth * 24 + 16}px`,
+    paddingLeft: `${indent}px`,
     opacity: isDragging ? 0.5 : 1,
   };
 
