@@ -4,6 +4,7 @@ import { Check } from 'lucide-react';
 interface WizardStep {
   id: string;
   title: string;
+  shortTitle?: string;
   description?: string;
 }
 
