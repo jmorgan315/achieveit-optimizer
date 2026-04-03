@@ -1473,6 +1473,13 @@ async function runResume(sessionId: string): Promise<void> {
         let allItems = [...existingItems];
 
         for (let chunkIdx = batchesCompleted; chunkIdx < textChunks.length; chunkIdx++) {
+          // Time check
+          if (shouldChain(startTime)) {
+            console.log(`[process-plan] Resume: time limit before text chunk ${chunkIdx + 1}, chaining...`);
+            await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit, chaining (resume text chunk ${chunkIdx} completed)`, status: "success" });
+            await dispatchChain(sessionId);
+            return;
+          }
           if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
           if (chunkIdx > batchesCompleted) {
