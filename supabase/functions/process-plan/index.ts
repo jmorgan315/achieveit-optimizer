@@ -1258,6 +1258,14 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // STEP 2: Audit Completeness ONLY — Agent 3 runs in next resume cycle
     // ==============================
+    // Time check before Agent 2
+    if (shouldChain(startTime)) {
+      console.log("[process-plan] Time limit approaching before Agent 2, chaining...");
+      await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: "Time limit approaching, chaining before Agent 2", status: "success" });
+      await dispatchChain(sessionId);
+      return;
+    }
+
     if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
     await updateSessionProgress(sessionId, { current_step: "auditing" });
