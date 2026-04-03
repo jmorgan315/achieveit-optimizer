@@ -307,6 +307,7 @@ export default function SessionDetailPage() {
                   <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
                     {log.input_tokens != null && <span>{log.input_tokens.toLocaleString()} in</span>}
                     {log.output_tokens != null && <span>{log.output_tokens.toLocaleString()} out</span>}
+                    {(() => { const c = calcCost(log.model, log.input_tokens, log.output_tokens); return c != null ? <span className="font-medium text-foreground">${c.toFixed(4)}</span> : null; })()}
                     {log.duration_ms != null && <span>{(log.duration_ms / 1000).toFixed(1)}s</span>}
                     <Badge variant={log.status === 'success' ? 'default' : 'destructive'} className="text-xs">{log.status}</Badge>
                   </span>
