@@ -1862,7 +1862,8 @@ async function runAgent3Only(
   extractionMethod: string,
   auditFindings: AuditFindings | null,
   pipelineRunId: string,
-  existingStepResults?: Record<string, unknown>
+  existingStepResults?: Record<string, unknown>,
+  startTime?: number
 ): Promise<void> {
   const agent1NameSet = collectItemNameSet(agent1Items);
   const totalItems = countAllItems(agent1Items);
