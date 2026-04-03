@@ -453,12 +453,12 @@ export function UploadIdentifyStep({
             </div>
           ) : (
             <div className="flex items-center justify-between p-4 rounded-lg bg-primary/5 border border-primary/20">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                   <FileText className="h-5 w-5 text-primary" />
                 </div>
-                <div>
-                  <p className="font-medium text-foreground">{uploadedFile.name}</p>
+                <div className="min-w-0">
+                  <p className="font-medium text-foreground truncate">{uploadedFile.name}</p>
                   <p className="text-sm text-muted-foreground">
                     {formatFileSize(uploadedFile.size)}
                     {pdfPageCount !== null && ` · ${pdfPageCount} pages`}

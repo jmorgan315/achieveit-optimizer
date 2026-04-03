@@ -492,7 +492,7 @@ export function PlanOptimizerStep({
       </div>
 
       {/* Stats Bar */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
         {/* Total Items — always neutral */}
         <Card
           className={`cursor-pointer transition-all hover:shadow-md ${!activeFilter ? 'ring-2 ring-primary' : ''}`}

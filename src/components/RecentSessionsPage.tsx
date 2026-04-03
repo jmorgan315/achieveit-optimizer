@@ -79,12 +79,12 @@ export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessi
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-8">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Plan Import Assistant</h1>
             <p className="text-muted-foreground mt-1">Import and structure strategic plans for AchieveIt</p>
           </div>
-          <Button onClick={onNewImport} size="default">
+          <Button onClick={onNewImport} size="default" className="self-start sm:self-auto">
             <Plus className="h-4 w-4 mr-2" />
             New Import
           </Button>
