@@ -2,23 +2,40 @@ import { ExternalLink, Settings } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import achieveitLogo from '@/assets/achieveit-logo.png';
 
-export function Header() {
+interface HeaderProps {
+  onHomeClick?: () => void;
+}
+
+export function Header({ onHomeClick }: HeaderProps) {
   return (
     <header className="border-b border-border/50 bg-card/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <a 
-            href="https://www.achieveit.com" 
-            target="_blank" 
-            rel="noopener noreferrer"
-            className="hover:opacity-90 transition-opacity"
-          >
-            <img 
-              src={achieveitLogo} 
-              alt="AchieveIt - Let's actually do this." 
-              className="h-10 w-auto"
-            />
-          </a>
+          {onHomeClick ? (
+            <button
+              onClick={onHomeClick}
+              className="hover:opacity-90 transition-opacity cursor-pointer"
+            >
+              <img 
+                src={achieveitLogo} 
+                alt="AchieveIt - Let's actually do this." 
+                className="h-10 w-auto"
+              />
+            </button>
+          ) : (
+            <a 
+              href="https://www.achieveit.com" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="hover:opacity-90 transition-opacity"
+            >
+              <img 
+                src={achieveitLogo} 
+                alt="AchieveIt - Let's actually do this." 
+                className="h-10 w-auto"
+              />
+            </a>
+          )}
           <div className="hidden sm:block h-6 w-px bg-border mx-2" />
           <span className="hidden sm:block text-sm font-medium text-muted-foreground">
             Plan Import Assistant
