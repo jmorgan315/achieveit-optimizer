@@ -13,6 +13,18 @@ import { useToast } from '@/hooks/use-toast';
 import type { Json } from '@/integrations/supabase/types';
 import { ResultsPreviewTree } from '@/components/admin/ResultsPreviewTree';
 
+const MODEL_RATES: Record<string, { input: number; output: number }> = {
+  'claude-opus-4-6': { input: 15, output: 75 },
+  'claude-sonnet-4-20250514': { input: 3, output: 15 },
+};
+
+function calcCost(model: string | null, inputTokens: number | null, outputTokens: number | null): number | null {
+  if (!model || inputTokens == null || outputTokens == null) return null;
+  const rates = MODEL_RATES[model];
+  if (!rates) return null;
+  return (inputTokens * rates.input + outputTokens * rates.output) / 1_000_000;
+}
+
 interface Session {
   id: string;
   created_at: string;
@@ -229,6 +241,10 @@ export default function SessionDetailPage() {
             <div><span className="text-muted-foreground">API Calls:</span> {session.total_api_calls}</div>
             <div><span className="text-muted-foreground">Tokens:</span> {session.total_input_tokens.toLocaleString()} in / {session.total_output_tokens.toLocaleString()} out</div>
             <div><span className="text-muted-foreground">Duration:</span> {(session.total_duration_ms / 1000).toFixed(1)}s</div>
+            {(() => {
+              const totalCost = logs.reduce((sum, log) => sum + (calcCost(log.model, log.input_tokens, log.output_tokens) ?? 0), 0);
+              return totalCost > 0 ? <div><span className="text-muted-foreground">Cost:</span> ${totalCost.toFixed(2)}</div> : null;
+            })()}
           </div>
         </CardContent>
       </Card>
@@ -291,6 +307,7 @@ export default function SessionDetailPage() {
                   <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
                     {log.input_tokens != null && <span>{log.input_tokens.toLocaleString()} in</span>}
                     {log.output_tokens != null && <span>{log.output_tokens.toLocaleString()} out</span>}
+                    {(() => { const c = calcCost(log.model, log.input_tokens, log.output_tokens); return c != null ? <span className="font-medium text-foreground">${c.toFixed(4)}</span> : null; })()}
                     {log.duration_ms != null && <span>{(log.duration_ms / 1000).toFixed(1)}s</span>}
                     <Badge variant={log.status === 'success' ? 'default' : 'destructive'} className="text-xs">{log.status}</Badge>
                   </span>
