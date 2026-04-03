@@ -1815,14 +1815,17 @@ async function runAgent2Only(
       audit: auditFindings,
     },
   });
-  console.log("[process-plan] Agent 2 persisted as 'audited'. Agent 3 will run in next resume cycle.");
+  console.log("[process-plan] Agent 2 persisted as 'audited'. Chaining to Agent 3.");
 
   await logApiCall({
     session_id: sessionId,
     edge_function: "process-plan",
-    step_label: "Agent 2 complete — awaiting Agent 3 resume",
+    step_label: "Agent 2 complete — chaining to Agent 3",
     status: "success",
   });
+
+  // Self-chain to run Agent 3 instead of waiting for browser stall detector
+  await dispatchChain(sessionId);
 }
 
 /** Group top-level items into batches of ~BATCH_THRESHOLD total items */
