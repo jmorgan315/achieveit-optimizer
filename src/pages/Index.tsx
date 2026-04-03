@@ -30,11 +30,11 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const WIZARD_STEPS = [
-  { id: 'upload-identify', title: 'Upload & Identify' },
-  { id: 'configure', title: 'Review & Configure' },
+  { id: 'upload-identify', title: 'Upload & Identify', shortTitle: 'Upload' },
+  { id: 'configure', title: 'Review & Configure', shortTitle: 'Configure' },
   { id: 'process', title: 'Process' },
-  { id: 'people', title: 'Map People' },
-  { id: 'review', title: 'Review & Export' },
+  { id: 'people', title: 'Map People', shortTitle: 'People' },
+  { id: 'review', title: 'Review & Export', shortTitle: 'Export' },
 ];
 
 const Index = () => {
