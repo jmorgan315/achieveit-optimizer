@@ -503,7 +503,12 @@ const Index = () => {
   );
 
   if (activeView === 'sessions') {
-    return <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} />;
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} />
+      </div>
+    );
   }
 
   return (
