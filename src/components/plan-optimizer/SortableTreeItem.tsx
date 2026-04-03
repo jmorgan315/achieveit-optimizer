@@ -292,8 +292,8 @@ export function SortableTreeItem({
           size="sm"
           onClick={() => onOptimize(item)}
         >
-          <Sparkles className="h-4 w-4 mr-1" />
-          Optimize
+          <Sparkles className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">Optimize</span>
         </Button>
 
         <Button

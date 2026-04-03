@@ -621,8 +621,8 @@ export function PlanOptimizerStep({
                 size="sm"
                 onClick={() => setShowLevelModal(true)}
               >
-                <Settings className="h-4 w-4 mr-2" />
-                Configure Levels
+                <Settings className="h-4 w-4 sm:mr-2" />
+                <span className="hidden sm:inline">Configure Levels</span>
               </Button>
             )}
           </div>

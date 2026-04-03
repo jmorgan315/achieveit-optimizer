@@ -510,7 +510,7 @@ const Index = () => {
     <div className="min-h-screen bg-background">
       <Header />
 
-      <main className="container mx-auto px-4 py-8">
+      <main className="container mx-auto px-4 py-8 overflow-x-hidden">
         <div className="space-y-2">
           {/* Stepper row */}
           <div className="flex items-center gap-4">
