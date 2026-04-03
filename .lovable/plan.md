@@ -1,34 +1,36 @@
 
 
-# Mobile Fixes (375px)
+# Fix Horizontal Overflow on Mobile
 
-## 3 Issues, 3 Files
+## Root Causes
 
-### Fix 1: Hide stepper labels on mobile — `WizardProgress.tsx`
+From the screenshots, two main sources of horizontal spill:
 
-The short labels render without spacing and run together. On mobile (`< sm`), hide all text labels and show only dots.
+### 1. SortableTreeItem rows (line 157)
+Each tree row is a single `flex items-center gap-2` containing 10+ elements: grip handle, expand chevron, order badge, level badge, confidence dot, item name, metric/date/owner icons, "Optimize" button (with text), edit icon, delete icon. At depth 1+, there's also `paddingLeft: depth * 24 + 16px`. This row has no `overflow-hidden` or `min-w-0`, so on mobile it pushes well past the viewport.
 
-**Change:** On the `<p>` label element (line 57-69), add `hidden sm:block` so the entire label is invisible below `sm`. The dots (h-4 w-4 circles) are sufficient progress indicators at 375px.
+### 2. Global container
+The `<main className="container mx-auto px-4">` in Index.tsx should be fine at 375px, but child content overflowing causes the page body to scroll horizontally.
 
-### Fix 2: Nav row — stack Back/StartOver below stepper on mobile — `Index.tsx`
+## Proposed Fixes
 
-The current layout (lines 514-542) is a single `flex` row: `[Back] [stepper] [Download + Start Over]`. At 375px this overflows.
+### Fix 1: Add `overflow-x-hidden` to the main content wrapper (`Index.tsx`)
+On the `<main>` tag, add `overflow-x-hidden` as a safety net to prevent any child from causing horizontal page scroll.
 
-**Change:** Wrap in a `flex-col sm:flex-row` container:
-- Top row (always): stepper dots only (full width)
-- Bottom row (mobile only, `flex sm:hidden`): Back/Sessions button (left) + Start Over (right), spread with `justify-between`
-- On `sm+`: keep current single-row layout with `hidden sm:flex` on the button containers
+### Fix 2: Make SortableTreeItem responsive (`SortableTreeItem.tsx`)
+- Hide the text label on "Optimize" button on mobile — show icon only. Use `<span className="hidden sm:inline">Optimize</span>`.
+- Hide the level name badge (`item.levelName`) on mobile: `hidden sm:inline-flex` on that Badge.
+- Add `overflow-hidden` and `min-w-0` to the row container so the item name truncates properly instead of pushing the row wider.
+- Reduce left padding on mobile: cap indentation e.g. `Math.min(depth, 3) * 16 + 8` on mobile vs current `depth * 24 + 16`.
 
-Move the "Download AchieveIt Import File" button out of the nav row entirely. Place it as a full-width button below the nav bar on mobile (`sm:hidden`), and keep it in the nav row on desktop (`hidden sm:flex`).
-
-### Fix 3: PlanOptimizerStep toolbar — already partially fixed, verify stats grid
-
-The toolbar (line 452) already uses `flex-col sm:flex-row`. The stats grid (line 495) already uses `grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5`. These were applied in the previous round. No further changes needed here — the issue the user sees is likely caused by Fix 2 (the Download button and nav row overflow pushing content off-screen).
+### Fix 3: Plan Structure card header (`PlanOptimizerStep.tsx` line 613)
+The "Plan Structure" header with "Configure Levels" button uses `flex items-center justify-between`. On mobile, "Configure Levels" text could be abbreviated or the button could be icon-only. Add `overflow-hidden` to the card.
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/components/WizardProgress.tsx` | Add `hidden sm:block` to label `<p>` element |
-| `src/pages/Index.tsx` | Restructure nav row: stack buttons below stepper on mobile; move Download button out of nav row |
+| `src/pages/Index.tsx` | Add `overflow-x-hidden` to `<main>` |
+| `src/components/plan-optimizer/SortableTreeItem.tsx` | Hide "Optimize" text on mobile; hide level badge on mobile; add `overflow-hidden min-w-0` to row; reduce indent depth on mobile |
+| `src/components/steps/PlanOptimizerStep.tsx` | Add `overflow-hidden` to tree Card container |
 
