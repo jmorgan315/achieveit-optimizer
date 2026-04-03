@@ -416,10 +416,6 @@ export function ScanResultsStep({
   return (
     <div className="w-full max-w-5xl mx-auto space-y-4">
       <div className="text-center space-y-1">
-        <h2 className="text-2xl font-bold">Review & Configure</h2>
-        <p className="text-muted-foreground">
-          Confirm your organization and adjust settings before processing.
-        </p>
       </div>
 
       {/* Two-column grid on wide screens */}
