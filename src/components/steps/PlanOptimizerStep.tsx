@@ -449,7 +449,7 @@ export function PlanOptimizerStep({
       )}
 
       {/* View Mode Toggle + Stats Bar */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <LayoutList className={`h-4 w-4 ${viewMode === 'summary' ? 'text-primary' : 'text-muted-foreground'}`} />
           <Switch
@@ -461,7 +461,7 @@ export function PlanOptimizerStep({
             {viewMode === 'full' ? 'Full Editor' : 'Summary'}
           </Label>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
           {/* AI Confidence toggle */}
           <div className="flex items-center gap-2">
             <Switch
@@ -492,7 +492,7 @@ export function PlanOptimizerStep({
       </div>
 
       {/* Stats Bar */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 sm:gap-4">
         {/* Total Items — always neutral */}
         <Card
           className={`cursor-pointer transition-all hover:shadow-md ${!activeFilter ? 'ring-2 ring-primary' : ''}`}
