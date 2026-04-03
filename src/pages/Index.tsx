@@ -392,17 +392,20 @@ const Index = () => {
       <Header />
 
       <main className="container mx-auto px-4 py-8">
-        <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} completedStep={highestCompletedStep} onStepClick={handleStepClick} />
-
-        {/* Sticky Action Bar */}
-        {currentStep > 0 && (
-          <div className="sticky top-16 z-40 bg-background/95 backdrop-blur-sm border-b border-border/50 -mx-4 px-4 py-3 mt-4 flex items-center justify-between">
-            <Button variant="ghost" onClick={handleBack} size="sm">
+        <div className="flex items-center gap-4">
+          {currentStep > 0 ? (
+            <Button variant="ghost" onClick={handleBack} size="sm" className="shrink-0">
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back
             </Button>
+          ) : <div className="w-[72px] shrink-0" />}
 
-            <div className="flex items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} completedStep={highestCompletedStep} onStepClick={handleStepClick} />
+          </div>
+
+          {currentStep > 0 ? (
+            <div className="flex items-center gap-2 shrink-0">
               {currentStep === 4 && (
                 <Button onClick={handleExport} size="sm">
                   <Download className="h-4 w-4 mr-2" />
@@ -411,8 +414,8 @@ const Index = () => {
               )}
               {startOverButton}
             </div>
-          </div>
-        )}
+          ) : <div className="w-[72px] shrink-0" />}
+        </div>
 
         <div className="mt-8">
           {currentStep === 0 && (

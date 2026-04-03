@@ -437,7 +437,7 @@ export function ScanResultsStep({
       {timeEstimate && (
         <p className="text-sm text-muted-foreground text-center flex items-center justify-center gap-1.5">
           <Clock className="h-3.5 w-3.5" />
-          Estimated: {timeEstimate} • {scopePageCount} page{scopePageCount !== 1 ? 's' : ''} • {docType.replace(/_/g, ' ')} document
+          Estimated: {timeEstimate} • {scopePageCount} page{scopePageCount !== 1 ? 's' : ''}
         </p>
       )}
 
