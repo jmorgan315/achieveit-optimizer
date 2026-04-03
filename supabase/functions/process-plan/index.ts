@@ -871,6 +871,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       }
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        // Time check: chain to new invocation if running low
+        if (shouldChain(startTime)) {
+          console.log(`[process-plan] Time limit approaching before vision batch ${batchIdx + 1}, chaining...`);
+          await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit approaching, chaining (vision batch ${batchIdx} completed)`, status: "success" });
+          await dispatchChain(sessionId);
+          return;
+        }
         // Ownership check before each extraction batch
         if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
