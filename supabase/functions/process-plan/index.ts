@@ -1448,8 +1448,9 @@ async function runResume(sessionId: string): Promise<void> {
           },
         });
 
-        // Agent 2 will be picked up by next resume cycle (stall detector fires in ~20s)
-        console.log("[process-plan] Resume: extraction complete, returning for Agent 2 in next cycle");
+        // Self-chain to run Agent 2 instead of waiting for browser stall detector
+        console.log("[process-plan] Resume: extraction complete, chaining to Agent 2");
+        await dispatchChain(sessionId);
         return;
       }
 
