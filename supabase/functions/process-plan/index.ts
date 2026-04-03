@@ -15,6 +15,32 @@ function getServiceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
+// ==============================
+// SELF-CHAINING HELPERS
+// ==============================
+const MAX_EXECUTION_MS = 120_000; // 120s — leave 30s buffer before 150s timeout
+
+function shouldChain(startTime: number): boolean {
+  return (Date.now() - startTime) > MAX_EXECUTION_MS;
+}
+
+async function dispatchChain(sessionId: string): Promise<void> {
+  const url = `${SUPABASE_URL}/functions/v1/process-plan`;
+  const payload = {
+    resume_session_id: sessionId,
+    isChainedResume: true,
+  };
+  fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify(payload),
+  }).catch(err => console.error("[process-plan] Chain dispatch failed:", err));
+  console.log(`[process-plan] Chained next invocation for session ${sessionId}`);
+}
+
 async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
   try {
     const client = getServiceClient();
