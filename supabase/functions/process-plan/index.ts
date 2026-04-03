@@ -15,6 +15,32 @@ function getServiceClient() {
   return createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 }
 
+// ==============================
+// SELF-CHAINING HELPERS
+// ==============================
+const MAX_EXECUTION_MS = 120_000; // 120s — leave 30s buffer before 150s timeout
+
+function shouldChain(startTime: number): boolean {
+  return (Date.now() - startTime) > MAX_EXECUTION_MS;
+}
+
+async function dispatchChain(sessionId: string): Promise<void> {
+  const url = `${SUPABASE_URL}/functions/v1/process-plan`;
+  const payload = {
+    resume_session_id: sessionId,
+    isChainedResume: true,
+  };
+  fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify(payload),
+  }).catch(err => console.error("[process-plan] Chain dispatch failed:", err));
+  console.log(`[process-plan] Chained next invocation for session ${sessionId}`);
+}
+
 async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
   try {
     const client = getServiceClient();
@@ -649,6 +675,7 @@ async function cleanupPageImages(sessionId: string): Promise<void> {
 // The actual pipeline logic, runs in background after early return
 // ==============================
 async function runPipeline(sessionId: string, body: Record<string, unknown>): Promise<void> {
+  const startTime = Date.now();
   const pipelineRunId = crypto.randomUUID();
   console.log(`[process-plan] Starting pipeline run ${pipelineRunId} for session ${sessionId}`);
   await updateSessionProgress(sessionId, { pipeline_run_id: pipelineRunId });
@@ -844,6 +871,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       }
 
       for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        // Time check: chain to new invocation if running low
+        if (shouldChain(startTime)) {
+          console.log(`[process-plan] Time limit approaching before vision batch ${batchIdx + 1}, chaining...`);
+          await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit approaching, chaining (vision batch ${batchIdx} completed)`, status: "success" });
+          await dispatchChain(sessionId);
+          return;
+        }
         // Ownership check before each extraction batch
         if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
@@ -999,6 +1033,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       let textDetectedLevels: { depth: number; name: string }[] = [];
 
       for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        // Time check: chain to new invocation if running low
+        if (shouldChain(startTime)) {
+          console.log(`[process-plan] Time limit approaching before text chunk ${chunkIdx + 1}, chaining...`);
+          await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit approaching, chaining (text chunk ${chunkIdx} completed)`, status: "success" });
+          await dispatchChain(sessionId);
+          return;
+        }
         // Ownership check before each text extraction batch
         if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
@@ -1217,6 +1258,14 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // STEP 2: Audit Completeness ONLY — Agent 3 runs in next resume cycle
     // ==============================
+    // Time check before Agent 2
+    if (shouldChain(startTime)) {
+      console.log("[process-plan] Time limit approaching before Agent 2, chaining...");
+      await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: "Time limit approaching, chaining before Agent 2", status: "success" });
+      await dispatchChain(sessionId);
+      return;
+    }
+
     if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
     await updateSessionProgress(sessionId, { current_step: "auditing" });
@@ -1276,10 +1325,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         },
       },
     });
-    console.log("[process-plan] Agent 2 complete, persisted as 'audited'. Agent 3 will run in next resume cycle.");
+    console.log("[process-plan] Agent 2 complete, persisted as 'audited'. Chaining to Agent 3.");
 
     // Fire-and-forget cleanup of stored page images (no longer needed after audit)
     cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Cleanup error:", e));
+
+    // Self-chain to run Agent 3 instead of waiting for browser stall detector
+    await dispatchChain(sessionId);
 
   } catch (error) {
     console.error("[process-plan] Pipeline error:", error);
@@ -1299,6 +1351,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 // Resume function: handles mid-extraction AND post-extraction resume
 // ==============================
 async function runResume(sessionId: string): Promise<void> {
+  const startTime = Date.now();
   const pipelineRunId = crypto.randomUUID();
   console.log(`[process-plan] Starting resume pipeline run ${pipelineRunId} for session ${sessionId}`);
   await updateSessionProgress(sessionId, { pipeline_run_id: pipelineRunId });
@@ -1395,8 +1448,9 @@ async function runResume(sessionId: string): Promise<void> {
           },
         });
 
-        // Agent 2 will be picked up by next resume cycle (stall detector fires in ~20s)
-        console.log("[process-plan] Resume: extraction complete, returning for Agent 2 in next cycle");
+        // Self-chain to run Agent 2 instead of waiting for browser stall detector
+        console.log("[process-plan] Resume: extraction complete, chaining to Agent 2");
+        await dispatchChain(sessionId);
         return;
       }
 
@@ -1419,6 +1473,13 @@ async function runResume(sessionId: string): Promise<void> {
         let allItems = [...existingItems];
 
         for (let chunkIdx = batchesCompleted; chunkIdx < textChunks.length; chunkIdx++) {
+          // Time check
+          if (shouldChain(startTime)) {
+            console.log(`[process-plan] Resume: time limit before text chunk ${chunkIdx + 1}, chaining...`);
+            await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit, chaining (resume text chunk ${chunkIdx} completed)`, status: "success" });
+            await dispatchChain(sessionId);
+            return;
+          }
           if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
           if (chunkIdx > batchesCompleted) {
@@ -1495,8 +1556,9 @@ async function runResume(sessionId: string): Promise<void> {
           },
         });
 
-        // Agent 2 will be picked up by next resume cycle (stall detector fires in ~20s)
-        console.log("[process-plan] Resume: text extraction complete, returning for Agent 2 in next cycle");
+        // Self-chain to run Agent 2
+        console.log("[process-plan] Resume: text extraction complete, chaining to Agent 2");
+        await dispatchChain(sessionId);
         return;
       }
 
@@ -1521,6 +1583,13 @@ async function runResume(sessionId: string): Promise<void> {
       let previousContext = previousContextFromState;
 
       for (let batchIdx = batchesCompleted; batchIdx < batches.length; batchIdx++) {
+        // Time check
+        if (shouldChain(startTime)) {
+          console.log(`[process-plan] Resume: time limit before vision batch ${batchIdx + 1}, chaining...`);
+          await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit, chaining (resume vision batch ${batchIdx} completed)`, status: "success" });
+          await dispatchChain(sessionId);
+          return;
+        }
         // Ownership check before each resumed extraction batch
         if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
@@ -1615,9 +1684,10 @@ async function runResume(sessionId: string): Promise<void> {
         },
       });
 
-      // Agent 2 will be picked up by next resume cycle (stall detector fires in ~20s)
-      console.log("[process-plan] Resume: vision extraction complete, returning for Agent 2 in next cycle");
+      // Self-chain to run Agent 2
+      console.log("[process-plan] Resume: vision extraction complete, chaining to Agent 2");
       cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
+      await dispatchChain(sessionId);
       return;
     }
 
@@ -1647,6 +1717,13 @@ async function runResume(sessionId: string): Promise<void> {
     const sourceText = (pipeCtx.documentText || "") as string;
 
     if (currentStep === "extraction_complete" || currentStep === "auditing") {
+      // Time check before Agent 2
+      if (shouldChain(startTime)) {
+        console.log("[process-plan] Resume: time limit before Agent 2, chaining...");
+        await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: "Time limit, chaining before Agent 2 (resume)", status: "success" });
+        await dispatchChain(sessionId);
+        return;
+      }
       // Agent 2 hasn't finished — run (or re-run) Agent 2
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 2`);
       await runAgent2Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, pipelineRunId, stepResults);
@@ -1655,7 +1732,7 @@ async function runResume(sessionId: string): Promise<void> {
       // Agent 2 done, Agent 3 hasn't finished — run (or re-run) Agent 3
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 3`);
       const auditFindings = (stepResults.audit || null) as AuditFindings | null;
-      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, pipelineRunId, stepResults);
+      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, pipelineRunId, stepResults, startTime);
     }
 
   } catch (error) {
@@ -1738,14 +1815,17 @@ async function runAgent2Only(
       audit: auditFindings,
     },
   });
-  console.log("[process-plan] Agent 2 persisted as 'audited'. Agent 3 will run in next resume cycle.");
+  console.log("[process-plan] Agent 2 persisted as 'audited'. Chaining to Agent 3.");
 
   await logApiCall({
     session_id: sessionId,
     edge_function: "process-plan",
-    step_label: "Agent 2 complete — awaiting Agent 3 resume",
+    step_label: "Agent 2 complete — chaining to Agent 3",
     status: "success",
   });
+
+  // Self-chain to run Agent 3 instead of waiting for browser stall detector
+  await dispatchChain(sessionId);
 }
 
 /** Group top-level items into batches of ~BATCH_THRESHOLD total items */
@@ -1782,7 +1862,8 @@ async function runAgent3Only(
   extractionMethod: string,
   auditFindings: AuditFindings | null,
   pipelineRunId: string,
-  existingStepResults?: Record<string, unknown>
+  existingStepResults?: Record<string, unknown>,
+  startTime?: number
 ): Promise<void> {
   const agent1NameSet = collectItemNameSet(agent1Items);
   const totalItems = countAllItems(agent1Items);
@@ -1843,6 +1924,14 @@ async function runAgent3Only(
       if (completedBatches[String(i)]) {
         console.log(`[process-plan] Agent 3 batch ${i + 1}/${batches.length} already complete, skipping`);
         continue;
+      }
+
+      // Time check before each Agent 3 batch
+      if (startTime && shouldChain(startTime)) {
+        console.log(`[process-plan] Time limit approaching before Agent 3 batch ${i + 1}, chaining...`);
+        await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit, chaining before Agent 3 batch ${i + 1}`, status: "success" });
+        await dispatchChain(sessionId);
+        return;
       }
 
       if (!(await checkOwnership(sessionId, pipelineRunId))) return;
@@ -2017,7 +2106,8 @@ serve(async (req) => {
     // Resume mode: pick up from extracting or extraction_complete
     if (body.resume_session_id) {
       const resumeSessionId = body.resume_session_id as string;
-      console.log("[process-plan] Resume requested for session:", resumeSessionId);
+      const isChained = !!body.isChainedResume;
+      console.log(`[process-plan] ${isChained ? 'Chained' : 'Browser'} resume requested for session:`, resumeSessionId);
 
       runResume(resumeSessionId).catch((err) => {
         console.error("[process-plan] Resume fatal error:", err);
