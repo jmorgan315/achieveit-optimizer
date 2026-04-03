@@ -336,9 +336,8 @@ export function FileUploadStep({
           if (!extractionCompleteAt) {
             extractionCompleteAt = Date.now();
           }
-          // 120s for states where an agent is actively running, 20s for idle states
-          const agentRunning = step === 'auditing' || step === 'validating';
-          const threshold = agentRunning ? 120000 : 20000;
+          // 300s threshold — backend self-chaining handles transitions, this is a safety net
+          const threshold = 300000;
           const stallDuration = Date.now() - extractionCompleteAt;
           if (stallDuration > threshold && resumeCount < MAX_RESUMES) {
             resumeCount++;
