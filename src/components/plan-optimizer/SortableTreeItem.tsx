@@ -159,7 +159,7 @@ export function SortableTreeItem({
         ref={setNodeRef}
         style={style}
         data-id={item.id}
-        className={`flex items-center gap-2 py-3 px-4 border-b transition-colors ${
+        className={`flex items-center gap-1 sm:gap-2 py-3 px-2 sm:px-4 border-b transition-colors overflow-hidden min-w-0 ${
           needsReview ? 'bg-amber-50 dark:bg-amber-950/20' : hasIssues ? 'bg-destructive/5' : ''
         } ${isDragging ? 'bg-muted shadow-lg z-50' : 'hover:bg-muted/50'} ${
           showInsideHighlight ? 'bg-primary/10 border-l-4 border-l-primary border-b' : ''
