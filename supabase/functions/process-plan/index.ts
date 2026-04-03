@@ -1583,6 +1583,13 @@ async function runResume(sessionId: string): Promise<void> {
       let previousContext = previousContextFromState;
 
       for (let batchIdx = batchesCompleted; batchIdx < batches.length; batchIdx++) {
+        // Time check
+        if (shouldChain(startTime)) {
+          console.log(`[process-plan] Resume: time limit before vision batch ${batchIdx + 1}, chaining...`);
+          await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit, chaining (resume vision batch ${batchIdx} completed)`, status: "success" });
+          await dispatchChain(sessionId);
+          return;
+        }
         // Ownership check before each resumed extraction batch
         if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
