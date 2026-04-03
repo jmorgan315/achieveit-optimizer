@@ -1033,6 +1033,13 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       let textDetectedLevels: { depth: number; name: string }[] = [];
 
       for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        // Time check: chain to new invocation if running low
+        if (shouldChain(startTime)) {
+          console.log(`[process-plan] Time limit approaching before text chunk ${chunkIdx + 1}, chaining...`);
+          await logApiCall({ session_id: sessionId, edge_function: "process-plan", step_label: `Time limit approaching, chaining (text chunk ${chunkIdx} completed)`, status: "success" });
+          await dispatchChain(sessionId);
+          return;
+        }
         // Ownership check before each text extraction batch
         if (!(await checkOwnership(sessionId, pipelineRunId))) return;
 
