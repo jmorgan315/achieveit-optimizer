@@ -3,7 +3,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, FileText, Building2, Clock, Loader2, FolderOpen } from 'lucide-react';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Plus, FileText, Building2, Clock, Loader2, FolderOpen, Trash2, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface SessionRow {
   id: string;
@@ -56,6 +62,8 @@ function StatusBadge({ status }: { status: string }) {
 export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessionsPageProps) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchSessions() {
@@ -75,6 +83,54 @@ export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessi
     }
     fetchSessions();
   }, []);
+
+  async function handleDelete(sessionId: string) {
+    setDeletingId(sessionId);
+    try {
+      const { error: logsErr } = await supabase
+        .from('api_call_logs')
+        .delete()
+        .eq('session_id', sessionId);
+      if (logsErr) throw logsErr;
+
+      const { error: sessErr } = await supabase
+        .from('processing_sessions')
+        .delete()
+        .eq('id', sessionId);
+      if (sessErr) throw sessErr;
+
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      toast.success('Session deleted');
+    } catch (err: any) {
+      console.error('Delete failed:', err);
+      toast.error('Failed to delete session');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function handleCancel(sessionId: string) {
+    setCancellingId(sessionId);
+    try {
+      const { error } = await supabase
+        .from('processing_sessions')
+        .update({ status: 'failed', current_step: 'cancelled', pipeline_run_id: null })
+        .eq('id', sessionId);
+      if (error) throw error;
+
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId ? { ...s, status: 'failed', current_step: 'cancelled' } : s,
+        ),
+      );
+      toast.success('Import cancelled');
+    } catch (err: any) {
+      console.error('Cancel failed:', err);
+      toast.error('Failed to cancel session');
+    } finally {
+      setCancellingId(null);
+    }
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -138,14 +194,83 @@ export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessi
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
-                    {session.status === 'completed' && session.total_items_extracted != null ? (
-                      <span className="text-sm font-medium text-foreground">
+                  <div className="flex items-center gap-2 shrink-0">
+                    {session.status === 'completed' && session.total_items_extracted != null && (
+                      <span className="text-sm font-medium text-foreground mr-1">
                         {session.total_items_extracted} items
                       </span>
-                    ) : session.status === 'in_progress' ? (
-                      <span className="text-sm text-muted-foreground">Processing…</span>
-                    ) : null}
+                    )}
+                    {session.status === 'in_progress' && (
+                      <>
+                        <span className="text-sm text-muted-foreground mr-1">Processing…</span>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-amber-600"
+                              onClick={(e) => e.stopPropagation()}
+                              disabled={cancellingId === session.id}
+                            >
+                              {cancellingId === session.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <XCircle className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Cancel this import?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will stop processing and mark the session as failed.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Keep Running</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleCancel(session.id)}>
+                                Cancel Import
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </>
+                    )}
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => e.stopPropagation()}
+                          disabled={deletingId === session.id}
+                        >
+                          {deletingId === session.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete this session?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will permanently delete the session and all its logs. This cannot be undone.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Keep</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={() => handleDelete(session.id)}
+                          >
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </div>
                 </CardContent>
               </Card>
