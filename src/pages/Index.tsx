@@ -9,12 +9,14 @@ import { LookupResult } from '@/components/steps/OrgProfileStep';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
+import { RecentSessionsPage } from '@/components/RecentSessionsPage';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
+import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, RotateCcw, Download } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Download, List } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,9 +38,11 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
+  const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
+  const [isHydrating, setIsHydrating] = useState(false);
 
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
@@ -136,25 +140,21 @@ const Index = () => {
     resetState();
     setPendingAIData(null);
     setProcessingConfig(null);
-    // Reset Screen 1 state
     setOrgName('');
     setIndustry('');
     setUploadedFile(null);
-    // Reset quick scan results
     setLookupResult(null);
     setClassificationResult(null);
     setParsedText(null);
     setDocumentPageCount(null);
     setPageImages(null);
     setScanErrors({});
-    // Reset bridge state
     setFileContent('');
     setExtractedItems(null);
     setExtractedMappings(null);
     setDetectedLevels(null);
     setUseVisionAI(false);
     setDedupResults([]);
-    // Reset legacy state
     setDocumentHints('');
     setKnowsLevels(false);
     setLevelCount(3);
@@ -163,6 +163,121 @@ const Index = () => {
     setEndPage('');
     setHighestCompletedStep(-1);
     setCurrentStep(0);
+    setActiveView('sessions');
+  };
+
+  const handleNewImport = () => {
+    sessionIdRef.current = null;
+    sessionPromiseRef.current = null;
+    resetState();
+    setPendingAIData(null);
+    setProcessingConfig(null);
+    setOrgName('');
+    setIndustry('');
+    setUploadedFile(null);
+    setLookupResult(null);
+    setClassificationResult(null);
+    setParsedText(null);
+    setDocumentPageCount(null);
+    setPageImages(null);
+    setScanErrors({});
+    setFileContent('');
+    setExtractedItems(null);
+    setExtractedMappings(null);
+    setDetectedLevels(null);
+    setUseVisionAI(false);
+    setDedupResults([]);
+    setDocumentHints('');
+    setKnowsLevels(false);
+    setLevelCount(3);
+    setLevelNames(['Strategic Priority', 'Objective', 'Goal']);
+    setStartPage('');
+    setEndPage('');
+    setHighestCompletedStep(-1);
+    setCurrentStep(0);
+    setActiveView('wizard');
+  };
+
+  const handleSelectSession = async (session: { id: string; org_name: string | null; status: string }) => {
+    setIsHydrating(true);
+    try {
+      // Fetch full session data
+      const { data: fullSession, error } = await supabase
+        .from('processing_sessions')
+        .select('*')
+        .eq('id', session.id)
+        .single();
+
+      if (error || !fullSession) {
+        toast({ title: 'Error', description: 'Failed to load session data.', variant: 'destructive' });
+        setIsHydrating(false);
+        return;
+      }
+
+      // Set session ID
+      sessionIdRef.current = fullSession.id;
+      setSessionId(fullSession.id);
+
+      // Build org profile
+      const profile: OrgProfile = {
+        organizationName: fullSession.org_name || '',
+        industry: fullSession.org_industry || '',
+        confirmed: true,
+      };
+      setOrgProfile(profile);
+      setOrgName(fullSession.org_name || '');
+      setIndustry(fullSession.org_industry || '');
+
+      if (fullSession.status === 'completed') {
+        // Hydrate items from step_results
+        const stepResults = fullSession.step_results as Record<string, unknown> | null;
+        const data = stepResults?.data as Record<string, unknown> | undefined;
+        const aiItems = data?.items as unknown[];
+        const detectedLvls = (data?.detectedLevels as Array<{ depth: number; name: string }>) || [];
+
+        if (aiItems && aiItems.length > 0) {
+          // Build levels from detected levels
+          const levels: PlanLevel[] = detectedLvls.length > 0
+            ? detectedLvls.map((l) => ({ id: String(l.depth), name: l.name, depth: l.depth }))
+            : DEFAULT_LEVELS;
+
+          // Convert AI response to plan items
+          const aiResponse: AIExtractionResponse = {
+            items: aiItems as AIExtractionResponse['items'],
+            detectedLevels: detectedLvls,
+          };
+          const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
+
+          setLevels(levels);
+          setItems(items, personMappings);
+          updateLevelsAndRecalculate(levels);
+
+          setHighestCompletedStep(3);
+          setCurrentStep(4);
+          setActiveView('wizard');
+        } else {
+          // Completed but no items — go to step 4 with empty state
+          setHighestCompletedStep(3);
+          setCurrentStep(4);
+          setActiveView('wizard');
+        }
+      } else if (fullSession.status === 'in_progress') {
+        // For in-progress: jump to processing step, let polling handle the rest
+        setHighestCompletedStep(1);
+        setCurrentStep(2);
+        setActiveView('wizard');
+      } else {
+        // Failed or unknown — go to processing step to show error
+        setHighestCompletedStep(1);
+        setCurrentStep(2);
+        setActiveView('wizard');
+      }
+    } catch (err) {
+      console.error('Session hydration error:', err);
+      toast({ title: 'Error', description: 'Failed to load session.', variant: 'destructive' });
+    } finally {
+      setIsHydrating(false);
+    }
   };
 
   const handleStepClick = (stepIndex: number) => {
@@ -387,6 +502,10 @@ const Index = () => {
     </AlertDialog>
   );
 
+  if (activeView === 'sessions') {
+    return <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} />;
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -398,7 +517,12 @@ const Index = () => {
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back
             </Button>
-          ) : <div className="w-[72px] shrink-0" />}
+          ) : (
+            <Button variant="ghost" onClick={() => setActiveView('sessions')} size="sm" className="shrink-0">
+              <List className="h-4 w-4 mr-2" />
+              Sessions
+            </Button>
+          )}
 
           <div className="flex-1 min-w-0">
             <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} completedStep={highestCompletedStep} onStepClick={handleStepClick} />
