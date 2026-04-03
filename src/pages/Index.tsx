@@ -502,6 +502,10 @@ const Index = () => {
     </AlertDialog>
   );
 
+  if (activeView === 'sessions') {
+    return <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} />;
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -513,7 +517,12 @@ const Index = () => {
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back
             </Button>
-          ) : <div className="w-[72px] shrink-0" />}
+          ) : (
+            <Button variant="ghost" onClick={() => setActiveView('sessions')} size="sm" className="shrink-0">
+              <List className="h-4 w-4 mr-2" />
+              Sessions
+            </Button>
+          )}
 
           <div className="flex-1 min-w-0">
             <WizardProgress steps={WIZARD_STEPS} currentStep={currentStep} completedStep={highestCompletedStep} onStepClick={handleStepClick} />
