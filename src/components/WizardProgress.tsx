@@ -56,14 +56,14 @@ export function WizardProgress({ steps, currentStep, completedStep = -1, onStepC
               </div>
               <p
                 className={cn(
-                  'text-[10px] mt-0.5 whitespace-nowrap',
+                  'text-[10px] mt-0.5 whitespace-nowrap hidden sm:block',
                   isCurrent ? 'font-medium text-foreground' : isComplete ? 'text-foreground' : 'text-muted-foreground'
                 )}
               >
                 {step.shortTitle ? (
                   <>
-                    <span className="hidden sm:inline">{step.title}</span>
-                    <span className="sm:hidden">{step.shortTitle}</span>
+                    <span className="hidden md:inline">{step.title}</span>
+                    <span className="md:hidden">{step.shortTitle}</span>
                   </>
                 ) : step.title}
               </p>
