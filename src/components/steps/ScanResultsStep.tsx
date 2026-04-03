@@ -437,6 +437,14 @@ export function ScanResultsStep({
         </Alert>
       )}
 
+      {/* Time estimate inline */}
+      {timeEstimate && (
+        <p className="text-sm text-muted-foreground text-center flex items-center justify-center gap-1.5">
+          <Clock className="h-3.5 w-3.5" />
+          Estimated: {timeEstimate} • {scopePageCount} page{scopePageCount !== 1 ? 's' : ''} • {docType.replace(/_/g, ' ')} document
+        </p>
+      )}
+
       {/* Inline hint when button is disabled due to org confirmation */}
       {showOrgHint && (
         <p className="text-sm text-muted-foreground text-center flex items-center justify-center gap-1.5">
