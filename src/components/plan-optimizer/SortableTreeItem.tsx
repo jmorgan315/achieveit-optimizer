@@ -84,10 +84,15 @@ export function SortableTreeItem({
     isDragging,
   } = useSortable({ id: item.id, resizeObserverConfig: { disabled: true } });
 
+  // Reduce indent on mobile: smaller multiplier, capped depth
+  const indent = typeof window !== 'undefined' && window.innerWidth < 640
+    ? Math.min(depth, 3) * 16 + 8
+    : depth * 24 + 16;
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    paddingLeft: `${depth * 24 + 16}px`,
+    paddingLeft: `${indent}px`,
     opacity: isDragging ? 0.5 : 1,
   };
 
@@ -154,7 +159,7 @@ export function SortableTreeItem({
         ref={setNodeRef}
         style={style}
         data-id={item.id}
-        className={`flex items-center gap-2 py-3 px-4 border-b transition-colors ${
+        className={`flex items-center gap-1 sm:gap-2 py-3 px-2 sm:px-4 border-b transition-colors overflow-hidden min-w-0 ${
           needsReview ? 'bg-amber-50 dark:bg-amber-950/20' : hasIssues ? 'bg-destructive/5' : ''
         } ${isDragging ? 'bg-muted shadow-lg z-50' : 'hover:bg-muted/50'} ${
           showInsideHighlight ? 'bg-primary/10 border-l-4 border-l-primary border-b' : ''
@@ -192,7 +197,7 @@ export function SortableTreeItem({
           {item.order}
         </Badge>
 
-        <Badge variant="secondary" className="text-xs">
+        <Badge variant="secondary" className="text-xs hidden sm:inline-flex">
           {item.levelName}
         </Badge>
 
@@ -287,8 +292,8 @@ export function SortableTreeItem({
           size="sm"
           onClick={() => onOptimize(item)}
         >
-          <Sparkles className="h-4 w-4 mr-1" />
-          Optimize
+          <Sparkles className="h-4 w-4 sm:mr-1" />
+          <span className="hidden sm:inline">Optimize</span>
         </Button>
 
         <Button
