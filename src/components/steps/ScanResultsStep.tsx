@@ -415,8 +415,6 @@ export function ScanResultsStep({
 
   return (
     <div className="w-full max-w-5xl mx-auto space-y-4">
-      <div className="text-center space-y-1">
-      </div>
 
       {/* Two-column grid on wide screens */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
