@@ -505,11 +505,32 @@ const Index = () => {
     </AlertDialog>
   );
 
+  if (activeView === 'login') {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
+        <LoginPage
+          onSignIn={async (email, password) => {
+            const result = await signIn(email, password);
+            if (!result.error) setActiveView('sessions');
+            return { error: result.error ? { message: result.error.message } : null };
+          }}
+          onSignUp={async (email, password) => {
+            const result = await signUp(email, password);
+            if (!result.error) setActiveView('sessions');
+            return { error: result.error ? { message: result.error.message } : null };
+          }}
+          onSkip={() => setActiveView('sessions')}
+        />
+      </div>
+    );
+  }
+
   if (activeView === 'sessions') {
     return (
       <div className="min-h-screen bg-background">
-        <Header />
-        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} />
+        <Header onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); }} />
+        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user?.id} />
       </div>
     );
   }
