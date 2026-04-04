@@ -24,6 +24,7 @@ interface SessionRow {
 interface RecentSessionsPageProps {
   onNewImport: () => void;
   onSelectSession: (session: SessionRow) => void;
+  userId?: string;
 }
 
 function formatRelativeTime(dateStr: string): string {
