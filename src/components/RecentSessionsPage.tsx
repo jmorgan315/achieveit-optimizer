@@ -68,12 +68,16 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
 
   useEffect(() => {
     async function fetchSessions() {
-      const { data, error } = await supabase
+      let query = supabase
         .from('processing_sessions')
         .select('id, org_name, document_name, status, current_step, total_items_extracted, created_at')
         .not('document_name', 'is', null)
         .order('created_at', { ascending: false })
         .limit(20);
+
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
 
       if (error) {
         console.error('Failed to fetch sessions:', error);
