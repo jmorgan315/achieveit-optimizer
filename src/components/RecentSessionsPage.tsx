@@ -24,6 +24,7 @@ interface SessionRow {
 interface RecentSessionsPageProps {
   onNewImport: () => void;
   onSelectSession: (session: SessionRow) => void;
+  userId?: string;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -59,7 +60,7 @@ function StatusBadge({ status }: { status: string }) {
   }
 }
 
-export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessionsPageProps) {
+export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: RecentSessionsPageProps) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -67,12 +68,18 @@ export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessi
 
   useEffect(() => {
     async function fetchSessions() {
-      const { data, error } = await supabase
+      let query = supabase
         .from('processing_sessions')
         .select('id, org_name, document_name, status, current_step, total_items_extracted, created_at')
         .not('document_name', 'is', null)
         .order('created_at', { ascending: false })
         .limit(20);
+
+      if (userId) {
+        query = query.eq('user_id', userId);
+      }
+
+      const { data, error } = await query;
 
       if (error) {
         console.error('Failed to fetch sessions:', error);
@@ -82,7 +89,7 @@ export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessi
       setLoading(false);
     }
     fetchSessions();
-  }, []);
+  }, [userId]);
 
   async function handleDelete(sessionId: string) {
     setDeletingId(sessionId);

@@ -10,6 +10,8 @@ import { LevelVerificationModal } from '@/components/steps/LevelVerificationModa
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
 import { RecentSessionsPage } from '@/components/RecentSessionsPage';
+import { LoginPage } from '@/components/LoginPage';
+import { useAuth } from '@/hooks/useAuth';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
 import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
@@ -38,7 +40,8 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
-  const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
+  const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
+  const [activeView, setActiveView] = useState<'sessions' | 'wizard' | 'login'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
@@ -113,7 +116,7 @@ const Index = () => {
       sessionIdRef.current = id;
       console.log('[Session] Creating new session:', id);
       setSessionId(id);
-      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress' }, { onConflict: 'id' });
+      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress', user_id: user?.id ?? null }, { onConflict: 'id' });
       if (error) console.error('[Session] Failed to create session row:', error);
       else console.log('[Session] Row created successfully:', id);
       return id;
@@ -502,18 +505,39 @@ const Index = () => {
     </AlertDialog>
   );
 
+  if (activeView === 'login') {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
+        <LoginPage
+          onSignIn={async (email, password) => {
+            const result = await signIn(email, password);
+            if (!result.error) setActiveView('sessions');
+            return { error: result.error ? { message: result.error.message } : null };
+          }}
+          onSignUp={async (email, password) => {
+            const result = await signUp(email, password);
+            if (!result.error) setActiveView('sessions');
+            return { error: result.error ? { message: result.error.message } : null };
+          }}
+          onSkip={() => setActiveView('sessions')}
+        />
+      </div>
+    );
+  }
+
   if (activeView === 'sessions') {
     return (
       <div className="min-h-screen bg-background">
-        <Header />
-        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} />
+        <Header onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); }} />
+        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user?.id} />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} />
+      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} user={user} onSignIn={() => setActiveView('login')} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
 
       <main className="container mx-auto px-4 py-8 overflow-x-hidden">
         <div className="space-y-2">
