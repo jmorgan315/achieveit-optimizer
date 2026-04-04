@@ -40,7 +40,8 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
-  const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
+  const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
+  const [activeView, setActiveView] = useState<'sessions' | 'wizard' | 'login'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
