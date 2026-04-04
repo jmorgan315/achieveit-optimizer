@@ -63,14 +63,27 @@ export function Header({ onHomeClick, user, onSignIn, onSignOut }: HeaderProps) 
           >
             <Settings className="h-4 w-4" />
           </Link>
-          <a
-            href="https://my.achieveit.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
-          >
-            Log In
-          </a>
+          {user ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground truncate max-w-[120px]" title={user.email}>
+                {user.email}
+              </span>
+              <button
+                onClick={onSignOut}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                title="Sign Out"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onSignIn}
+              className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+            >
+              Sign In
+            </button>
+          )}
         </div>
       </div>
     </header>
