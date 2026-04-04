@@ -116,7 +116,7 @@ const Index = () => {
       sessionIdRef.current = id;
       console.log('[Session] Creating new session:', id);
       setSessionId(id);
-      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress' }, { onConflict: 'id' });
+      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress', user_id: user?.id ?? null }, { onConflict: 'id' });
       if (error) console.error('[Session] Failed to create session row:', error);
       else console.log('[Session] Row created successfully:', id);
       return id;
