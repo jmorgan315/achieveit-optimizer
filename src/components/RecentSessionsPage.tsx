@@ -79,6 +79,8 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
         query = query.eq('user_id', userId);
       }
 
+      const { data, error } = await query;
+
       if (error) {
         console.error('Failed to fetch sessions:', error);
       } else {
