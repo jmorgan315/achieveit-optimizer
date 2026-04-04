@@ -10,6 +10,8 @@ import { LevelVerificationModal } from '@/components/steps/LevelVerificationModa
 import { PeopleMapperStep } from '@/components/steps/PeopleMapperStep';
 import { PlanOptimizerStep } from '@/components/steps/PlanOptimizerStep';
 import { RecentSessionsPage } from '@/components/RecentSessionsPage';
+import { LoginPage } from '@/components/LoginPage';
+import { useAuth } from '@/hooks/useAuth';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
 import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
