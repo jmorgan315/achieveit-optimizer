@@ -89,7 +89,7 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
       setLoading(false);
     }
     fetchSessions();
-  }, []);
+  }, [userId]);
 
   async function handleDelete(sessionId: string) {
     setDeletingId(sessionId);
