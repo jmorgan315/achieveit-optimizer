@@ -60,7 +60,7 @@ function StatusBadge({ status }: { status: string }) {
   }
 }
 
-export function RecentSessionsPage({ onNewImport, onSelectSession }: RecentSessionsPageProps) {
+export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: RecentSessionsPageProps) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
