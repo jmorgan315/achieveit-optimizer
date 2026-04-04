@@ -90,6 +90,7 @@ export type Database = {
           total_input_tokens: number
           total_items_extracted: number | null
           total_output_tokens: number
+          user_id: string | null
         }
         Insert: {
           classification_result?: Json | null
@@ -110,6 +111,7 @@ export type Database = {
           total_input_tokens?: number
           total_items_extracted?: number | null
           total_output_tokens?: number
+          user_id?: string | null
         }
         Update: {
           classification_result?: Json | null
@@ -130,6 +132,7 @@ export type Database = {
           total_input_tokens?: number
           total_items_extracted?: number | null
           total_output_tokens?: number
+          user_id?: string | null
         }
         Relationships: []
       }
