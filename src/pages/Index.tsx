@@ -566,12 +566,6 @@ const Index = () => {
             <div className="hidden sm:flex items-center gap-2 shrink-0">
               {currentStep > 0 ? (
                 <>
-                  {currentStep === 4 && (
-                    <Button onClick={handleExport} size="sm">
-                      <Download className="h-4 w-4 mr-2" />
-                      Download AchieveIt Import File
-                    </Button>
-                  )}
                   {startOverButton}
                 </>
               ) : <div className="w-[72px]" />}
