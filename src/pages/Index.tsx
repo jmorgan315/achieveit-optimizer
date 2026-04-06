@@ -508,7 +508,7 @@ const Index = () => {
   if (activeView === 'login') {
     return (
       <div className="min-h-screen bg-background">
-        <Header onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
+        <Header onHomeClick={() => { setActiveView('sessions'); }} onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
         <LoginPage
           onSignIn={async (email, password) => {
             const result = await signIn(email, password);

@@ -27,10 +27,8 @@ export function Header({ onHomeClick, user, onSignIn, onSignOut }: HeaderProps) 
               />
             </button>
           ) : (
-            <a 
-              href="https://www.achieveit.com" 
-              target="_blank" 
-              rel="noopener noreferrer"
+            <Link 
+              to="/"
               className="hover:opacity-90 transition-opacity"
             >
               <img 
@@ -38,7 +36,7 @@ export function Header({ onHomeClick, user, onSignIn, onSignOut }: HeaderProps) 
                 alt="AchieveIt - Let's actually do this." 
                 className="h-10 w-auto"
               />
-            </a>
+            </Link>
           )}
           <div className="hidden sm:block h-6 w-px bg-border mx-2" />
           <span className="hidden sm:block text-sm font-medium text-muted-foreground">
