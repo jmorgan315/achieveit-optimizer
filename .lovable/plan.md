@@ -1,42 +1,43 @@
 
 
-# Fix: Resume Polling for In-Progress Sessions + Homepage Auto-Refresh
+# Diagnosis: Resume Polling Path Analysis
 
-## Bug 1: In-progress sessions trigger handleFileUpload instead of just polling
+## What the code shows
 
-**Problem**: When clicking an in-progress session from RecentSessionsPage, `handleSelectSession` sets `currentStep = 2` which renders `FileUploadStep` with `autoStart` always true. The autoStart effect fires `handleFileUpload`, which tries to re-upload and re-process the file (which doesn't even exist in memory). The backend is already running — we just need to poll.
+1. **`handleSelectSession` (Index.tsx:270-275)**: Correctly sets `resumePollingOnly = true` for in_progress sessions.
 
-**Fix**:
+2. **`FileUploadStep` autoStart effect (line 109-114)**: Correctly checks `autoStart && !resumePollingOnly` — should NOT fire when resuming.
 
-### `src/pages/Index.tsx`
-- Add a `resumePollingOnly` state flag (default `false`)
-- In `handleSelectSession` for `in_progress` sessions: set `resumePollingOnly = true`
-- In `handleNewImport` / `handleStartOver`: reset `resumePollingOnly = false`
-- Pass `resumePollingOnly` as a prop to `FileUploadStep` instead of hardcoding `autoStart`
-- Change `autoStart` to only be true when `resumePollingOnly` is false (i.e., coming from Screen 2)
+3. **`FileUploadStep` resume effect (line 118-174)**: Correctly fires only when `resumePollingOnly && sessionId` is true, calls `pollForResults` only.
 
-### `src/components/steps/FileUploadStep.tsx`
-- Add `resumePollingOnly?: boolean` prop
-- Add a new `useEffect`: when `resumePollingOnly` is true and `sessionId` exists, skip `handleFileUpload` entirely — go straight into `pollForResults(sessionId)`, show the processing overlay, and handle results the same way the pipeline completion path does
-- The existing `autoStart` effect remains unchanged for the normal flow (new import from Screen 2)
+4. **Stall detector (lines 376-384)**: Sends `{ resume_session_id: pollSessionId }` to process-plan, which triggers the `runResume` path — NOT a fresh pipeline. This is correct.
 
-## Bug 2: RecentSessionsPage doesn't auto-refresh for in-progress sessions
+## Likely root cause
 
-**Problem**: The sessions list fetches once on mount and never updates. If a session is processing, the user must manually refresh to see status changes.
+The 4 pipeline starts visible in the admin timeline are probably from the **original upload**, not from clicking the in_progress session. The `hasAutoStarted` ref resets when the component unmounts/remounts. If the user navigated away from the processing screen and back (e.g. clicked Back then Forward, or the component remounted for other reasons), `handleFileUpload` would fire again, calling `process-plan` with the full payload each time.
 
-**Fix**:
+Another possibility: React's StrictMode double-mounting in development could cause the autoStart effect to fire twice.
 
-### `src/components/RecentSessionsPage.tsx`
-- Extract `fetchSessions` out of the `useEffect` so it can be called repeatedly
-- Add a polling `useEffect`: if any session in state has `status === 'in_progress'`, set a 10-second interval that re-fetches sessions
-- When no sessions are in-progress, clear the interval
-- Clean up on unmount
+## Plan
 
-## Files
+### 1. Add diagnostic console.logs to trace execution paths
+
+In `FileUploadStep.tsx`:
+- Top of autoStart `useEffect`: log `autoStart`, `resumePollingOnly`, `uploadedFile`, `hasAutoStarted.current`, `isProcessing`
+- Top of resumePollingOnly `useEffect`: log `resumePollingOnly`, `sessionId`, `hasResumeStarted.current`
+- Top of `handleFileUpload`: log that it was called and from which path
+
+### 2. Guard `handleFileUpload` against duplicate invocations
+
+Add a ref `isUploadInFlight` that prevents `handleFileUpload` from being called while a previous call is still running. This prevents duplicate pipeline starts from re-mounts, double-clicks, or React StrictMode.
+
+### 3. Guard `extractWithVisionPipeline` and `extractPlanItemsWithAI` similarly
+
+Both call `process-plan` — add the same in-flight guard so they can't fire concurrently.
+
+## Files to modify
 
 | File | Change |
 |------|--------|
-| `src/pages/Index.tsx` | Add `resumePollingOnly` state; pass to FileUploadStep; set on session resume |
-| `src/components/steps/FileUploadStep.tsx` | Add `resumePollingOnly` prop; new useEffect for poll-only resume path |
-| `src/components/RecentSessionsPage.tsx` | Add 10s polling interval when any session is in_progress |
+| `src/components/steps/FileUploadStep.tsx` | Add console.logs to autoStart effect, resume effect, and handleFileUpload. Add `isUploadInFlight` ref guard to prevent duplicate process-plan calls. |
 
