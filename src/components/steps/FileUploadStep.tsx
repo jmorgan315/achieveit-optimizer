@@ -746,6 +746,16 @@ export function FileUploadStep({
   };
 
   const handleFileUpload = async (file: File) => {
+    console.log('[handleFileUpload] called', { fileName: file.name, isUploadInFlight: isUploadInFlight.current, resumePollingOnly });
+    if (isUploadInFlight.current) {
+      console.log('[handleFileUpload] BLOCKED — already in flight');
+      return;
+    }
+    if (resumePollingOnly) {
+      console.log('[handleFileUpload] BLOCKED — resumePollingOnly is true');
+      return;
+    }
+    isUploadInFlight.current = true;
     setIsProcessing(true);
     setUploadedFile(file);
     setExtractedItems(null);
