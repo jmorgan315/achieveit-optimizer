@@ -119,6 +119,7 @@ export function FileUploadStep({
   // Resume polling only — skip handleFileUpload, go straight to pollForResults
   const hasResumeStarted = useRef(false);
   useEffect(() => {
+    console.log('[ResumePolling Effect]', { resumePollingOnly, sessionId, hasResumeStarted: hasResumeStarted.current });
     if (!resumePollingOnly || !sessionId || hasResumeStarted.current) return;
     hasResumeStarted.current = true;
 
