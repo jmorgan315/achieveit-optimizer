@@ -20,6 +20,7 @@ import { SpreadsheetImportStep } from './SpreadsheetImportStep';
 
 interface FileUploadStepProps {
   autoStart?: boolean;
+  resumePollingOnly?: boolean;
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
@@ -58,6 +59,7 @@ const MAX_PDF_PAGES = 250;
 
 export function FileUploadStep({
   autoStart,
+  resumePollingOnly,
   onTextSubmit, onAIExtraction, onSpreadsheetComplete, orgProfile, classificationResult, sessionId,
   hasExistingItems, onAdvanceExisting,
   uploadedFile, setUploadedFile,
@@ -105,11 +107,71 @@ export function FileUploadStep({
 
   // Auto-start extraction when mounting with autoStart + uploadedFile
   useEffect(() => {
-    if (autoStart && uploadedFile && !hasAutoStarted.current && !extractedItems && !isProcessing) {
+    if (autoStart && !resumePollingOnly && uploadedFile && !hasAutoStarted.current && !extractedItems && !isProcessing) {
       hasAutoStarted.current = true;
       handleFileUpload(uploadedFile);
     }
-  }, [autoStart, uploadedFile, extractedItems, isProcessing]);
+  }, [autoStart, resumePollingOnly, uploadedFile, extractedItems, isProcessing]);
+
+  // Resume polling only — skip handleFileUpload, go straight to pollForResults
+  const hasResumeStarted = useRef(false);
+  useEffect(() => {
+    if (!resumePollingOnly || !sessionId || hasResumeStarted.current) return;
+    hasResumeStarted.current = true;
+
+    (async () => {
+      setIsExtracting(true);
+      setUseVisionAI(true);
+      resetProgress();
+      setStepProgress('extract', 20);
+      addMessage('Resuming — monitoring pipeline progress...');
+
+      try {
+        const result = await pollForResults(sessionId);
+
+        if (!result.success || !result.data) {
+          throw new Error(result.error || 'Pipeline returned no data');
+        }
+
+        setStepProgress('extract', 100);
+        addMessage(`Extraction complete — found ${result.totalItems || 0} items`);
+        setStepProgress('validate', 100);
+
+        const aiResponse: AIExtractionResponse = result.data;
+        const levels: PlanLevel[] = aiResponse.detectedLevels?.length > 0
+          ? aiResponse.detectedLevels.map((l: { name: string; depth: number }, idx: number) => ({
+              id: String(idx + 1),
+              name: cleanLevelName(l.name),
+              depth: l.depth,
+            }))
+          : DEFAULT_LEVELS;
+
+        const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
+        applyFallbackConfidence(items, result.pipelineComplete);
+
+        const dedupData = result.dedupResults || [];
+        setDedupResults(dedupData);
+
+        setExtractedItems(items);
+        setExtractedMappings(personMappings);
+        setDetectedLevels(levels);
+        setFileContent('__VISION_EXTRACTED__');
+
+        if (onAIExtraction) {
+          onAIExtraction(items, personMappings, levels);
+        }
+      } catch (error) {
+        console.error('Resume polling error:', error);
+        toast({
+          title: 'Processing Failed',
+          description: getUserFriendlyError(error, 'extraction'),
+          variant: 'destructive',
+        });
+      } finally {
+        setIsExtracting(false);
+      }
+    })();
+  }, [resumePollingOnly, sessionId]);
 
   const updateSessionRow = async (updates: Record<string, unknown>) => {
     if (!sessionId) return;

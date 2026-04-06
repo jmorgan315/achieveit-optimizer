@@ -46,6 +46,7 @@ const Index = () => {
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
   const [isHydrating, setIsHydrating] = useState(false);
+  const [resumePollingOnly, setResumePollingOnly] = useState(false);
 
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
@@ -166,6 +167,7 @@ const Index = () => {
     setEndPage('');
     setHighestCompletedStep(-1);
     setCurrentStep(0);
+    setResumePollingOnly(false);
     setActiveView('sessions');
   };
 
@@ -198,6 +200,7 @@ const Index = () => {
     setEndPage('');
     setHighestCompletedStep(-1);
     setCurrentStep(0);
+    setResumePollingOnly(false);
     setActiveView('wizard');
   };
 
@@ -265,7 +268,8 @@ const Index = () => {
           setActiveView('wizard');
         }
       } else if (fullSession.status === 'in_progress') {
-        // For in-progress: jump to processing step, let polling handle the rest
+        // For in-progress: jump to processing step, poll only (don't re-trigger handleFileUpload)
+        setResumePollingOnly(true);
         setHighestCompletedStep(1);
         setCurrentStep(2);
         setActiveView('wizard');
@@ -617,7 +621,8 @@ const Index = () => {
 
           {currentStep === 2 && (
             <FileUploadStep
-              autoStart
+              autoStart={!resumePollingOnly}
+              resumePollingOnly={resumePollingOnly}
               onTextSubmit={handleTextSubmit}
               onAIExtraction={handleAIExtraction}
               onSpreadsheetComplete={handleSpreadsheetComplete}
