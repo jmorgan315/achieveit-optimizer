@@ -66,30 +66,43 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function fetchSessions() {
-      let query = supabase
-        .from('processing_sessions')
-        .select('id, org_name, document_name, status, current_step, total_items_extracted, created_at')
-        .not('document_name', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(20);
+  const fetchSessions = async () => {
+    let query = supabase
+      .from('processing_sessions')
+      .select('id, org_name, document_name, status, current_step, total_items_extracted, created_at')
+      .not('document_name', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(20);
 
-      if (userId) {
-        query = query.eq('user_id', userId);
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error('Failed to fetch sessions:', error);
-      } else {
-        setSessions((data as SessionRow[]) || []);
-      }
-      setLoading(false);
+    if (userId) {
+      query = query.eq('user_id', userId);
     }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Failed to fetch sessions:', error);
+    } else {
+      setSessions((data as SessionRow[]) || []);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
     fetchSessions();
   }, [userId]);
+
+  // Poll for updates while any session is in_progress
+  useEffect(() => {
+    const hasInProgress = sessions.some((s) => s.status === 'in_progress');
+    if (!hasInProgress) return;
+
+    const interval = setInterval(() => {
+      fetchSessions();
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [sessions, userId]);
 
   async function handleDelete(sessionId: string) {
     setDeletingId(sessionId);
