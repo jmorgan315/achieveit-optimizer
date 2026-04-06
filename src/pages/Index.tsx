@@ -167,6 +167,7 @@ const Index = () => {
     setEndPage('');
     setHighestCompletedStep(-1);
     setCurrentStep(0);
+    setResumePollingOnly(false);
     setActiveView('sessions');
   };
 
