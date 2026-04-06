@@ -621,7 +621,8 @@ const Index = () => {
 
           {currentStep === 2 && (
             <FileUploadStep
-              autoStart
+              autoStart={!resumePollingOnly}
+              resumePollingOnly={resumePollingOnly}
               onTextSubmit={handleTextSubmit}
               onAIExtraction={handleAIExtraction}
               onSpreadsheetComplete={handleSpreadsheetComplete}
