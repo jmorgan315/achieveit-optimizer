@@ -20,6 +20,7 @@ import { SpreadsheetImportStep } from './SpreadsheetImportStep';
 
 interface FileUploadStepProps {
   autoStart?: boolean;
+  resumePollingOnly?: boolean;
   onTextSubmit: (text: string) => void;
   onAIExtraction?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
   onSpreadsheetComplete?: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
