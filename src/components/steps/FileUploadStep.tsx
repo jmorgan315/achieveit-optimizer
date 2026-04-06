@@ -82,6 +82,7 @@ export function FileUploadStep({
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasAutoStarted = useRef(false);
+  const isUploadInFlight = useRef(false);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
 
