@@ -46,6 +46,7 @@ const Index = () => {
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
   const [isHydrating, setIsHydrating] = useState(false);
+  const [resumePollingOnly, setResumePollingOnly] = useState(false);
 
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
