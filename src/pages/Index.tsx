@@ -268,7 +268,8 @@ const Index = () => {
           setActiveView('wizard');
         }
       } else if (fullSession.status === 'in_progress') {
-        // For in-progress: jump to processing step, let polling handle the rest
+        // For in-progress: jump to processing step, poll only (don't re-trigger handleFileUpload)
+        setResumePollingOnly(true);
         setHighestCompletedStep(1);
         setCurrentStep(2);
         setActiveView('wizard');
