@@ -1,60 +1,42 @@
 
 
-# Optional Auth Infrastructure (Email/Password, Not Enforced)
+# Fix: Resume Polling for In-Progress Sessions + Homepage Auto-Refresh
 
-## Summary
-Add email/password authentication that is entirely optional. Anonymous users keep full access. Signed-in users get sessions tagged with their `user_id` and see only their own sessions.
+## Bug 1: In-progress sessions trigger handleFileUpload instead of just polling
 
-## Database Migration
+**Problem**: When clicking an in-progress session from RecentSessionsPage, `handleSelectSession` sets `currentStep = 2` which renders `FileUploadStep` with `autoStart` always true. The autoStart effect fires `handleFileUpload`, which tries to re-upload and re-process the file (which doesn't even exist in memory). The backend is already running — we just need to poll.
 
-```sql
-ALTER TABLE processing_sessions
-  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id);
-
-CREATE INDEX IF NOT EXISTS idx_processing_sessions_user_id
-  ON processing_sessions(user_id);
-```
-
-## Files to Create
-
-### `src/hooks/useAuth.ts`
-Auth hook providing `user`, `loading`, `signIn`, `signUp`, `signOut`. Uses `onAuthStateChange` listener set up before `getSession()` per best practices.
-
-### `src/components/LoginPage.tsx`
-Simple login/signup form:
-- Toggle between "Sign In" and "Create Account" modes
-- Email + password fields with basic validation
-- Error message display
-- "Continue without signing in" link that calls a callback to go back to sessions
-- On successful auth, navigates back to sessions view
-
-## Files to Modify
+**Fix**:
 
 ### `src/pages/Index.tsx`
-- Import and call `useAuth()` to get `user`, `loading`, `signIn`, `signUp`, `signOut`
-- Add `activeView` state option: `'sessions' | 'wizard' | 'login'`
-- When `activeView === 'login'`, render `<LoginPage>` with auth callbacks
-- Pass `user` to `Header` and `RecentSessionsPage`
-- In `ensureSessionId`: include `user_id: user?.id ?? null` in the upsert payload
+- Add a `resumePollingOnly` state flag (default `false`)
+- In `handleSelectSession` for `in_progress` sessions: set `resumePollingOnly = true`
+- In `handleNewImport` / `handleStartOver`: reset `resumePollingOnly = false`
+- Pass `resumePollingOnly` as a prop to `FileUploadStep` instead of hardcoding `autoStart`
+- Change `autoStart` to only be true when `resumePollingOnly` is false (i.e., coming from Screen 2)
 
-### `src/components/Header.tsx`
-- Add `user` and `onSignOut` and `onSignIn` props (all optional)
-- If user is signed in: show truncated email + "Sign Out" button instead of "Log In" link
-- If user is not signed in: "Sign In" link calls `onSignIn` callback (navigates to login view)
+### `src/components/steps/FileUploadStep.tsx`
+- Add `resumePollingOnly?: boolean` prop
+- Add a new `useEffect`: when `resumePollingOnly` is true and `sessionId` exists, skip `handleFileUpload` entirely — go straight into `pollForResults(sessionId)`, show the processing overlay, and handle results the same way the pipeline completion path does
+- The existing `autoStart` effect remains unchanged for the normal flow (new import from Screen 2)
+
+## Bug 2: RecentSessionsPage doesn't auto-refresh for in-progress sessions
+
+**Problem**: The sessions list fetches once on mount and never updates. If a session is processing, the user must manually refresh to see status changes.
+
+**Fix**:
 
 ### `src/components/RecentSessionsPage.tsx`
-- Accept optional `userId` prop
-- If `userId` is provided: filter query with `.eq('user_id', userId)`
-- If `userId` is null/undefined: show all sessions (current behavior)
+- Extract `fetchSessions` out of the `useEffect` so it can be called repeatedly
+- Add a polling `useEffect`: if any session in state has `status === 'in_progress'`, set a 10-second interval that re-fetches sessions
+- When no sessions are in-progress, clear the interval
+- Clean up on unmount
 
-## Auth Configuration
-- Enable auto-confirm for email signups (since the prompt says "No email verification required for now")
-- Use `cloud--configure_auth` tool to set this
+## Files
 
-## What Does NOT Change
-- No RLS changes — current permissive policies stay
-- No protected routes — everything accessible
-- No admin panel changes
-- No edge function changes
-- No SSO/OAuth
+| File | Change |
+|------|--------|
+| `src/pages/Index.tsx` | Add `resumePollingOnly` state; pass to FileUploadStep; set on session resume |
+| `src/components/steps/FileUploadStep.tsx` | Add `resumePollingOnly` prop; new useEffect for poll-only resume path |
+| `src/components/RecentSessionsPage.tsx` | Add 10s polling interval when any session is in_progress |
 
