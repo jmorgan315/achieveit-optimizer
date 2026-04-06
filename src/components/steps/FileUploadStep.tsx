@@ -82,6 +82,7 @@ export function FileUploadStep({
   const [pageCountError, setPageCountError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasAutoStarted = useRef(false);
+  const isUploadInFlight = useRef(false);
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
 
@@ -107,8 +108,10 @@ export function FileUploadStep({
 
   // Auto-start extraction when mounting with autoStart + uploadedFile
   useEffect(() => {
+    console.log('[AutoStart Effect]', { autoStart, resumePollingOnly, hasFile: !!uploadedFile, hasAutoStarted: hasAutoStarted.current, isProcessing, hasExtractedItems: !!extractedItems });
     if (autoStart && !resumePollingOnly && uploadedFile && !hasAutoStarted.current && !extractedItems && !isProcessing) {
       hasAutoStarted.current = true;
+      console.log('[AutoStart Effect] → calling handleFileUpload');
       handleFileUpload(uploadedFile);
     }
   }, [autoStart, resumePollingOnly, uploadedFile, extractedItems, isProcessing]);
@@ -116,6 +119,7 @@ export function FileUploadStep({
   // Resume polling only — skip handleFileUpload, go straight to pollForResults
   const hasResumeStarted = useRef(false);
   useEffect(() => {
+    console.log('[ResumePolling Effect]', { resumePollingOnly, sessionId, hasResumeStarted: hasResumeStarted.current });
     if (!resumePollingOnly || !sessionId || hasResumeStarted.current) return;
     hasResumeStarted.current = true;
 
@@ -742,6 +746,16 @@ export function FileUploadStep({
   };
 
   const handleFileUpload = async (file: File) => {
+    console.log('[handleFileUpload] called', { fileName: file.name, isUploadInFlight: isUploadInFlight.current, resumePollingOnly });
+    if (isUploadInFlight.current) {
+      console.log('[handleFileUpload] BLOCKED — already in flight');
+      return;
+    }
+    if (resumePollingOnly) {
+      console.log('[handleFileUpload] BLOCKED — resumePollingOnly is true');
+      return;
+    }
+    isUploadInFlight.current = true;
     setIsProcessing(true);
     setUploadedFile(file);
     setExtractedItems(null);
@@ -885,6 +899,8 @@ export function FileUploadStep({
         variant: "destructive",
       });
       setIsProcessing(false);
+    } finally {
+      isUploadInFlight.current = false;
     }
   };
 
