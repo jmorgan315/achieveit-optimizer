@@ -899,6 +899,8 @@ export function FileUploadStep({
         variant: "destructive",
       });
       setIsProcessing(false);
+    } finally {
+      isUploadInFlight.current = false;
     }
   };
 
