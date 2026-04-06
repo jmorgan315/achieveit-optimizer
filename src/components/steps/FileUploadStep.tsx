@@ -108,8 +108,10 @@ export function FileUploadStep({
 
   // Auto-start extraction when mounting with autoStart + uploadedFile
   useEffect(() => {
+    console.log('[AutoStart Effect]', { autoStart, resumePollingOnly, hasFile: !!uploadedFile, hasAutoStarted: hasAutoStarted.current, isProcessing, hasExtractedItems: !!extractedItems });
     if (autoStart && !resumePollingOnly && uploadedFile && !hasAutoStarted.current && !extractedItems && !isProcessing) {
       hasAutoStarted.current = true;
+      console.log('[AutoStart Effect] → calling handleFileUpload');
       handleFileUpload(uploadedFile);
     }
   }, [autoStart, resumePollingOnly, uploadedFile, extractedItems, isProcessing]);
