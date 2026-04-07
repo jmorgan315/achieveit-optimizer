@@ -7,10 +7,11 @@ interface HeaderProps {
   onHomeClick?: () => void;
   user?: User | null;
   isAdmin?: boolean;
+  displayName?: string | null;
   onSignOut?: () => void;
 }
 
-export function Header({ onHomeClick, user, isAdmin, onSignOut }: HeaderProps) {
+export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut }: HeaderProps) {
   return (
     <header className="border-b border-border/50 bg-card/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -71,7 +72,7 @@ export function Header({ onHomeClick, user, isAdmin, onSignOut }: HeaderProps) {
                 title="Account Settings"
               >
                 <UserCircle className="h-4 w-4 shrink-0" />
-                {user.user_metadata?.full_name || user.user_metadata?.name || user.email}
+                {displayName || user.user_metadata?.full_name || user.user_metadata?.name || user.email}
               </Link>
               <button
                 onClick={onSignOut}

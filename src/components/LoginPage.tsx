@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
   onSignIn: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
-  onSignUp: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
+  onSignUp: (email: string, password: string, firstName?: string, lastName?: string) => Promise<{ error: { message: string } | null }>;
   onResetPassword: (email: string) => Promise<{ error: { message: string } | null }>;
   domainError?: string | null;
 }
@@ -16,6 +16,8 @@ interface LoginPageProps {
 export function LoginPage({ onSignIn, onSignUp, onResetPassword, domainError }: LoginPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -46,7 +48,7 @@ export function LoginPage({ onSignIn, onSignUp, onResetPassword, domainError }: 
           setSuccess('Password reset link sent. Check your email.');
         }
       } else if (mode === 'signup') {
-        const result = await onSignUp(email, password);
+        const result = await onSignUp(email, password, firstName, lastName);
         if (result.error) {
           setError(result.error.message);
         } else {
@@ -103,6 +105,33 @@ export function LoginPage({ onSignIn, onSignUp, onResetPassword, domainError }: 
                 required
               />
             </div>
+
+            {mode === 'signup' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName">First Name</Label>
+                  <Input
+                    id="firstName"
+                    type="text"
+                    placeholder="Jane"
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName">Last Name</Label>
+                  <Input
+                    id="lastName"
+                    type="text"
+                    placeholder="Doe"
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+            )}
 
             {mode !== 'forgot' && (
               <div className="space-y-2">

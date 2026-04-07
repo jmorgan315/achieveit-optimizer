@@ -5,6 +5,7 @@ import type { User } from '@supabase/supabase-js';
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [domainError, setDomainError] = useState<string | null>(null);
 
@@ -23,7 +24,7 @@ export function useAuth() {
     // Check profile (auto-created by DB trigger on signup)
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('is_admin, is_active')
+      .select('is_admin, is_active, first_name, last_name')
       .eq('id', currentUser.id)
       .single();
 
@@ -47,6 +48,8 @@ export function useAuth() {
         return;
       }
       setIsAdmin(profile.is_admin ?? false);
+      const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
+      setDisplayName(name || null);
     }
   }, []);
 
@@ -84,12 +87,17 @@ export function useAuth() {
     return { error: null };
   };
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, firstName?: string, lastName?: string) => {
     setDomainError(null);
     if (!email.endsWith('@achieveit.com')) {
       return { error: { message: 'Please use your @achieveit.com email address.' } };
     }
-    const { error } = await supabase.auth.signUp({ email, password });
+    const fullName = [firstName, lastName].filter(Boolean).join(' ') || undefined;
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: fullName ? { data: { full_name: fullName } } : undefined,
+    });
     if (error) return { error: { message: error.message } };
     return { error: null };
   };
@@ -110,5 +118,5 @@ export function useAuth() {
     return await supabase.auth.signOut();
   };
 
-  return { user, isAdmin, loading, domainError, signIn, signUp, resetPassword, signOut };
+  return { user, isAdmin, displayName, loading, domainError, signIn, signUp, resetPassword, signOut };
 }
