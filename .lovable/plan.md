@@ -1,33 +1,55 @@
 
 
-# Admin User Management
+# User Account Settings Page
 
-Add a user management page to the admin area for viewing, editing, and inviting users.
+## Overview
+Add a self-service account settings page where any authenticated user can manage their profile (first/last name) and trigger a password reset.
 
 ## Changes
 
-### 1. New: `src/pages/admin/UsersPage.tsx`
-- Table listing all `user_profiles` (email, full_name, is_admin, is_active, created_at)
-- Toggle buttons to activate/deactivate users and grant/revoke admin
-- "Invite User" button that opens a dialog to enter an email address
+### 1. Database migration
+- Split `full_name` into `first_name` and `last_name` columns on `user_profiles` (add new columns, migrate existing data, drop old column).
+- Existing RLS policies already allow users to update their own profile, so no policy changes needed.
 
-### 2. New: `supabase/functions/invite-user/index.ts`
-- Edge function that uses the Supabase Admin API (`auth.admin.createUser`) to create a user with a generated temporary password and send them an invite/reset-password email
-- Validates `@achieveit.com` domain server-side
-- Only callable by admins (checks `is_admin` via service role)
+```sql
+ALTER TABLE public.user_profiles ADD COLUMN first_name text;
+ALTER TABLE public.user_profiles ADD COLUMN last_name text;
 
-### 3. Database migration
-- Add RLS policy on `user_profiles` allowing admins to UPDATE any profile (for toggling is_admin / is_active)
-- Current policies only allow users to update their own profile
+-- Migrate existing full_name data (split on first space)
+UPDATE public.user_profiles
+SET first_name = split_part(full_name, ' ', 1),
+    last_name = CASE WHEN position(' ' in full_name) > 0
+      THEN substring(full_name from position(' ' in full_name) + 1)
+      ELSE NULL END
+WHERE full_name IS NOT NULL;
 
-### 4. `src/pages/admin/AdminLayout.tsx`
-- Add "Users" nav item linking to `/admin/users`
+ALTER TABLE public.user_profiles DROP COLUMN full_name;
+```
 
-### 5. `src/App.tsx`
-- Add `/admin/users` route under the admin layout
+- Update `handle_new_user()` trigger function to populate `first_name`/`last_name` instead of `full_name`.
 
-### Technical notes
-- The invite flow uses `supabase.auth.admin.inviteUserByEmail()` in the edge function (requires service role key, already available as a secret)
-- Invited users receive an email with a magic link to set their password
-- The `handle_new_user` trigger will auto-create their profile row
+### 2. New: `src/pages/AccountSettingsPage.tsx`
+- Form with First Name and Last Name fields, pre-populated from `user_profiles`
+- "Change Password" button that calls `supabase.auth.resetPasswordForEmail()` and shows a toast confirming the email was sent
+- Save button to update `user_profiles` via Supabase client
+- Clean layout with the standard Header component
+
+### 3. Update `src/App.tsx`
+- Add route: `/account` -> `AccountSettingsPage`
+
+### 4. Update `src/components/Header.tsx`
+- Make the user's display name clickable, linking to `/account`
+- Add a small user icon or chevron to indicate it's interactive
+
+### 5. Update `src/hooks/useAuth.ts`
+- Adjust `checkDomainAndProfile` to read `first_name`/`last_name` instead of `full_name` (for display name fallback)
+
+### 6. Update references to `full_name`
+- `UsersPage.tsx` — display `first_name + last_name` in the users table
+- `LoginPage.tsx` — if sign-up collects a name, split into first/last
+- Any other references found via search
+
+## Notes
+- The existing `/reset-password` page already handles the password update flow, so we just need to trigger the reset email from the account page.
+- The `user_profiles` RLS policy "Users can update own profile" already permits self-service updates with no additional migration.
 
