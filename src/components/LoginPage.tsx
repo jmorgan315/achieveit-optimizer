@@ -48,7 +48,7 @@ export function LoginPage({ onSignIn, onSignUp, onResetPassword, domainError }: 
           setSuccess('Password reset link sent. Check your email.');
         }
       } else if (mode === 'signup') {
-        const result = await onSignUp(email, password);
+        const result = await onSignUp(email, password, firstName, lastName);
         if (result.error) {
           setError(result.error.message);
         } else {
