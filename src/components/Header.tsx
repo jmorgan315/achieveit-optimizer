@@ -11,7 +11,7 @@ interface HeaderProps {
   onSignOut?: () => void;
 }
 
-export function Header({ onHomeClick, user, isAdmin, onSignOut }: HeaderProps) {
+export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut }: HeaderProps) {
   return (
     <header className="border-b border-border/50 bg-card/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
