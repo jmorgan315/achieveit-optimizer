@@ -1,4 +1,4 @@
-import { ExternalLink, Settings, LogOut } from 'lucide-react';
+import { ExternalLink, Settings, LogOut, UserCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import achieveitLogo from '@/assets/achieveit-logo.png';
 import type { User } from '@supabase/supabase-js';
