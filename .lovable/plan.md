@@ -1,43 +1,43 @@
 
 
-# Diagnosis: Resume Polling Path Analysis
+# Microsoft OAuth — Sign in with Microsoft Only
 
-## What the code shows
+## Overview
 
-1. **`handleSelectSession` (Index.tsx:270-275)**: Correctly sets `resumePollingOnly = true` for in_progress sessions.
+Replace email/password login with Microsoft OAuth via Supabase's Azure provider. Auth remains optional. Four files to modify.
 
-2. **`FileUploadStep` autoStart effect (line 109-114)**: Correctly checks `autoStart && !resumePollingOnly` — should NOT fire when resuming.
+## Files & Changes
 
-3. **`FileUploadStep` resume effect (line 118-174)**: Correctly fires only when `resumePollingOnly && sessionId` is true, calls `pollForResults` only.
+### 1. `src/hooks/useAuth.ts`
+- Remove `signIn` and `signUp` functions
+- Add `signInWithMicrosoft` that calls `supabase.auth.signInWithOAuth({ provider: 'azure', options: { scopes: 'email profile openid', redirectTo: window.location.origin } })`
+- Keep `user`, `loading`, `signOut`
 
-4. **Stall detector (lines 376-384)**: Sends `{ resume_session_id: pollSessionId }` to process-plan, which triggers the `runResume` path — NOT a fresh pipeline. This is correct.
+### 2. `src/components/LoginPage.tsx`
+- Complete rewrite — remove all email/password fields, form, mode toggle
+- New props: `onSignInWithMicrosoft: () => Promise<void>`, `onSkip: () => void`
+- Add Azure setup instructions as a comment block at top of file (Azure AD registration steps, redirect URI, client secret, Supabase provider config)
+- UI: Card with Microsoft logo SVG button (white bg, dark text, Microsoft icon) + "Continue without signing in" link below
+- Error state for when Azure isn't configured yet
+- Loading spinner on the button while OAuth initiates
 
-## Likely root cause
+### 3. `src/pages/Index.tsx`
+- Destructure `signInWithMicrosoft` instead of `signIn`/`signUp` from `useAuth()`
+- Rewrite the `activeView === 'login'` block: pass `onSignInWithMicrosoft` and `onSkip` to LoginPage (remove `onSignIn`/`onSignUp`)
+- Add `useEffect`: when `activeView === 'login'` and `user` becomes non-null (OAuth callback), auto-switch to `'sessions'`
 
-The 4 pipeline starts visible in the admin timeline are probably from the **original upload**, not from clicking the in_progress session. The `hasAutoStarted` ref resets when the component unmounts/remounts. If the user navigated away from the processing screen and back (e.g. clicked Back then Forward, or the component remounted for other reasons), `handleFileUpload` would fire again, calling `process-plan` with the full payload each time.
+### 4. `src/components/Header.tsx`
+- Update the signed-in display: show `user.user_metadata?.full_name || user.user_metadata?.name || user.email` instead of just `user.email`
+- No other changes needed (Sign In link already navigates to login view)
 
-Another possibility: React's StrictMode double-mounting in development could cause the autoStart effect to fire twice.
+## What stays the same
+- No backend/edge function changes
+- No session creation, user_id tagging, or RLS changes
+- No admin panel changes
+- "Continue without signing in" preserves full anonymous access
 
-## Plan
-
-### 1. Add diagnostic console.logs to trace execution paths
-
-In `FileUploadStep.tsx`:
-- Top of autoStart `useEffect`: log `autoStart`, `resumePollingOnly`, `uploadedFile`, `hasAutoStarted.current`, `isProcessing`
-- Top of resumePollingOnly `useEffect`: log `resumePollingOnly`, `sessionId`, `hasResumeStarted.current`
-- Top of `handleFileUpload`: log that it was called and from which path
-
-### 2. Guard `handleFileUpload` against duplicate invocations
-
-Add a ref `isUploadInFlight` that prevents `handleFileUpload` from being called while a previous call is still running. This prevents duplicate pipeline starts from re-mounts, double-clicks, or React StrictMode.
-
-### 3. Guard `extractWithVisionPipeline` and `extractPlanItemsWithAI` similarly
-
-Both call `process-plan` — add the same in-flight guard so they can't fire concurrently.
-
-## Files to modify
-
-| File | Change |
-|------|--------|
-| `src/components/steps/FileUploadStep.tsx` | Add console.logs to autoStart effect, resume effect, and handleFileUpload. Add `isUploadInFlight` ref guard to prevent duplicate process-plan calls. |
+## Technical Notes
+- Supabase Azure provider must be manually configured in the dashboard before the OAuth flow works
+- The comment block in LoginPage.tsx will document all manual Azure AD setup steps
+- `signInWithOAuth` redirects to Microsoft — no tokens are handled client-side
 
