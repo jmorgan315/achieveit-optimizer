@@ -72,7 +72,7 @@ export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut }: H
                 title="Account Settings"
               >
                 <UserCircle className="h-4 w-4 shrink-0" />
-                {user.user_metadata?.full_name || user.user_metadata?.name || user.email}
+                {displayName || user.user_metadata?.full_name || user.user_metadata?.name || user.email}
               </Link>
               <button
                 onClick={onSignOut}

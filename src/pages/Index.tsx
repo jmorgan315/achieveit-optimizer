@@ -545,7 +545,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} user={user} isAdmin={isAdmin} onSignOut={async () => { await signOut(); }} />
+      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} user={user} isAdmin={isAdmin} displayName={displayName} onSignOut={async () => { await signOut(); }} />
 
       <main className="container mx-auto px-4 py-8 overflow-x-hidden">
         <div className="space-y-2">

@@ -118,5 +118,5 @@ export function useAuth() {
     return await supabase.auth.signOut();
   };
 
-  return { user, isAdmin, loading, domainError, signIn, signUp, resetPassword, signOut };
+  return { user, isAdmin, displayName, loading, domainError, signIn, signUp, resetPassword, signOut };
 }
