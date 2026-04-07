@@ -1,40 +1,36 @@
 
 
-# Email/Password Authentication
+# Fix Admin Access & Session Visibility
 
-Replace Microsoft OAuth with email/password sign-in, keeping the `@achieveit.com` domain restriction.
+## Problem
+1. `is_admin` is `false` for `jmorgan@achieveit.com` — wrong email was used in the migration.
+2. All 5+ existing sessions have `user_id = NULL`. The Recent Sessions page filters `WHERE user_id = :currentUserId`, returning zero results.
+3. The `handle_new_user` trigger was not created (DB shows no triggers), though this is a secondary concern since the fallback insert in `useAuth.ts` handles it.
 
-## Changes
+## Fix
 
-### 1. `src/hooks/useAuth.ts`
-- Remove `signInWithMicrosoft` function
-- Add `signIn(email, password)` — calls `supabase.auth.signInWithPassword()`
-- Add `signUp(email, password)` — validates `@achieveit.com` domain, then calls `supabase.auth.signUp()`
-- Add `resetPassword(email)` — calls `supabase.auth.resetPasswordForEmail()`
-- Keep existing `checkDomainAndProfile`, `signOut`, and admin/profile logic unchanged
+### 1. Database migration
+Single migration to:
+- Set `is_admin = true` for `jmorgan@achieveit.com`
+- Backfill existing `NULL` user_id sessions to the only user (`ee58c766-cc3c-4196-a404-1ed9ebf3847d`)
+- Re-create the `handle_new_user` trigger (it exists as a function but the trigger itself is missing)
 
-### 2. `src/components/LoginPage.tsx`
-- Replace Microsoft button with email + password form
-- Add sign-in / sign-up toggle
-- Add "Forgot password?" link
-- Enforce `@achieveit.com` domain on the email field (client-side validation)
-- Show appropriate error messages
+```sql
+UPDATE public.user_profiles SET is_admin = true WHERE email = 'jmorgan@achieveit.com';
 
-### 3. `src/pages/Index.tsx`
-- Update destructuring from `useAuth()` (remove `signInWithMicrosoft`, add `signIn`, `signUp`)
-- Update `<LoginPage>` props to pass new callbacks
+UPDATE public.processing_sessions SET user_id = 'ee58c766-cc3c-4196-a404-1ed9ebf3847d' WHERE user_id IS NULL;
 
-### 4. New: `src/pages/ResetPasswordPage.tsx`
-- Form to enter new password after clicking reset link
-- Calls `supabase.auth.updateUser({ password })`
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_user();
+```
 
-### 5. `src/App.tsx`
-- Add `/reset-password` route
+### 2. No code changes needed
+The existing `useAuth.ts` already reads `is_admin` from `user_profiles` and the `RecentSessionsPage` already filters by `user_id`. Once the data is fixed, both features will work.
 
-### 6. Database migration
-- Add trigger to auto-create `user_profiles` row on signup (so the manual insert in `useAuth` isn't needed and avoids race conditions)
-
-### 7. Backend auth config
-- Enable auto-confirm for email signups (so users don't need to verify email — since domain is already restricted to `@achieveit.com`)
-  - *Or keep email verification if you prefer an extra security step*
+## After the fix
+- Sign out and sign back in (or refresh) to pick up the admin flag
+- Recent Sessions will show all previously-created sessions
+- The Admin link in the header will become visible
 
