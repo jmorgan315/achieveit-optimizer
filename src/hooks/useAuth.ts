@@ -48,6 +48,8 @@ export function useAuth() {
         return;
       }
       setIsAdmin(profile.is_admin ?? false);
+      const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
+      setDisplayName(name || null);
     }
   }, []);
 
