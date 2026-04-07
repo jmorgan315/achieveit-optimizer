@@ -7,6 +7,7 @@ interface HeaderProps {
   onHomeClick?: () => void;
   user?: User | null;
   isAdmin?: boolean;
+  displayName?: string | null;
   onSignOut?: () => void;
 }
 
