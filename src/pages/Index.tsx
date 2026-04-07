@@ -525,10 +525,9 @@ const Index = () => {
       <div className="min-h-screen bg-background">
         <Header user={null} />
         <LoginPage
-          onSignInWithMicrosoft={async () => {
-            const result = await signInWithMicrosoft();
-            return { error: result.error ? { message: result.error.message } : null };
-          }}
+          onSignIn={signIn}
+          onSignUp={signUp}
+          onResetPassword={resetPassword}
           domainError={domainError}
         />
       </div>
