@@ -30,6 +30,7 @@ const App = () => (
               <Route path="sessions" element={<SessionsPage />} />
               <Route path="sessions/:id" element={<SessionDetailPage />} />
               <Route path="logs" element={<ApiLogsPage />} />
+              <Route path="users" element={<UsersPage />} />
             </Route>
           </Route>
           <Route path="*" element={<NotFound />} />

@@ -18,6 +18,7 @@ import {
 const navItems = [
   { title: 'Sessions', url: '/admin/sessions', icon: List },
   { title: 'API Logs', url: '/admin/logs', icon: FileText },
+  { title: 'Users', url: '/admin/users', icon: Users },
 ];
 
 function AdminSidebar() {
