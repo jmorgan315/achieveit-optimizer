@@ -514,14 +514,8 @@ const Index = () => {
       <div className="min-h-screen bg-background">
         <Header onHomeClick={() => { setActiveView('sessions'); }} onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
         <LoginPage
-          onSignIn={async (email, password) => {
-            const result = await signIn(email, password);
-            if (!result.error) setActiveView('sessions');
-            return { error: result.error ? { message: result.error.message } : null };
-          }}
-          onSignUp={async (email, password) => {
-            const result = await signUp(email, password);
-            if (!result.error) setActiveView('sessions');
+          onSignInWithMicrosoft={async () => {
+            const result = await signInWithMicrosoft();
             return { error: result.error ? { message: result.error.message } : null };
           }}
           onSkip={() => setActiveView('sessions')}
