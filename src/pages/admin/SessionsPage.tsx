@@ -157,6 +157,7 @@ export default function SessionsPage() {
               filtered.map((s) => (
                 <TableRow key={s.id} className="cursor-pointer" onClick={() => navigate(`/admin/sessions/${s.id}`)}>
                   <TableCell className="text-xs">{format(new Date(s.created_at), 'MMM d, HH:mm')}</TableCell>
+                  <TableCell className="text-xs truncate max-w-[140px]">{s.user_id ? (userMap[s.user_id] || s.user_id.slice(0, 8)) : '—'}</TableCell>
                   <TableCell>{s.org_name || '—'}</TableCell>
                   <TableCell className="max-w-[200px] truncate">{s.document_name || '—'}</TableCell>
                   <TableCell><Badge variant="outline">{s.extraction_method || '—'}</Badge></TableCell>
