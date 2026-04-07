@@ -1,68 +1,65 @@
-/**
- * AZURE AD SETUP INSTRUCTIONS (Manual — Required Before Microsoft Sign-In Works)
- *
- * 1. Register an app in Azure AD Portal:
- *    - Go to https://portal.azure.com → Azure Active Directory → App registrations → New registration
- *    - Name: "AchieveIt Plan Import Assistant"
- *    - Supported account types: Choose based on whether external users need access
- *      - "Accounts in this organizational directory only" for single-tenant
- *      - "Accounts in any organizational directory" for multi-tenant
- *    - Redirect URI (Web platform): https://yntqxpvmswpdviwwlsyy.supabase.co/auth/v1/callback
- *    - Click "Register"
- *
- * 2. Note from the app's Overview page:
- *    - Application (client) ID
- *    - Directory (tenant) ID
- *
- * 3. Create a client secret:
- *    - Go to Certificates & secrets → New client secret
- *    - Copy the secret value immediately (it won't be shown again)
- *
- * 4. API Permissions:
- *    - Ensure "Microsoft Graph → User.Read" (delegated) is granted
- *    - Click "Grant admin consent" if required by your organization
- *
- * 5. Configure Supabase:
- *    - Supabase Dashboard → Authentication → Providers → Azure
- *    - Enable the Azure provider
- *    - Enter the Client ID, Client Secret, and Azure Tenant URL
- *      (Tenant URL format: https://login.microsoftonline.com/<TENANT_ID>)
- */
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
-  onSignInWithMicrosoft: () => Promise<{ error: { message: string } | null }>;
+  onSignIn: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
+  onSignUp: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
+  onResetPassword: (email: string) => Promise<{ error: { message: string } | null }>;
   domainError?: string | null;
 }
 
-function MicrosoftIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
-      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
-      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
-      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
-      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
-    </svg>
-  );
-}
-
-export function LoginPage({ onSignInWithMicrosoft, domainError }: LoginPageProps) {
+export function LoginPage({ onSignIn, onSignUp, onResetPassword, domainError }: LoginPageProps) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
 
-  const handleMicrosoftSignIn = async () => {
+  const validateDomain = (email: string) => {
+    if (!email.endsWith('@achieveit.com')) {
+      setError('Please use your @achieveit.com email address.');
+      return false;
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError(null);
+    setSuccess(null);
+
+    if (!validateDomain(email)) return;
+
     setLoading(true);
-    const { error } = await onSignInWithMicrosoft();
-    if (error) {
-      setError(
-        'Microsoft sign-in is not configured yet. Please contact your administrator.'
-      );
+    try {
+      if (mode === 'forgot') {
+        const result = await onResetPassword(email);
+        if (result.error) {
+          setError(result.error.message);
+        } else {
+          setSuccess('Password reset link sent. Check your email.');
+        }
+      } else if (mode === 'signup') {
+        const result = await onSignUp(email, password);
+        if (result.error) {
+          setError(result.error.message);
+        } else {
+          setSuccess('Account created! You can now sign in.');
+          setMode('signin');
+        }
+      } else {
+        const result = await onSignIn(email, password);
+        if (result.error) {
+          setError(result.error.message);
+        }
+      }
+    } finally {
       setLoading(false);
     }
   };
@@ -73,31 +70,89 @@ export function LoginPage({ onSignInWithMicrosoft, domainError }: LoginPageProps
     <div className="min-h-[80vh] flex items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle>Welcome</CardTitle>
+          <CardTitle>
+            {mode === 'forgot' ? 'Reset Password' : mode === 'signup' ? 'Create Account' : 'Welcome'}
+          </CardTitle>
           <CardDescription>
-            Sign in with your AchieveIt Microsoft account to continue
+            {mode === 'forgot'
+              ? 'Enter your email to receive a reset link'
+              : 'Sign in with your AchieveIt email to continue'}
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {displayError && (
-            <Alert variant="destructive">
-              <AlertDescription>{displayError}</AlertDescription>
-            </Alert>
-          )}
-
-          <Button
-            onClick={handleMicrosoftSignIn}
-            disabled={loading}
-            variant="outline"
-            className="w-full h-11 text-sm font-medium gap-3"
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <MicrosoftIcon className="h-5 w-5" />
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {displayError && (
+              <Alert variant="destructive">
+                <AlertDescription>{displayError}</AlertDescription>
+              </Alert>
             )}
-            Sign in with Microsoft
-          </Button>
+            {success && (
+              <Alert>
+                <AlertDescription>{success}</AlertDescription>
+              </Alert>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@achieveit.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            {mode !== 'forgot' && (
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={6}
+                />
+              </div>
+            )}
+
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {mode === 'forgot' ? 'Send Reset Link' : mode === 'signup' ? 'Create Account' : 'Sign In'}
+            </Button>
+
+            <div className="text-center text-sm space-y-1">
+              {mode === 'signin' && (
+                <>
+                  <button type="button" onClick={() => { setMode('forgot'); setError(null); setSuccess(null); }} className="text-primary hover:underline block mx-auto">
+                    Forgot password?
+                  </button>
+                  <p className="text-muted-foreground">
+                    No account?{' '}
+                    <button type="button" onClick={() => { setMode('signup'); setError(null); setSuccess(null); }} className="text-primary hover:underline">
+                      Sign up
+                    </button>
+                  </p>
+                </>
+              )}
+              {mode === 'signup' && (
+                <p className="text-muted-foreground">
+                  Already have an account?{' '}
+                  <button type="button" onClick={() => { setMode('signin'); setError(null); setSuccess(null); }} className="text-primary hover:underline">
+                    Sign in
+                  </button>
+                </p>
+              )}
+              {mode === 'forgot' && (
+                <button type="button" onClick={() => { setMode('signin'); setError(null); setSuccess(null); }} className="text-primary hover:underline">
+                  Back to sign in
+                </button>
+              )}
+            </div>
+          </form>
         </CardContent>
       </Card>
     </div>
