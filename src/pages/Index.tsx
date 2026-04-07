@@ -40,7 +40,7 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
-  const { user, isAdmin, loading: authLoading, domainError, signIn, signUp, resetPassword, signOut } = useAuth();
+  const { user, isAdmin, displayName, loading: authLoading, domainError, signIn, signUp, resetPassword, signOut } = useAuth();
   const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
