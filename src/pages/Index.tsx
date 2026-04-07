@@ -48,6 +48,13 @@ const Index = () => {
   const [isHydrating, setIsHydrating] = useState(false);
   const [resumePollingOnly, setResumePollingOnly] = useState(false);
 
+  // Auto-switch from login view to sessions when OAuth callback completes
+  useEffect(() => {
+    if (activeView === 'login' && user) {
+      setActiveView('sessions');
+    }
+  }, [activeView, user]);
+
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
     personMappings: PersonMapping[];
