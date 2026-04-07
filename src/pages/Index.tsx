@@ -537,7 +537,7 @@ const Index = () => {
   if (activeView === 'sessions') {
     return (
       <div className="min-h-screen bg-background">
-        <Header user={user} isAdmin={isAdmin} onSignOut={async () => { await signOut(); }} />
+        <Header user={user} isAdmin={isAdmin} displayName={displayName} onSignOut={async () => { await signOut(); }} />
         <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user.id} />
       </div>
     );
