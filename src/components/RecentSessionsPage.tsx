@@ -151,35 +151,30 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Plan Import Assistant</h1>
-            <p className="text-muted-foreground mt-1">Import and structure strategic plans for AchieveIt</p>
-          </div>
-          <Button onClick={onNewImport} size="default" className="self-start sm:self-auto">
-            <Plus className="h-4 w-4 mr-2" />
-            New Import
-          </Button>
-        </div>
+      {/* Hero CTA Section */}
+      <div className="max-w-xl mx-auto text-center px-4 py-5 sm:py-8">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground">Plan Import Assistant</h1>
+        <p className="text-muted-foreground mt-1 mb-5">Import and structure strategic plans for AchieveIt</p>
+        <Button onClick={onNewImport} size="lg" className="w-full sm:w-[300px]">
+          <Plus className="h-4 w-4 mr-2" />
+          New Import
+        </Button>
+        <p className="text-sm text-muted-foreground mt-3">Upload a PDF, Word, or Excel file to get started</p>
+      </div>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      {/* Loading spinner */}
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      )}
+
+      {/* Recent Imports Section */}
+      {!loading && sessions.length > 0 && (
+        <div className="max-w-3xl mx-auto px-4 sm:px-0 pb-8">
+          <div className="border-t border-border pt-6 mb-4">
+            <h2 className="text-lg font-semibold text-muted-foreground">Recent Imports</h2>
           </div>
-        ) : sessions.length === 0 ? (
-          <Card className="border-dashed">
-            <CardContent className="flex flex-col items-center justify-center py-16">
-              <FolderOpen className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <h2 className="text-lg font-semibold text-foreground mb-2">No imports yet</h2>
-              <p className="text-muted-foreground mb-6">Click "New Import" to get started with your first plan.</p>
-              <Button onClick={onNewImport}>
-                <Plus className="h-4 w-4 mr-2" />
-                New Import
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
           <div className="space-y-2">
             {sessions.map((session) => (
               <Card
@@ -293,8 +288,8 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
               </Card>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
