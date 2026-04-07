@@ -16,7 +16,8 @@ import { UserPlus, Loader2 } from 'lucide-react';
 interface UserProfile {
   id: string;
   email: string | null;
-  full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   is_admin: boolean;
   is_active: boolean;
   created_at: string;
