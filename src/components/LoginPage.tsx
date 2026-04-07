@@ -37,7 +37,7 @@ import { Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
   onSignInWithMicrosoft: () => Promise<{ error: { message: string } | null }>;
-  onSkip: () => void;
+  domainError?: string | null;
 }
 
 function MicrosoftIcon({ className }: { className?: string }) {
@@ -51,7 +51,7 @@ function MicrosoftIcon({ className }: { className?: string }) {
   );
 }
 
-export function LoginPage({ onSignInWithMicrosoft, onSkip }: LoginPageProps) {
+export function LoginPage({ onSignInWithMicrosoft, domainError }: LoginPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -61,12 +61,13 @@ export function LoginPage({ onSignInWithMicrosoft, onSkip }: LoginPageProps) {
     const { error } = await onSignInWithMicrosoft();
     if (error) {
       setError(
-        'Microsoft sign-in is not configured yet. Please continue without signing in, or contact your administrator.'
+        'Microsoft sign-in is not configured yet. Please contact your administrator.'
       );
       setLoading(false);
     }
-    // On success, Supabase redirects to Microsoft — no further action needed
   };
+
+  const displayError = domainError || error;
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4">
@@ -74,13 +75,13 @@ export function LoginPage({ onSignInWithMicrosoft, onSkip }: LoginPageProps) {
         <CardHeader className="text-center">
           <CardTitle>Welcome</CardTitle>
           <CardDescription>
-            Sign in to track and manage your plan imports
+            Sign in with your AchieveIt Microsoft account to continue
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {error && (
+          {displayError && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{displayError}</AlertDescription>
             </Alert>
           )}
 
@@ -97,16 +98,6 @@ export function LoginPage({ onSignInWithMicrosoft, onSkip }: LoginPageProps) {
             )}
             Sign in with Microsoft
           </Button>
-
-          <div className="text-center">
-            <button
-              type="button"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-              onClick={onSkip}
-            >
-              Continue without signing in →
-            </button>
-          </div>
         </CardContent>
       </Card>
     </div>

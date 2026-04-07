@@ -20,10 +20,17 @@ interface Session {
   total_output_tokens: number;
   total_duration_ms: number;
   status: string;
+  user_id: string | null;
+}
+
+interface UserProfile {
+  id: string;
+  email: string | null;
 }
 
 export default function SessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [userMap, setUserMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [methodFilter, setMethodFilter] = useState<string>('all');
@@ -38,6 +45,17 @@ export default function SessionsPage() {
         .select('*')
         .order('created_at', { ascending: false });
       setSessions(data || []);
+
+      // Fetch user profiles for email display
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, email');
+      if (profiles) {
+        const map: Record<string, string> = {};
+        profiles.forEach((p: UserProfile) => { if (p.email) map[p.id] = p.email; });
+        setUserMap(map);
+      }
+
       setLoading(false);
     })();
   }, []);
@@ -119,6 +137,7 @@ export default function SessionsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
+              <TableHead>User</TableHead>
               <TableHead>Org Name</TableHead>
               <TableHead>Document</TableHead>
               <TableHead>Method</TableHead>
@@ -131,13 +150,14 @@ export default function SessionsPage() {
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">Loading…</TableCell></TableRow>
             ) : filtered.length === 0 ? (
-              <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No sessions found</TableCell></TableRow>
+              <TableRow><TableCell colSpan={11} className="text-center text-muted-foreground py-8">No sessions found</TableCell></TableRow>
             ) : (
               filtered.map((s) => (
                 <TableRow key={s.id} className="cursor-pointer" onClick={() => navigate(`/admin/sessions/${s.id}`)}>
                   <TableCell className="text-xs">{format(new Date(s.created_at), 'MMM d, HH:mm')}</TableCell>
+                  <TableCell className="text-xs truncate max-w-[140px]">{s.user_id ? (userMap[s.user_id] || s.user_id.slice(0, 8)) : '—'}</TableCell>
                   <TableCell>{s.org_name || '—'}</TableCell>
                   <TableCell className="max-w-[200px] truncate">{s.document_name || '—'}</TableCell>
                   <TableCell><Badge variant="outline">{s.extraction_method || '—'}</Badge></TableCell>

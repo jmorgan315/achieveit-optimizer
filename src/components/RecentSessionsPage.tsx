@@ -24,7 +24,7 @@ interface SessionRow {
 interface RecentSessionsPageProps {
   onNewImport: () => void;
   onSelectSession: (session: SessionRow) => void;
-  userId?: string;
+  userId: string;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -72,11 +72,8 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
       .select('id, org_name, document_name, status, current_step, total_items_extracted, created_at')
       .not('document_name', 'is', null)
       .order('created_at', { ascending: false })
-      .limit(20);
-
-    if (userId) {
-      query = query.eq('user_id', userId);
-    }
+      .limit(20)
+      .eq('user_id', userId);
 
     const { data, error } = await query;
 

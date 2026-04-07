@@ -18,7 +18,7 @@ import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/text
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, RotateCcw, Download, List } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Download, List, Loader2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,20 +40,14 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
-  const { user, loading: authLoading, signInWithMicrosoft, signOut } = useAuth();
-  const [activeView, setActiveView] = useState<'sessions' | 'wizard' | 'login'>('sessions');
+  const { user, isAdmin, loading: authLoading, domainError, signInWithMicrosoft, signOut } = useAuth();
+  const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
   const [isHydrating, setIsHydrating] = useState(false);
   const [resumePollingOnly, setResumePollingOnly] = useState(false);
 
-  // Auto-switch from login view to sessions when OAuth callback completes
-  useEffect(() => {
-    if (activeView === 'login' && user) {
-      setActiveView('sessions');
-    }
-  }, [activeView, user]);
 
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
@@ -124,7 +118,7 @@ const Index = () => {
       sessionIdRef.current = id;
       console.log('[Session] Creating new session:', id);
       setSessionId(id);
-      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress', user_id: user?.id ?? null }, { onConflict: 'id' });
+      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress', user_id: user!.id }, { onConflict: 'id' });
       if (error) console.error('[Session] Failed to create session row:', error);
       else console.log('[Session] Row created successfully:', id);
       return id;
@@ -516,16 +510,26 @@ const Index = () => {
     </AlertDialog>
   );
 
-  if (activeView === 'login') {
+  // Loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // Not authenticated — show login
+  if (!user) {
     return (
       <div className="min-h-screen bg-background">
-        <Header onHomeClick={() => { setActiveView('sessions'); }} onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
+        <Header user={null} />
         <LoginPage
           onSignInWithMicrosoft={async () => {
             const result = await signInWithMicrosoft();
             return { error: result.error ? { message: result.error.message } : null };
           }}
-          onSkip={() => setActiveView('sessions')}
+          domainError={domainError}
         />
       </div>
     );
@@ -534,15 +538,15 @@ const Index = () => {
   if (activeView === 'sessions') {
     return (
       <div className="min-h-screen bg-background">
-        <Header onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); }} />
-        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user?.id} />
+        <Header user={user} isAdmin={isAdmin} onSignOut={async () => { await signOut(); }} />
+        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user.id} />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} user={user} onSignIn={() => setActiveView('login')} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
+      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} user={user} isAdmin={isAdmin} onSignOut={async () => { await signOut(); }} />
 
       <main className="container mx-auto px-4 py-8 overflow-x-hidden">
         <div className="space-y-2">

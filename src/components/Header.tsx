@@ -6,11 +6,11 @@ import type { User } from '@supabase/supabase-js';
 interface HeaderProps {
   onHomeClick?: () => void;
   user?: User | null;
-  onSignIn?: () => void;
+  isAdmin?: boolean;
   onSignOut?: () => void;
 }
 
-export function Header({ onHomeClick, user, onSignIn, onSignOut }: HeaderProps) {
+export function Header({ onHomeClick, user, isAdmin, onSignOut }: HeaderProps) {
   return (
     <header className="border-b border-border/50 bg-card/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -54,14 +54,16 @@ export function Header({ onHomeClick, user, onSignIn, onSignOut }: HeaderProps) 
             Support
             <ExternalLink className="h-3.5 w-3.5" />
           </a>
-          <Link
-            to="/admin"
-            className="text-muted-foreground hover:text-foreground transition-colors"
-            title="Admin"
-          >
-            <Settings className="h-4 w-4" />
-          </Link>
-          {user ? (
+          {isAdmin && (
+            <Link
+              to="/admin"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title="Admin"
+            >
+              <Settings className="h-4 w-4" />
+            </Link>
+          )}
+          {user && (
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground truncate max-w-[160px]" title={user.email ?? undefined}>
                 {user.user_metadata?.full_name || user.user_metadata?.name || user.email}
@@ -74,13 +76,6 @@ export function Header({ onHomeClick, user, onSignIn, onSignOut }: HeaderProps) 
                 <LogOut className="h-3.5 w-3.5" />
               </button>
             </div>
-          ) : (
-            <button
-              onClick={onSignIn}
-              className="text-sm font-medium text-primary hover:text-primary/80 transition-colors"
-            >
-              Sign In
-            </button>
           )}
         </div>
       </div>
