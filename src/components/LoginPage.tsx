@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
   onSignIn: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
-  onSignUp: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
+  onSignUp: (email: string, password: string, firstName?: string, lastName?: string) => Promise<{ error: { message: string } | null }>;
   onResetPassword: (email: string) => Promise<{ error: { message: string } | null }>;
   domainError?: string | null;
 }
