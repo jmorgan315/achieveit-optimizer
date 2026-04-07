@@ -510,16 +510,26 @@ const Index = () => {
     </AlertDialog>
   );
 
-  if (activeView === 'login') {
+  // Loading state
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // Not authenticated — show login
+  if (!user) {
     return (
       <div className="min-h-screen bg-background">
-        <Header onHomeClick={() => { setActiveView('sessions'); }} onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
+        <Header user={null} />
         <LoginPage
           onSignInWithMicrosoft={async () => {
             const result = await signInWithMicrosoft();
             return { error: result.error ? { message: result.error.message } : null };
           }}
-          onSkip={() => setActiveView('sessions')}
+          domainError={domainError}
         />
       </div>
     );
@@ -528,8 +538,8 @@ const Index = () => {
   if (activeView === 'sessions') {
     return (
       <div className="min-h-screen bg-background">
-        <Header onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); }} />
-        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user?.id} />
+        <Header user={user} isAdmin={isAdmin} onSignOut={async () => { await signOut(); }} />
+        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user.id} />
       </div>
     );
   }
