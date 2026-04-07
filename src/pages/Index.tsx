@@ -40,7 +40,7 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
-  const { user, isAdmin, loading: authLoading, domainError, signInWithMicrosoft, signOut } = useAuth();
+  const { user, isAdmin, loading: authLoading, domainError, signIn, signUp, resetPassword, signOut } = useAuth();
   const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
@@ -525,10 +525,9 @@ const Index = () => {
       <div className="min-h-screen bg-background">
         <Header user={null} />
         <LoginPage
-          onSignInWithMicrosoft={async () => {
-            const result = await signInWithMicrosoft();
-            return { error: result.error ? { message: result.error.message } : null };
-          }}
+          onSignIn={signIn}
+          onSignUp={signUp}
+          onResetPassword={resetPassword}
           domainError={domainError}
         />
       </div>

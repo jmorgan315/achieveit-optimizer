@@ -20,7 +20,7 @@ export function useAuth() {
 
     setDomainError(null);
 
-    // Check / create profile
+    // Check profile (auto-created by DB trigger on signup)
     const { data: profile } = await supabase
       .from('user_profiles')
       .select('is_admin, is_active')
@@ -28,7 +28,7 @@ export function useAuth() {
       .single();
 
     if (!profile) {
-      // Auto-create profile on first sign-in
+      // Fallback: create profile if trigger didn't fire
       await supabase.from('user_profiles').insert({
         id: currentUser.id,
         email: currentUser.email,
@@ -73,15 +73,35 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, [checkDomainAndProfile]);
 
-  const signInWithMicrosoft = async () => {
+  const signIn = async (email: string, password: string) => {
     setDomainError(null);
-    return await supabase.auth.signInWithOAuth({
-      provider: 'azure',
-      options: {
-        scopes: 'email profile openid',
-        redirectTo: window.location.origin,
-      },
+    if (!email.endsWith('@achieveit.com')) {
+      return { error: { message: 'Please use your @achieveit.com email address.' } };
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) return { error: { message: error.message } };
+    return { error: null };
+  };
+
+  const signUp = async (email: string, password: string) => {
+    setDomainError(null);
+    if (!email.endsWith('@achieveit.com')) {
+      return { error: { message: 'Please use your @achieveit.com email address.' } };
+    }
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) return { error: { message: error.message } };
+    return { error: null };
+  };
+
+  const resetPassword = async (email: string) => {
+    if (!email.endsWith('@achieveit.com')) {
+      return { error: { message: 'Please use your @achieveit.com email address.' } };
+    }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
     });
+    if (error) return { error: { message: error.message } };
+    return { error: null };
   };
 
   const signOut = async () => {
@@ -89,5 +109,5 @@ export function useAuth() {
     return await supabase.auth.signOut();
   };
 
-  return { user, isAdmin, loading, domainError, signInWithMicrosoft, signOut };
+  return { user, isAdmin, loading, domainError, signIn, signUp, resetPassword, signOut };
 }
