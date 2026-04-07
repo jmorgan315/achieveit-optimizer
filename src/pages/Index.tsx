@@ -18,7 +18,7 @@ import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/text
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, RotateCcw, Download, List } from 'lucide-react';
+import { ArrowLeft, RotateCcw, Download, List, Loader2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
