@@ -45,6 +45,17 @@ export default function SessionsPage() {
         .select('*')
         .order('created_at', { ascending: false });
       setSessions(data || []);
+
+      // Fetch user profiles for email display
+      const { data: profiles } = await supabase
+        .from('user_profiles')
+        .select('id, email');
+      if (profiles) {
+        const map: Record<string, string> = {};
+        profiles.forEach((p: UserProfile) => { if (p.email) map[p.id] = p.email; });
+        setUserMap(map);
+      }
+
       setLoading(false);
     })();
   }, []);
