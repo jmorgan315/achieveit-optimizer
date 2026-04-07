@@ -65,9 +65,14 @@ export function Header({ onHomeClick, user, isAdmin, onSignOut }: HeaderProps) {
           )}
           {user && (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground truncate max-w-[160px]" title={user.email ?? undefined}>
+              <Link
+                to="/account"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1.5 truncate max-w-[160px]"
+                title="Account Settings"
+              >
+                <UserCircle className="h-4 w-4 shrink-0" />
                 {user.user_metadata?.full_name || user.user_metadata?.name || user.email}
-              </span>
+              </Link>
               <button
                 onClick={onSignOut}
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"

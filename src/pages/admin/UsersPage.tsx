@@ -117,7 +117,7 @@ export default function UsersPage() {
               {users.map(u => (
                 <TableRow key={u.id}>
                   <TableCell className="font-medium">{u.email ?? '—'}</TableCell>
-                  <TableCell>{u.full_name ?? '—'}</TableCell>
+                  <TableCell>{[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}</TableCell>
                   <TableCell>
                     <Switch
                       checked={u.is_admin}
