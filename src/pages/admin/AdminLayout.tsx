@@ -1,5 +1,5 @@
 import { Outlet, Link } from 'react-router-dom';
-import { Settings, List, FileText, ArrowLeft } from 'lucide-react';
+import { Settings, List, FileText, Users, ArrowLeft } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import {
   SidebarProvider,
