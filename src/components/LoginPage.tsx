@@ -1,119 +1,111 @@
+/**
+ * AZURE AD SETUP INSTRUCTIONS (Manual — Required Before Microsoft Sign-In Works)
+ *
+ * 1. Register an app in Azure AD Portal:
+ *    - Go to https://portal.azure.com → Azure Active Directory → App registrations → New registration
+ *    - Name: "AchieveIt Plan Import Assistant"
+ *    - Supported account types: Choose based on whether external users need access
+ *      - "Accounts in this organizational directory only" for single-tenant
+ *      - "Accounts in any organizational directory" for multi-tenant
+ *    - Redirect URI (Web platform): https://yntqxpvmswpdviwwlsyy.supabase.co/auth/v1/callback
+ *    - Click "Register"
+ *
+ * 2. Note from the app's Overview page:
+ *    - Application (client) ID
+ *    - Directory (tenant) ID
+ *
+ * 3. Create a client secret:
+ *    - Go to Certificates & secrets → New client secret
+ *    - Copy the secret value immediately (it won't be shown again)
+ *
+ * 4. API Permissions:
+ *    - Ensure "Microsoft Graph → User.Read" (delegated) is granted
+ *    - Click "Grant admin consent" if required by your organization
+ *
+ * 5. Configure Supabase:
+ *    - Supabase Dashboard → Authentication → Providers → Azure
+ *    - Enable the Azure provider
+ *    - Enter the Client ID, Client Secret, and Azure Tenant URL
+ *      (Tenant URL format: https://login.microsoftonline.com/<TENANT_ID>)
+ */
+
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2 } from 'lucide-react';
 
 interface LoginPageProps {
-  onSignIn: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
-  onSignUp: (email: string, password: string) => Promise<{ error: { message: string } | null }>;
+  onSignInWithMicrosoft: () => Promise<{ error: { message: string } | null }>;
   onSkip: () => void;
 }
 
-export function LoginPage({ onSignIn, onSignUp, onSkip }: LoginPageProps) {
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+function MicrosoftIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
+  );
+}
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+export function LoginPage({ onSignInWithMicrosoft, onSkip }: LoginPageProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-    if (!email.trim() || !password.trim()) {
-      setError('Please enter both email and password.');
-      return;
+  const handleMicrosoftSignIn = async () => {
+    setError(null);
+    setLoading(true);
+    const { error } = await onSignInWithMicrosoft();
+    if (error) {
+      setError(
+        'Microsoft sign-in is not configured yet. Please continue without signing in, or contact your administrator.'
+      );
+      setLoading(false);
     }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const fn = mode === 'signin' ? onSignIn : onSignUp;
-      const { error: authError } = await fn(email.trim(), password);
-      if (authError) {
-        setError(authError.message);
-      }
-      // On success, the auth state change listener will update the app
-    } catch (err: unknown) {
-      setError('An unexpected error occurred.');
-    } finally {
-      setSubmitting(false);
-    }
+    // On success, Supabase redirects to Microsoft — no further action needed
   };
 
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle>{mode === 'signin' ? 'Sign In' : 'Create Account'}</CardTitle>
+          <CardTitle>Welcome</CardTitle>
           <CardDescription>
-            {mode === 'signin'
-              ? 'Sign in to see your import sessions'
-              : 'Create an account to track your imports'}
+            Sign in to track and manage your plan imports
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
+        <CardContent className="space-y-4">
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <Button
+            onClick={handleMicrosoftSignIn}
+            disabled={loading}
+            variant="outline"
+            className="w-full h-11 text-sm font-medium gap-3"
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <MicrosoftIcon className="h-5 w-5" />
             )}
+            Sign in with Microsoft
+          </Button>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-              />
-            </div>
-
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {mode === 'signin' ? 'Sign In' : 'Create Account'}
-            </Button>
-          </form>
-
-          <div className="mt-4 text-center space-y-2">
+          <div className="text-center">
             <button
               type="button"
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-              onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); }}
+              onClick={onSkip}
             >
-              {mode === 'signin' ? "Don't have an account? Create one" : 'Already have an account? Sign in'}
+              Continue without signing in →
             </button>
-
-            <div>
-              <button
-                type="button"
-                className="text-sm text-primary hover:text-primary/80 transition-colors"
-                onClick={onSkip}
-              >
-                Continue without signing in →
-              </button>
-            </div>
           </div>
         </CardContent>
       </Card>

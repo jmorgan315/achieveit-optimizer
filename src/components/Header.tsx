@@ -63,8 +63,8 @@ export function Header({ onHomeClick, user, onSignIn, onSignOut }: HeaderProps) 
           </Link>
           {user ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground truncate max-w-[120px]" title={user.email}>
-                {user.email}
+              <span className="text-sm text-muted-foreground truncate max-w-[160px]" title={user.email ?? undefined}>
+                {user.user_metadata?.full_name || user.user_metadata?.name || user.email}
               </span>
               <button
                 onClick={onSignOut}
