@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { supabase } from '@/integrations/supabase/client';
 import { WizardProgress } from '@/components/WizardProgress';
@@ -40,13 +40,20 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
-  const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
+  const { user, loading: authLoading, signInWithMicrosoft, signOut } = useAuth();
   const [activeView, setActiveView] = useState<'sessions' | 'wizard' | 'login'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
   const [highestCompletedStep, setHighestCompletedStep] = useState(-1);
   const [isHydrating, setIsHydrating] = useState(false);
   const [resumePollingOnly, setResumePollingOnly] = useState(false);
+
+  // Auto-switch from login view to sessions when OAuth callback completes
+  useEffect(() => {
+    if (activeView === 'login' && user) {
+      setActiveView('sessions');
+    }
+  }, [activeView, user]);
 
   const [pendingAIData, setPendingAIData] = useState<{
     items: PlanItem[];
@@ -514,14 +521,8 @@ const Index = () => {
       <div className="min-h-screen bg-background">
         <Header onHomeClick={() => { setActiveView('sessions'); }} onSignIn={() => setActiveView('login')} user={user} onSignOut={async () => { await signOut(); setActiveView('sessions'); }} />
         <LoginPage
-          onSignIn={async (email, password) => {
-            const result = await signIn(email, password);
-            if (!result.error) setActiveView('sessions');
-            return { error: result.error ? { message: result.error.message } : null };
-          }}
-          onSignUp={async (email, password) => {
-            const result = await signUp(email, password);
-            if (!result.error) setActiveView('sessions');
+          onSignInWithMicrosoft={async () => {
+            const result = await signInWithMicrosoft();
             return { error: result.error ? { message: result.error.message } : null };
           }}
           onSkip={() => setActiveView('sessions')}
