@@ -20,6 +20,12 @@ interface Session {
   total_output_tokens: number;
   total_duration_ms: number;
   status: string;
+  user_id: string | null;
+}
+
+interface UserProfile {
+  id: string;
+  email: string | null;
 }
 
 export default function SessionsPage() {
