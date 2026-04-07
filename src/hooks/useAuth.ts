@@ -32,7 +32,8 @@ export function useAuth() {
       await supabase.from('user_profiles').insert({
         id: currentUser.id,
         email: currentUser.email,
-        full_name: currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || null,
+        first_name: currentUser.user_metadata?.full_name?.split(' ')[0] || currentUser.user_metadata?.name?.split(' ')[0] || null,
+        last_name: currentUser.user_metadata?.full_name?.split(' ').slice(1).join(' ') || currentUser.user_metadata?.name?.split(' ').slice(1).join(' ') || null,
         is_admin: false,
         is_active: true,
       });

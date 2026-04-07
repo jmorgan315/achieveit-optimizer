@@ -16,7 +16,8 @@ import { UserPlus, Loader2 } from 'lucide-react';
 interface UserProfile {
   id: string;
   email: string | null;
-  full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   is_admin: boolean;
   is_active: boolean;
   created_at: string;
@@ -116,7 +117,7 @@ export default function UsersPage() {
               {users.map(u => (
                 <TableRow key={u.id}>
                   <TableCell className="font-medium">{u.email ?? '—'}</TableCell>
-                  <TableCell>{u.full_name ?? '—'}</TableCell>
+                  <TableCell>{[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}</TableCell>
                   <TableCell>
                     <Switch
                       checked={u.is_admin}

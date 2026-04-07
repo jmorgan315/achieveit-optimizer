@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import AccountSettingsPage from "./pages/AccountSettingsPage";
 import { AdminGuard } from "./components/AdminGuard";
 import AdminLayout from "./pages/admin/AdminLayout";
 import SessionsPage from "./pages/admin/SessionsPage";
@@ -24,6 +25,7 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/account" element={<AccountSettingsPage />} />
           <Route path="/admin" element={<AdminGuard />}>
             <Route element={<AdminLayout />}>
               <Route index element={<Navigate to="sessions" replace />} />
