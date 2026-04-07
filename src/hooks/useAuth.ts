@@ -24,7 +24,7 @@ export function useAuth() {
     // Check profile (auto-created by DB trigger on signup)
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('is_admin, is_active')
+      .select('is_admin, is_active, first_name, last_name')
       .eq('id', currentUser.id)
       .single();
 
