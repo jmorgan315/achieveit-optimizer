@@ -137,6 +137,7 @@ export default function SessionsPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Date</TableHead>
+              <TableHead>User</TableHead>
               <TableHead>Org Name</TableHead>
               <TableHead>Document</TableHead>
               <TableHead>Method</TableHead>
