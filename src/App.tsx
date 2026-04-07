@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import AccountSettingsPage from "./pages/AccountSettingsPage";
 import { AdminGuard } from "./components/AdminGuard";
 import AdminLayout from "./pages/admin/AdminLayout";
 import SessionsPage from "./pages/admin/SessionsPage";
