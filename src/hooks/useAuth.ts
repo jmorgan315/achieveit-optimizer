@@ -87,12 +87,17 @@ export function useAuth() {
     return { error: null };
   };
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = async (email: string, password: string, firstName?: string, lastName?: string) => {
     setDomainError(null);
     if (!email.endsWith('@achieveit.com')) {
       return { error: { message: 'Please use your @achieveit.com email address.' } };
     }
-    const { error } = await supabase.auth.signUp({ email, password });
+    const fullName = [firstName, lastName].filter(Boolean).join(' ') || undefined;
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: fullName ? { data: { full_name: fullName } } : undefined,
+    });
     if (error) return { error: { message: error.message } };
     return { error: null };
   };
