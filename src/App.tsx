@@ -11,6 +11,7 @@ import AdminLayout from "./pages/admin/AdminLayout";
 import SessionsPage from "./pages/admin/SessionsPage";
 import SessionDetailPage from "./pages/admin/SessionDetailPage";
 import ApiLogsPage from "./pages/admin/ApiLogsPage";
+import UsersPage from "./pages/admin/UsersPage";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +30,7 @@ const App = () => (
               <Route path="sessions" element={<SessionsPage />} />
               <Route path="sessions/:id" element={<SessionDetailPage />} />
               <Route path="logs" element={<ApiLogsPage />} />
+              <Route path="users" element={<UsersPage />} />
             </Route>
           </Route>
           <Route path="*" element={<NotFound />} />
