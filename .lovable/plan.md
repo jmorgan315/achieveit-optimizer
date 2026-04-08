@@ -1,67 +1,99 @@
 
 
-## Bug: Page Range Not Applied — Root Cause Analysis
+## Fix: Page Range Enforcement End-to-End
 
-### The Data Flow (with the break point)
+### Root Causes
 
-```text
-Screen 2 (ScanResultsStep)          →  ProcessingConfig.pageRanges = [{start:61, end:63}]
-                                        ProcessingConfig.orgProfile.pageRange = UNDEFINED ← ❌
-                                        
-Index.tsx handleStartProcessing()   →  setOrgProfile(config.orgProfile)  ← pageRange is missing
-                                        config.pageRanges is IGNORED, never mapped anywhere
-
-FileUploadStep                      →  orgProfile.pageRange = undefined
-                                        Sends ALL pre-rendered images to process-plan
-                                        pageRange field in request body = undefined
-
-process-plan edge function          →  pageRange = undefined
-                                        Falls back to Agent 0's page_annotations filtering
-                                        Processes whatever Agent 0 recommends (often most pages)
-```
-
-### Where It Breaks
-
-**Break Point 1 — `ScanResultsStep.tsx` line 198-225**: The `handleStartProcessing` function builds the `OrgProfile` object but **never sets `pageRange`** on it. The parsed page ranges are put into `ProcessingConfig.pageRanges` (an array of `{start, end}` objects), but the `OrgProfile.pageRange` field (which expects `{startPage, endPage}`) is left undefined.
-
-**Break Point 2 — `Index.tsx` line 330-344**: `handleStartProcessing` calls `setOrgProfile(config.orgProfile)` (which has no pageRange) and completely ignores `config.pageRanges`. Nobody ever maps the array of ranges onto the orgProfile.
-
-**Break Point 3 — `FileUploadStep.tsx` line 492-508**: When pre-rendered images exist from quick scan, it uses ALL of them regardless of page range. When rendering fresh, it passes `orgProfile.pageRange` to `renderPDFToImages()` — but that field is undefined, so all pages are rendered.
-
-### Type Mismatch
-
-- `ProcessingConfig.pageRanges`: `Array<{start: number, end: number}> | null` — supports non-contiguous ranges
-- `OrgProfile.pageRange`: `{startPage: number, endPage: number}` — only supports a single contiguous range
-- `process-plan` edge function: receives `pageRange` as a string like `"61-63"` and parses it
-
-The types are incompatible. The UI supports "1-5, 10, 15-20" but the downstream only accepts one range.
+1. **`process-plan`**: Has `parsePageRange()` but never calls it. Page images go through Agent 0's `page_annotations` filter but never the user's explicit page range.
+2. **`text_heavy` override**: When `text_heavy` is detected, the pipeline switches from vision to text extraction (line 768), sending full document text with no page filtering. Since `parse-pdf` returns full-document text without page boundaries, the only fix is to force vision extraction when `pageRange` is set.
+3. **`extract-plan-items`**: The `processChunk` function signature expects `pageRange` as `{ startPage: number; endPage: number }` (line 407), but the frontend now sends a string like `"61-63"`. The prompt generation at line 420-422 tries to read `.startPage` and `.endPage` which are undefined on a string.
 
 ### Fix Plan
 
-#### 1. Change `OrgProfile.pageRange` type in `src/types/plan.ts`
-Change from `{startPage, endPage}` to `string` (e.g., `"61-63"` or `"1-5, 10, 15-20"`). This matches what `process-plan` expects and supports non-contiguous ranges.
+#### 1. `supabase/functions/process-plan/index.ts` — Server-side image filtering
 
-#### 2. Map pageRanges onto orgProfile in `ScanResultsStep.tsx`
-In `handleStartProcessing`, convert the parsed ranges array back to a string and set it on the profile:
+After Agent 0's `page_annotations` filtering (around line 838), add a second filter using `parsePageRange()` to enforce the user's explicit page range:
+
 ```typescript
-const profile: OrgProfile = {
-  ...existing fields,
-  pageRange: scopeInput.trim() || undefined,  // pass the raw string like "61-63"
-};
+// After the page_annotations filtering block, before persistPageImages:
+if (typeof pageRange === "string" && pageRange.trim()) {
+  const allowedPages = parsePageRange(pageRange as string, images.length);
+  if (allowedPages.size > 0) {
+    const beforeCount = images.length;
+    // Note: at this point images may already be filtered by page_annotations,
+    // but we need original page numbers. Track them.
+    // Since page_annotations filter already re-indexed, we need to apply
+    // pageRange BEFORE page_annotations or track original indices.
+  }
+}
 ```
 
-#### 3. Filter images in `FileUploadStep.tsx` before sending
-When pre-rendered quick-scan images exist, filter them to only include pages within the user's specified range before sending to `process-plan`. Parse the `orgProfile.pageRange` string to determine which page indices to include.
+**Better approach**: Apply `parsePageRange` filtering *before* the `page_annotations` filter, right after `let images = pageImages as string[]` (line 788). This way we first scope to user's pages, then let Agent 0 further refine within that subset.
 
-#### 4. Update `renderPDFToImages` call
-Update the call in `FileUploadStep.tsx` to handle the new string-based pageRange format when rendering fresh (non-quick-scan path).
+Insert at line ~789:
+```typescript
+// Apply user-specified page range FIRST (safety net)
+if (typeof pageRange === "string" && (pageRange as string).trim()) {
+  const maxPage = images.length;
+  const allowedPages = parsePageRange(pageRange as string, maxPage);
+  if (allowedPages.size > 0) {
+    const beforeCount = images.length;
+    images = images.filter((_, idx) => allowedPages.has(idx + 1));
+    console.log(`[process-plan] pageRange "${pageRange}" filter: ${beforeCount} → ${images.length} images`);
+  }
+}
+```
+
+#### 2. `supabase/functions/process-plan/index.ts` — Force vision when pageRange + text_heavy
+
+Change the `text_heavy` override block (lines 768-779). When `pageRange` is set AND images are available, do NOT switch to text — keep vision with filtered images:
+
+```typescript
+if (useVision && classification?.document_type === "text_heavy" && hasDocumentText) {
+  if (typeof pageRange === "string" && (pageRange as string).trim()) {
+    // pageRange is set — keep vision extraction with filtered images
+    // (text path has no page boundaries, so vision is the only way to enforce page scoping)
+    console.log("[process-plan] text_heavy but pageRange set — keeping vision extraction for page-scoped accuracy");
+  } else {
+    console.log("[process-plan] Document classified as text_heavy — using text extraction instead of vision");
+    useVision = false;
+    extractionMethod = "text";
+    // ... existing logApiCall
+  }
+}
+```
+
+#### 3. `supabase/functions/extract-plan-items/index.ts` — Normalize pageRange type
+
+Change line 407 signature and lines 420-422 to handle string format:
+
+In `processChunk` signature (line 407), change `pageRange` type:
+```typescript
+pageRange?: string | { startPage: number; endPage: number }
+```
+
+In the prompt generation (lines 420-422), handle both formats:
+```typescript
+if (orgContext.pageRange) {
+  let rangeText: string;
+  if (typeof orgContext.pageRange === 'string') {
+    rangeText = orgContext.pageRange;
+  } else {
+    rangeText = `${orgContext.pageRange.startPage} through ${orgContext.pageRange.endPage}`;
+  }
+  parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${rangeText} of the original document. Focus your extraction ONLY on content from those pages.`);
+}
+```
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/types/plan.ts` | Change `pageRange` type to `string \| undefined` |
-| `src/components/steps/ScanResultsStep.tsx` | Set `pageRange` on orgProfile from scopeInput |
-| `src/components/steps/FileUploadStep.tsx` | Filter pre-rendered images by page range before sending |
-| `src/utils/pdfToImages.ts` | Update to accept string-based page range (or parse in caller) |
+| `supabase/functions/process-plan/index.ts` | (1) Apply `parsePageRange` filter on images before Agent 0 annotations. (2) Skip text_heavy override when pageRange is set. |
+| `supabase/functions/extract-plan-items/index.ts` | Normalize `pageRange` type to accept string or object in `processChunk`. |
+
+### What NOT to Change
+- Frontend filtering (already works as a first layer)
+- `extract-plan-vision` (receives pre-filtered images, no pageRange handling needed)
+- Card design, polling, auth
 
