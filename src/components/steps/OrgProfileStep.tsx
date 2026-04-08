@@ -99,7 +99,7 @@ export function OrgProfileStep({
     return levelNames.map((name, idx) => ({ depth: idx + 1, name: name.trim() || `Level ${idx + 1}` }));
   };
 
-  const buildPageRange = (): { startPage: number; endPage: number } | undefined => {
+  const buildPageRange = (): string | undefined => {
     const s = parseInt(startPage, 10);
     const e = parseInt(endPage, 10);
     if (!s && !e) return undefined;
@@ -108,7 +108,9 @@ export function OrgProfileStep({
       return undefined;
     }
     if ((s && s < 1) || (e && e < 1)) return undefined;
-    return { startPage: s || 1, endPage: e || 9999 };
+    const start = s || 1;
+    const end = e || 9999;
+    return `${start}-${end}`;
   };
 
   const handleLookup = async () => {
