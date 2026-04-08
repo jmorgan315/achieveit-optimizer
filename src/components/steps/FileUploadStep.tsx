@@ -489,17 +489,32 @@ export function FileUploadStep({
     addMessage('Extracting plan items...');
 
     try {
-      const pageRange = orgProfile?.pageRange;
+      const pageRangeStr = orgProfile?.pageRange;
       let images: { dataUrl: string; pageNumber: number; width: number; height: number }[];
       let pageCount: number;
 
+      // Parse page range string into a Set of allowed page numbers
+      const allowedPages: Set<number> | null = pageRangeStr ? parsePageRangeString(pageRangeStr) : null;
+
       // Use pre-rendered images from quick scan if available
       if (pageImages && pageImages.length > 0) {
-        images = pageImages.map((url, idx) => ({ dataUrl: url, pageNumber: idx + 1, width: 0, height: 0 }));
-        pageCount = pageImages.length;
+        let allImages = pageImages.map((url, idx) => ({ dataUrl: url, pageNumber: idx + 1, width: 0, height: 0 }));
+        // Filter to only pages in the user's specified range
+        if (allowedPages) {
+          allImages = allImages.filter(img => allowedPages.has(img.pageNumber));
+          console.log(`[Vision] Filtered pre-rendered images from ${pageImages.length} to ${allImages.length} pages (range: ${pageRangeStr})`);
+        }
+        images = allImages;
+        pageCount = images.length;
         console.log(`[Vision] Using ${images.length} pre-rendered images from quick scan`);
       } else {
-        const rendered = await renderPDFToImages(file, 250, 0.75, pageRange);
+        // For fresh render, convert string range to {startPage, endPage} for renderPDFToImages
+        const rangeObj = allowedPages ? { startPage: Math.min(...allowedPages), endPage: Math.max(...allowedPages) } : undefined;
+        const rendered = await renderPDFToImages(file, 250, 0.75, rangeObj);
+        // If non-contiguous range, further filter rendered images
+        if (allowedPages) {
+          rendered.images = rendered.images.filter(img => allowedPages.has(img.pageNumber));
+        }
         images = rendered.images;
         pageCount = rendered.pageCount;
         if (setPageImages) {

@@ -201,6 +201,7 @@ export function ScanResultsStep({
       industry,
       website: orgConfirmed ? lookupResult?.website : undefined,
       summary: orgConfirmed ? lookupResult?.summary : undefined,
+      pageRange: scopeInput.trim() || undefined,
       confirmed: true,
     };
 

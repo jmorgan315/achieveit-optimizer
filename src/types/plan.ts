@@ -66,7 +66,7 @@ export interface OrgProfile {
   summary?: string;
   documentHints?: string;
   planLevels?: Array<{ depth: number; name: string }>;
-  pageRange?: { startPage: number; endPage: number };
+  pageRange?: string;
   confirmed: boolean;
 }
 
