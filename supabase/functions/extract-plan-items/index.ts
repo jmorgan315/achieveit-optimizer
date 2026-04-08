@@ -404,7 +404,7 @@ async function processChunk(
   totalChunks: number,
   previousContext: { detectedLevels: { depth: number; name: string }[]; extractedItemNames: string[] } | null,
   apiKey: string,
-  orgContext?: { organizationName?: string; industry?: string; documentHints?: string; planLevels?: Array<{ depth: number; name: string }>; pageRange?: { startPage: number; endPage: number } },
+  orgContext?: { organizationName?: string; industry?: string; documentHints?: string; planLevels?: Array<{ depth: number; name: string }>; pageRange?: string | { startPage: number; endPage: number } },
   sessionId?: string,
   batchLabel?: string
 ): Promise<ExtractedChunkResult> {
