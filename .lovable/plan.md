@@ -1,43 +1,67 @@
 
 
-## Homepage Layout — Hero CTA + Recent Sessions Below
+## Bug: Page Range Not Applied — Root Cause Analysis
 
-### Summary
-Restructure `RecentSessionsPage` to put a centered hero CTA on top and move the sessions list into a secondary "Recent Imports" section below. Remove the current header row with title+button.
+### The Data Flow (with the break point)
 
-### Changes — `src/components/RecentSessionsPage.tsx`
+```text
+Screen 2 (ScanResultsStep)          →  ProcessingConfig.pageRanges = [{start:61, end:63}]
+                                        ProcessingConfig.orgProfile.pageRange = UNDEFINED ← ❌
+                                        
+Index.tsx handleStartProcessing()   →  setOrgProfile(config.orgProfile)  ← pageRange is missing
+                                        config.pageRanges is IGNORED, never mapped anywhere
 
-**Remove:** The current `flex` header row containing the heading, subtitle, and "New Import" button (lines ~130-140).
+FileUploadStep                      →  orgProfile.pageRange = undefined
+                                        Sends ALL pre-rendered images to process-plan
+                                        pageRange field in request body = undefined
 
-**Add Hero Section (top):**
-- Centered container (`max-w-xl mx-auto text-center`) with `py-8` desktop / `py-5` mobile
-- Heading: "Plan Import Assistant" — `text-2xl` desktop, `text-xl` mobile
-- Subheading: existing text, `text-muted-foreground`
-- Large CTA button: `w-[300px]` desktop, `w-full` mobile, centered
-- Helper text below button: "Upload a PDF, Word, or Excel file to get started" in `text-sm text-muted-foreground`
+process-plan edge function          →  pageRange = undefined
+                                        Falls back to Agent 0's page_annotations filtering
+                                        Processes whatever Agent 0 recommends (often most pages)
+```
 
-**Add Recent Imports Section (below hero):**
-- Only rendered when `sessions.length > 0`
-- "Recent Imports" heading — left-aligned, `text-lg font-semibold text-muted-foreground` with top border or spacing as divider
-- Centered container (`max-w-3xl mx-auto`)
-- Existing session cards rendered inside, unchanged
-- Mobile: `px-4`, full-width cards
+### Where It Breaks
 
-**Empty state:** Remove the current dashed empty-state card entirely. When no sessions exist, only the hero shows — no "Recent Imports" section, no empty-state message.
+**Break Point 1 — `ScanResultsStep.tsx` line 198-225**: The `handleStartProcessing` function builds the `OrgProfile` object but **never sets `pageRange`** on it. The parsed page ranges are put into `ProcessingConfig.pageRanges` (an array of `{start, end}` objects), but the `OrgProfile.pageRange` field (which expects `{startPage, endPage}`) is left undefined.
 
-**Loading state:** Show spinner below the hero section (not instead of it).
+**Break Point 2 — `Index.tsx` line 330-344**: `handleStartProcessing` calls `setOrgProfile(config.orgProfile)` (which has no pageRange) and completely ignores `config.pageRanges`. Nobody ever maps the array of ranges onto the orgProfile.
 
-**No changes to:** Card design, click handlers, delete/cancel logic, polling, StatusBadge, or formatRelativeTime.
+**Break Point 3 — `FileUploadStep.tsx` line 492-508**: When pre-rendered images exist from quick scan, it uses ALL of them regardless of page range. When rendering fresh, it passes `orgProfile.pageRange` to `renderPDFToImages()` — but that field is undefined, so all pages are rendered.
 
-### Responsive approach
-- Use Tailwind responsive prefixes (`sm:`, `md:`) for padding/width differences
-- Hero button: `w-full sm:w-[300px]`
-- Hero padding: `py-5 sm:py-8`
-- Heading: `text-xl sm:text-2xl`
-- Sessions container: `px-4 sm:px-0 max-w-3xl mx-auto`
+### Type Mismatch
 
-### Files
+- `ProcessingConfig.pageRanges`: `Array<{start: number, end: number}> | null` — supports non-contiguous ranges
+- `OrgProfile.pageRange`: `{startPage: number, endPage: number}` — only supports a single contiguous range
+- `process-plan` edge function: receives `pageRange` as a string like `"61-63"` and parses it
+
+The types are incompatible. The UI supports "1-5, 10, 15-20" but the downstream only accepts one range.
+
+### Fix Plan
+
+#### 1. Change `OrgProfile.pageRange` type in `src/types/plan.ts`
+Change from `{startPage, endPage}` to `string` (e.g., `"61-63"` or `"1-5, 10, 15-20"`). This matches what `process-plan` expects and supports non-contiguous ranges.
+
+#### 2. Map pageRanges onto orgProfile in `ScanResultsStep.tsx`
+In `handleStartProcessing`, convert the parsed ranges array back to a string and set it on the profile:
+```typescript
+const profile: OrgProfile = {
+  ...existing fields,
+  pageRange: scopeInput.trim() || undefined,  // pass the raw string like "61-63"
+};
+```
+
+#### 3. Filter images in `FileUploadStep.tsx` before sending
+When pre-rendered quick-scan images exist, filter them to only include pages within the user's specified range before sending to `process-plan`. Parse the `orgProfile.pageRange` string to determine which page indices to include.
+
+#### 4. Update `renderPDFToImages` call
+Update the call in `FileUploadStep.tsx` to handle the new string-based pageRange format when rendering fresh (non-quick-scan path).
+
+### Files to Modify
+
 | File | Change |
 |------|--------|
-| `src/components/RecentSessionsPage.tsx` | Restructure layout as described above |
+| `src/types/plan.ts` | Change `pageRange` type to `string \| undefined` |
+| `src/components/steps/ScanResultsStep.tsx` | Set `pageRange` on orgProfile from scopeInput |
+| `src/components/steps/FileUploadStep.tsx` | Filter pre-rendered images by page range before sending |
+| `src/utils/pdfToImages.ts` | Update to accept string-based page range (or parse in caller) |
 
