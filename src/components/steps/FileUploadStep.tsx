@@ -18,6 +18,26 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { OrgProfile } from '@/types/plan';
 import { SpreadsheetImportStep } from './SpreadsheetImportStep';
 
+/** Parse a page range string like "1-5, 10, 15-20" into a Set of page numbers */
+function parsePageRangeString(rangeStr: string): Set<number> {
+  const pages = new Set<number>();
+  const parts = rangeStr.split(',').map(s => s.trim()).filter(Boolean);
+  for (const part of parts) {
+    if (part.includes('-')) {
+      const [startStr, endStr] = part.split('-').map(s => s.trim());
+      const start = parseInt(startStr, 10);
+      const end = parseInt(endStr, 10);
+      if (!isNaN(start) && !isNaN(end)) {
+        for (let i = start; i <= end; i++) pages.add(i);
+      }
+    } else {
+      const num = parseInt(part, 10);
+      if (!isNaN(num)) pages.add(num);
+    }
+  }
+  return pages;
+}
+
 interface FileUploadStepProps {
   autoStart?: boolean;
   resumePollingOnly?: boolean;
