@@ -798,6 +798,17 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       extractionMethod = "vision";
       let images = pageImages as string[];
 
+      // Apply user-specified page range FIRST (safety net before Agent 0 annotations)
+      if (typeof pageRange === "string" && (pageRange as string).trim()) {
+        const maxPage = images.length;
+        const allowedPages = parsePageRange(pageRange as string, maxPage);
+        if (allowedPages.size > 0) {
+          const beforeCount = images.length;
+          images = images.filter((_, idx) => allowedPages.has(idx + 1));
+          console.log(`[process-plan] pageRange "${pageRange}" filter: ${beforeCount} → ${images.length} images (pages: ${[...allowedPages].sort((a,b)=>a-b).join(", ")})`);
+        }
+      }
+
       // Use Agent 0's page_annotations to filter pages (all modes)
       const pageAnnotationsArr = classification?.page_annotations as Array<{ page?: number; contains_plan_items?: boolean; notes?: string }> | undefined;
       if (Array.isArray(pageAnnotationsArr) && pageAnnotationsArr.length > 0) {
