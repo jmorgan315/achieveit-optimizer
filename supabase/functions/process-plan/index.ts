@@ -765,17 +765,28 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     let extractionMethod: "vision" | "text" = "text";
 
     // TEXT_HEAVY OVERRIDE: Use text extraction instead of vision
+    // BUT: if pageRange is set, keep vision — text path has no page boundaries
     if (useVision && classification?.document_type === "text_heavy" && hasDocumentText) {
-      console.log("[process-plan] Document classified as text_heavy — using text extraction instead of vision");
-      useVision = false;
-      extractionMethod = "text";
+      if (typeof pageRange === "string" && (pageRange as string).trim()) {
+        console.log("[process-plan] text_heavy but pageRange set — keeping vision extraction for page-scoped accuracy");
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "process-plan",
+          step_label: "Text_heavy override skipped: pageRange set, keeping vision for page-scoped extraction",
+          status: "success",
+        });
+      } else {
+        console.log("[process-plan] Document classified as text_heavy — using text extraction instead of vision");
+        useVision = false;
+        extractionMethod = "text";
 
-      await logApiCall({
-        session_id: sessionId,
-        edge_function: "process-plan",
-        step_label: "Text_heavy override: switching from vision to text extraction",
-        status: "success",
-      });
+        await logApiCall({
+          session_id: sessionId,
+          edge_function: "process-plan",
+          step_label: "Text_heavy override: switching from vision to text extraction",
+          status: "success",
+        });
+      }
     }
 
     await updateSessionProgress(sessionId, { current_step: "extracting" });
