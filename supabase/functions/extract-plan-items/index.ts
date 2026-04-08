@@ -404,7 +404,7 @@ async function processChunk(
   totalChunks: number,
   previousContext: { detectedLevels: { depth: number; name: string }[]; extractedItemNames: string[] } | null,
   apiKey: string,
-  orgContext?: { organizationName?: string; industry?: string; documentHints?: string; planLevels?: Array<{ depth: number; name: string }>; pageRange?: { startPage: number; endPage: number } },
+  orgContext?: { organizationName?: string; industry?: string; documentHints?: string; planLevels?: Array<{ depth: number; name: string }>; pageRange?: string | { startPage: number; endPage: number } },
   sessionId?: string,
   batchLabel?: string
 ): Promise<ExtractedChunkResult> {
@@ -418,7 +418,13 @@ async function processChunk(
     if (orgContext.industry) parts.push(`Industry: ${orgContext.industry}`);
     if (orgContext.documentHints) parts.push(`User-provided document hints: ${orgContext.documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
     if (orgContext.pageRange) {
-      parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${orgContext.pageRange.startPage} through ${orgContext.pageRange.endPage} of the original document. Focus your extraction ONLY on content from those pages. Ignore introductory material, appendices, and context that falls outside this range.`);
+      let rangeText: string;
+      if (typeof orgContext.pageRange === 'string') {
+        rangeText = orgContext.pageRange;
+      } else {
+        rangeText = `${orgContext.pageRange.startPage} through ${orgContext.pageRange.endPage}`;
+      }
+      parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${rangeText} of the original document. Focus your extraction ONLY on content from those pages. Ignore introductory material, appendices, and context that falls outside this range.`);
     }
     if (orgContext.planLevels && orgContext.planLevels.length > 0) {
       const levelsList = orgContext.planLevels.map((l, idx) => {
