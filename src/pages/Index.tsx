@@ -118,9 +118,12 @@ const Index = () => {
       sessionIdRef.current = id;
       console.log('[Session] Creating new session:', id);
       setSessionId(id);
-      const { error } = await supabase.from('processing_sessions').upsert({ id, status: 'in_progress', user_id: user!.id }, { onConflict: 'id' });
+      const upsertPayload: Record<string, unknown> = { id, status: 'in_progress' };
+      if (user?.id) upsertPayload.user_id = user.id;
+      else console.warn('[Session] user is null at session creation — user_id will be missing');
+      const { error } = await supabase.from('processing_sessions').upsert(upsertPayload, { onConflict: 'id' });
       if (error) console.error('[Session] Failed to create session row:', error);
-      else console.log('[Session] Row created successfully:', id);
+      else console.log('[Session] Row created successfully:', id, 'user_id:', user?.id ?? 'null');
       return id;
     })();
 
@@ -129,7 +132,7 @@ const Index = () => {
     } finally {
       sessionPromiseRef.current = null;
     }
-  }, [state.sessionId, setSessionId]);
+  }, [state.sessionId, setSessionId, user]);
 
   const goToStep = (step: number) => {
     setCurrentStep(step);
