@@ -84,6 +84,7 @@ export interface DedupRemovedDetail {
   removed_page: number;
   removed_parent: string;
   removed_item: Record<string, unknown>;
+  removed_sibling_index?: number;
   kept_name: string;
   kept_page: number;
   kept_parent: string;

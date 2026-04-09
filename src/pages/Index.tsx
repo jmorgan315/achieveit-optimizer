@@ -481,7 +481,27 @@ const Index = () => {
       confidence: 80,
     };
 
-    const updatedItems = [...state.items, newItem];
+    // Insert at original position among siblings instead of appending
+    const updatedItems = [...state.items];
+    const siblings = updatedItems.filter(i => i.parentId === parentId);
+    const siblingIndex = detail.removed_sibling_index ?? siblings.length;
+    const clampedIndex = Math.min(Math.max(0, siblingIndex), siblings.length);
+
+    if (clampedIndex >= siblings.length) {
+      // Insert after last sibling
+      if (siblings.length > 0) {
+        const lastSiblingIdx = updatedItems.indexOf(siblings[siblings.length - 1]);
+        updatedItems.splice(lastSiblingIdx + 1, 0, newItem);
+      } else {
+        updatedItems.push(newItem);
+      }
+    } else {
+      // Insert before the sibling currently at clampedIndex
+      const targetSibling = siblings[clampedIndex];
+      const targetIdx = updatedItems.indexOf(targetSibling);
+      updatedItems.splice(targetIdx, 0, newItem);
+    }
+
     setItems(updatedItems, state.personMappings);
     updateLevelsAndRecalculate(state.levels);
     setDedupResults(prev => prev.filter(d => d !== detail));
