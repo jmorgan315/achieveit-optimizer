@@ -85,13 +85,13 @@ export function useAutoSave(
         ...existingResults,
         data: {
           ...existingData,
-          items: treeItems,
+          items: treeItems as unknown,
         },
-      };
+      } as Record<string, unknown>;
 
       const { error } = await supabase
         .from('processing_sessions')
-        .update({ step_results: updatedResults })
+        .update({ step_results: updatedResults as any })
         .eq('id', sid);
 
       if (error) {
