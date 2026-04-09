@@ -2,98 +2,61 @@
 
 ## Fix: Page Range Enforcement End-to-End
 
-### Root Causes
+### Changes
 
-1. **`process-plan`**: Has `parsePageRange()` but never calls it. Page images go through Agent 0's `page_annotations` filter but never the user's explicit page range.
-2. **`text_heavy` override**: When `text_heavy` is detected, the pipeline switches from vision to text extraction (line 768), sending full document text with no page filtering. Since `parse-pdf` returns full-document text without page boundaries, the only fix is to force vision extraction when `pageRange` is set.
-3. **`extract-plan-items`**: The `processChunk` function signature expects `pageRange` as `{ startPage: number; endPage: number }` (line 407), but the frontend now sends a string like `"61-63"`. The prompt generation at line 420-422 tries to read `.startPage` and `.endPage` which are undefined on a string.
+#### 1. `src/components/steps/FileUploadStep.tsx` — Force vision when pageRange is set
 
-### Fix Plan
+At the text quality decision point (line ~845), add a check: if `orgProfile?.pageRange` is set, skip the text path and fall through to the vision path. This ensures filtered page images are sent to the server.
 
-#### 1. `supabase/functions/process-plan/index.ts` — Server-side image filtering
-
-After Agent 0's `page_annotations` filtering (around line 838), add a second filter using `parsePageRange()` to enforce the user's explicit page range:
-
+**Current code (line 845):**
 ```typescript
-// After the page_annotations filtering block, before persistPageImages:
-if (typeof pageRange === "string" && pageRange.trim()) {
-  const allowedPages = parsePageRange(pageRange as string, images.length);
-  if (allowedPages.size > 0) {
-    const beforeCount = images.length;
-    // Note: at this point images may already be filtered by page_annotations,
-    // but we need original page numbers. Track them.
-    // Since page_annotations filter already re-indexed, we need to apply
-    // pageRange BEFORE page_annotations or track original indices.
-  }
-}
+if (quality.useText) {
 ```
 
-**Better approach**: Apply `parsePageRange` filtering *before* the `page_annotations` filter, right after `let images = pageImages as string[]` (line 788). This way we first scope to user's pages, then let Agent 0 further refine within that subset.
-
-Insert at line ~789:
+**New code:**
 ```typescript
-// Apply user-specified page range FIRST (safety net)
-if (typeof pageRange === "string" && (pageRange as string).trim()) {
-  const maxPage = images.length;
+if (quality.useText && !orgProfile?.pageRange) {
+```
+
+This single condition change means: when `pageRange` is set, even if text quality is good, we skip the text path and fall through to the vision pipeline at line ~873. The vision pipeline already filters images by `pageRange` before sending. When no `pageRange` is set, text path works as before.
+
+#### 2. `supabase/functions/process-plan/index.ts` — Filter images BEFORE classification
+
+Move the `parsePageRange` filtering block from line ~801 (inside the `if (useVision)` extraction section) to line ~696 (right after `useVision` is determined), so images are filtered before the `classify-document` call.
+
+**Insert after line 696** (`let useVision = ...`):
+```typescript
+// Filter page images by user-specified page range EARLY — before classification
+if (useVision && typeof pageRange === "string" && (pageRange as string).trim()) {
+  let imgs = pageImages as string[];
+  const maxPage = imgs.length;
   const allowedPages = parsePageRange(pageRange as string, maxPage);
   if (allowedPages.size > 0) {
-    const beforeCount = images.length;
-    images = images.filter((_, idx) => allowedPages.has(idx + 1));
-    console.log(`[process-plan] pageRange "${pageRange}" filter: ${beforeCount} → ${images.length} images`);
+    const beforeCount = imgs.length;
+    imgs = imgs.filter((_, idx) => allowedPages.has(idx + 1));
+    console.log(`[process-plan] pageRange "${pageRange}" early filter: ${beforeCount} → ${imgs.length} images`);
+    // Mutate body reference so downstream code uses filtered images
+    (body as Record<string, unknown>).pageImages = imgs;
   }
 }
 ```
 
-#### 2. `supabase/functions/process-plan/index.ts` — Force vision when pageRange + text_heavy
+Then **remove** the duplicate filtering block at lines ~801-810 (inside `if (useVision)` extraction section) since it's now done earlier. The `classify-document` call at line ~727 uses `pageImages` from `body`, so it will now receive only the scoped pages.
 
-Change the `text_heavy` override block (lines 768-779). When `pageRange` is set AND images are available, do NOT switch to text — keep vision with filtered images:
+#### 3. Keep text_heavy + pageRange guard as safety net (no change needed)
 
-```typescript
-if (useVision && classification?.document_type === "text_heavy" && hasDocumentText) {
-  if (typeof pageRange === "string" && (pageRange as string).trim()) {
-    // pageRange is set — keep vision extraction with filtered images
-    // (text path has no page boundaries, so vision is the only way to enforce page scoping)
-    console.log("[process-plan] text_heavy but pageRange set — keeping vision extraction for page-scoped accuracy");
-  } else {
-    console.log("[process-plan] Document classified as text_heavy — using text extraction instead of vision");
-    useVision = false;
-    extractionMethod = "text";
-    // ... existing logApiCall
-  }
-}
-```
-
-#### 3. `supabase/functions/extract-plan-items/index.ts` — Normalize pageRange type
-
-Change line 407 signature and lines 420-422 to handle string format:
-
-In `processChunk` signature (line 407), change `pageRange` type:
-```typescript
-pageRange?: string | { startPage: number; endPage: number }
-```
-
-In the prompt generation (lines 420-422), handle both formats:
-```typescript
-if (orgContext.pageRange) {
-  let rangeText: string;
-  if (typeof orgContext.pageRange === 'string') {
-    rangeText = orgContext.pageRange;
-  } else {
-    rangeText = `${orgContext.pageRange.startPage} through ${orgContext.pageRange.endPage}`;
-  }
-  parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${rangeText} of the original document. Focus your extraction ONLY on content from those pages.`);
-}
-```
+The existing block at lines 769-790 stays as-is. It's now a secondary safety net: if somehow the frontend sends images for a text_heavy doc with pageRange, vision is preserved. But the primary enforcement is the frontend (fix #1) and early server filtering (fix #2).
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/process-plan/index.ts` | (1) Apply `parsePageRange` filter on images before Agent 0 annotations. (2) Skip text_heavy override when pageRange is set. |
-| `supabase/functions/extract-plan-items/index.ts` | Normalize `pageRange` type to accept string or object in `processChunk`. |
+| `src/components/steps/FileUploadStep.tsx` | Add `&& !orgProfile?.pageRange` to text quality gate (line ~845) |
+| `supabase/functions/process-plan/index.ts` | Move `parsePageRange` filtering before classification; remove duplicate block from extraction section |
 
-### What NOT to Change
-- Frontend filtering (already works as a first layer)
-- `extract-plan-vision` (receives pre-filtered images, no pageRange handling needed)
-- Card design, polling, auth
+### What stays the same
+- Text path for documents without page range — unchanged
+- `extract-plan-items` pageRange normalization — already fixed
+- Frontend image filtering in vision pipeline — already working
+- text_heavy override logic — stays as safety net
 
