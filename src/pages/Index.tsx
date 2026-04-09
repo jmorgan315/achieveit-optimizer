@@ -255,6 +255,10 @@ const Index = () => {
           };
           const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
 
+          // Hydrate dedup results for DedupSummaryCard
+          const dedupData = (stepResults?.dedupResults || []) as DedupRemovedDetail[];
+          setDedupResults(dedupData);
+
           setLevels(levels);
           setItems(items, personMappings);
           updateLevelsAndRecalculate(levels);
