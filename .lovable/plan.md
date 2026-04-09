@@ -1,29 +1,36 @@
 
 
-## Add User Assignment to Admin Session Detail
+## Two Fixes for Review & Export
 
-### What Changes
+### Fix 1: Restore dedup items to original position
 
-**File: `src/pages/admin/SessionDetailPage.tsx`**
+**Problem**: Restored items are appended to the end of the items array, so they appear at the bottom after `recalculateOrders` runs.
 
-Add a "User" row to the session header card (after the existing grid of metadata fields) that shows:
-- The currently assigned user's email + name, or "Unassigned" if `user_id` is null
-- A Select dropdown (using the existing `src/components/ui/select.tsx`) populated with all users from `user_profiles`
-- Selecting a user updates `processing_sessions.user_id` via supabase and refreshes local state
+**Current data available in `DedupRemovedDetail`**: The server-side dedup stores `removed_item` (the raw AI item with `parent_name`, `name`, etc.), `removed_parent`, and `kept_name`. There's no positional index stored.
 
-### Implementation Details
+**Approach**: 
+- **Server side** (`supabase/functions/process-plan/index.ts`): Add `removed_sibling_index` to `DedupRemovedDetail`. When an item is discarded, compute its index among siblings sharing the same `parent_name` in the items array at that point.
+- **Type** (`src/types/plan.ts`): Add `removed_sibling_index?: number` to `DedupRemovedDetail`.
+- **Restore logic** (`src/pages/Index.tsx` — `handleRestoreDedupItem`): Instead of `[...state.items, newItem]`, insert the new item at the correct position among its siblings. Find all siblings with the same `parentId`, then splice the new item at `removed_sibling_index` (clamped to bounds). If parent not found, append at root. Then call `updateLevelsAndRecalculate` as before — `recalculateOrders` will assign correct order strings based on array position.
 
-1. **Add state**: `users` array (fetched from `user_profiles`), `assigningUser` loading flag
-2. **Fetch users** in the same `useEffect` that loads session + logs — add a third parallel query: `supabase.from('user_profiles').select('id, email, first_name, last_name').eq('is_active', true)`
-3. **Add UI** below the metadata grid inside the existing Card: a row with label "User:", the current user's display (email + name), and a `<Select>` component with an "Unassigned" option + all users
-4. **On change handler**: call `supabase.from('processing_sessions').update({ user_id }).eq('id', session.id)`, update local session state, show toast
+### Fix 2: Auto-save edits to database
 
-### UI Layout
+**Problem**: User edits on the Review & Export screen are lost if the page is refreshed (only in-memory state).
 
-Inside the session header `<CardContent>`, after the grid, add:
-```
-User: john@achieveit.com (John Doe) [Select dropdown ▾]
-```
+**Approach**:
+- **New hook** `src/hooks/useAutoSave.ts`: A small hook that accepts `items`, `sessionId`, and a debounce delay (2s). On items change, debounce a Supabase update: `supabase.from('processing_sessions').update({ step_results: { ...existing, data: { ...existingData, items: convertedItems } } }).eq('id', sessionId)`. The saved items need to be converted back to the raw AI format that `convertAIResponseToPlanItems` expects on hydration.
+- **Save indicator**: The hook returns a `saveStatus` state (`'idle' | 'saving' | 'saved'`). 
+- **UI** (`src/components/steps/PlanOptimizerStep.tsx`): Accept and display `saveStatus` as a subtle indicator near the Export button — e.g., a small "Saving..." or "Saved ✓" text.
+- **Index.tsx**: Wire the hook with `state.items`, `state.sessionId`, and pass `saveStatus` to `PlanOptimizerStep`.
+- **Hydration**: Already reads from `step_results.data.items`, so auto-saved changes load automatically on resume.
 
-The Select shows: "Unassigned", then each user as "email (First Last)".
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `supabase/functions/process-plan/index.ts` | Add `removed_sibling_index` to dedup detail |
+| `src/types/plan.ts` | Add `removed_sibling_index` to `DedupRemovedDetail` |
+| `src/pages/Index.tsx` | Fix restore position logic; wire auto-save hook |
+| `src/hooks/useAutoSave.ts` | New hook: debounced save of items to session |
+| `src/components/steps/PlanOptimizerStep.tsx` | Add save status indicator prop + UI |
 
