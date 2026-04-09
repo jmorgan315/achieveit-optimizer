@@ -1,48 +1,72 @@
 
 
-## Fix: Missing `user_id` on Processing Sessions
+## Fix: Surface Dedup Results to the Client
 
 ### Root Cause
 
-A race condition between the frontend and server-side session creation:
+The `DedupSummaryCard` component and all wiring (props, state, restore handler) are intact. The data is simply never delivered to the client.
 
-1. Frontend (`Index.tsx:121`): upserts `{ id, status, user_id }` with `ignoreDuplicates: true`
-2. Server (`_shared/logging.ts:106`): upserts `{ id, status }` (NO `user_id`) with `ignoreDuplicates: true`
+**Server side** (`process-plan/index.ts`): The dedup `removedDetails` array is logged to `api_call_logs` (as `removed_items` in `response_payload`) but is **not included** in the final `step_results` written when the pipeline completes. The completion write at line 2099-2113 contains `data`, `totalItems`, `corrections`, `sessionConfidence`, `auditSummary`, `extractionMethod`, `pipelineComplete` — but no `dedupResults`.
 
-If the edge function's `ensureSession` executes first, it creates the row without `user_id`. The frontend upsert then becomes a no-op due to `ignoreDuplicates`, leaving `user_id` permanently null.
+**Client side** (`FileUploadStep.tsx`): The polling function returns `step_results` directly (line 455: `return results`), and the consumer reads `result.dedupResults` (line 176). Since the server never wrote it, it's always `undefined` → `[]`.
+
+**Resume/hydration path** (`Index.tsx` line 238-270): The hydration logic extracts `data.items` and `data.detectedLevels` from `step_results` but never reads `dedupResults` either.
 
 ### Fix
 
-**1. Change frontend upsert to NOT ignore duplicates** (`src/pages/Index.tsx`)
+#### 1. `supabase/functions/process-plan/index.ts` — Include dedupResults in final step_results
 
-Replace `ignoreDuplicates: true` with an explicit update so the frontend always wins:
+The `dedupResult.removedDetails` variable is available in scope during the pipeline. Thread it through to the final completion write.
 
+**At line ~1260** (extractionSnapshot construction), add `dedupResults` to the snapshot:
 ```typescript
-const { error } = await supabase
-  .from('processing_sessions')
-  .upsert(
-    { id, status: 'in_progress', user_id: user!.id },
-    { onConflict: 'id' }  // removes ignoreDuplicates — will UPDATE on conflict
-  );
+const extractionSnapshot = {
+  extraction: { ... },
+  classification: ...,
+  pipelineContext: { ... },
+  audit: null,
+  validation: null,
+  dedupResults: dedupResult.removedDetails,  // ADD THIS
+};
 ```
 
-This way, even if the server created the row first without `user_id`, the frontend upsert overwrites it with the correct `user_id`.
-
-**2. Backfill existing null sessions** (one-time migration)
-
-For the Apr 8-9 sessions that already have `user_id: null`, run a migration to set them based on the authenticated user who likely created them. Since there's only one active user (`ee58c766-...`), backfill all null rows:
-
-```sql
-UPDATE processing_sessions 
-SET user_id = 'ee58c766-cc3c-4196-a404-1ed9ebf3847d' 
-WHERE user_id IS NULL 
-  AND document_name IS NOT NULL;
+**At line ~2102** (final completion write), include it:
+```typescript
+step_results: {
+  success: true,
+  data: { items: finalItems, detectedLevels: finalLevels },
+  totalItems: finalItemCount,
+  corrections,
+  sessionConfidence,
+  auditSummary: auditFindings?.auditSummary || null,
+  extractionMethod,
+  pipelineComplete: true,
+  sessionId,
+  dedupResults: existingStepResults?.dedupResults || [],  // ADD THIS
+},
 ```
+
+The same needs to be done in the resume paths (~lines 1468, 1576, 1704) where `extractionSnapshot` is rebuilt — include `dedupResults: dedupResult.removedDetails`.
+
+#### 2. `src/pages/Index.tsx` — Hydrate dedupResults on session resume
+
+At line ~257, after converting items, add:
+```typescript
+const dedupData = (stepResults?.dedupResults || []) as DedupRemovedDetail[];
+setDedupResults(dedupData);
+```
+
+#### 3. Deploy the updated edge function
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
-| `src/pages/Index.tsx` | Remove `ignoreDuplicates: true` from session upsert (line 121) |
-| Migration | Backfill null `user_id` rows |
+| `supabase/functions/process-plan/index.ts` | Add `dedupResults` to extractionSnapshot and final completion `step_results` (4-5 locations) |
+| `src/pages/Index.tsx` | Hydrate `dedupResults` from `step_results` on session resume (~1 line) |
+
+### What stays the same
+- `FileUploadStep.tsx` polling already reads `result.dedupResults` — no change needed there
+- `DedupSummaryCard` component — no change needed
+- `PlanOptimizerStep` prop wiring — no change needed
 
