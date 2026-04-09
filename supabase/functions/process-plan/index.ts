@@ -548,14 +548,18 @@ function selectAuditImages(images: string[]): string[] {
   return selected;
 }
 
-function flattenItems(items: unknown[]): unknown[] {
+function flattenItems(items: unknown[], parentName?: string): unknown[] {
   const flat: unknown[] = [];
   for (const item of items) {
     const i = item as Record<string, unknown>;
     const { children, ...rest } = i;
+    if (parentName && !rest.parent_name) {
+      rest.parent_name = parentName;
+    }
     flat.push(rest);
+    const itemName = (rest.name as string) || undefined;
     if (Array.isArray(children) && children.length > 0) {
-      flat.push(...flattenItems(children as unknown[]));
+      flat.push(...flattenItems(children as unknown[], itemName));
     }
   }
   return flat;
