@@ -319,10 +319,11 @@ serve(async (req) => {
 
       const anthropicContent = buildVisionContent(imagesToSend, itemListing, contextPrefix, extractedItems.length);
 
+      const visionSystemPrompt = dedupExclusionNote ? VISION_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : VISION_AUDIT_SYSTEM_PROMPT;
       requestBody = {
         model: "claude-sonnet-4-20250514",
         max_tokens: 16384,
-        system: VISION_AUDIT_SYSTEM_PROMPT,
+        system: visionSystemPrompt,
         messages: [{ role: "user", content: anthropicContent }],
         tools: [{
           name: "report_audit_findings",
@@ -351,10 +352,11 @@ ${truncatedText}${truncationNote}
 
 Please audit the extraction above against the source document. Identify any missing items, merged items, or rephrased items.`;
 
+      const textSystemPrompt = dedupExclusionNote ? TEXT_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : TEXT_AUDIT_SYSTEM_PROMPT;
       requestBody = {
         model: "claude-sonnet-4-20250514",
         max_tokens: 16384,
-        system: TEXT_AUDIT_SYSTEM_PROMPT,
+        system: textSystemPrompt,
         messages: [{ role: "user", content: userMessage }],
         tools: [{
           name: "report_audit_findings",
