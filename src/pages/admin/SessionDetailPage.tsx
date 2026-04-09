@@ -205,22 +205,47 @@ function CopyButton({ text }: { text: string }) {
 
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const { toast } = useToast();
   const [session, setSession] = useState<Session | null>(null);
   const [logs, setLogs] = useState<ApiLog[]>([]);
+  const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [assigning, setAssigning] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     (async () => {
-      const [{ data: s }, { data: l }] = await Promise.all([
+      const [{ data: s }, { data: l }, { data: u }] = await Promise.all([
         supabase.from('processing_sessions').select('*').eq('id', id).single(),
         supabase.from('api_call_logs').select('*').eq('session_id', id).order('created_at', { ascending: true }),
+        supabase.from('user_profiles').select('id, email, first_name, last_name').eq('is_active', true),
       ]);
       setSession(s);
       setLogs((l || []) as ApiLog[]);
+      setUsers((u || []) as UserProfile[]);
       setLoading(false);
     })();
   }, [id]);
+
+  const handleAssignUser = async (userId: string) => {
+    if (!session) return;
+    setAssigning(true);
+    const newUserId = userId === '__unassigned__' ? null : userId;
+    const { error } = await supabase.from('processing_sessions').update({ user_id: newUserId }).eq('id', session.id);
+    if (error) {
+      toast({ title: 'Failed to assign user', description: error.message, variant: 'destructive' });
+    } else {
+      setSession({ ...session, user_id: newUserId });
+      toast({ title: 'User updated' });
+    }
+    setAssigning(false);
+  };
+
+  const assignedUser = users.find(u => u.id === session?.user_id);
+  const userDisplayName = (u: UserProfile) => {
+    const name = [u.first_name, u.last_name].filter(Boolean).join(' ');
+    return name ? `${u.email} (${name})` : u.email || u.id;
+  };
 
   if (loading) return <div className="p-6 text-muted-foreground">Loading…</div>;
   if (!session) return <div className="p-6 text-muted-foreground">Session not found</div>;
