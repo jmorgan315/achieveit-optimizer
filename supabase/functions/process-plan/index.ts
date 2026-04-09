@@ -1164,7 +1164,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // SAFETY NET: Low-item fallback to standard mode
     // ==============================
-    const totalPages = (pageImages as string[]).length;
+    const totalPages = (filteredPageImages as string[]).length;
     if (useVision && agent1ItemCount < 5 && totalPages > 10) {
       console.warn(`[process-plan] Safety net triggered: only ${agent1ItemCount} items from ${totalPages} pages. Re-running in standard mode...`);
 
@@ -1175,7 +1175,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         status: "success",
       });
 
-      const fallbackBatches = batchImages(pageImages as string[], 5);
+      const fallbackBatches = batchImages(filteredPageImages as string[], 5);
       let fallbackItems: unknown[] = [];
       let fallbackLevels: { depth: number; name: string }[] = [];
       let fallbackContext = "";
@@ -1302,7 +1302,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
     let auditFindings: AuditFindings | null = null;
 
-    if (hasSourceText || (useVision && pageImages)) {
+    if (hasSourceText || (useVision && filteredPageImages)) {
       const auditPayload: Record<string, unknown> = {
         extractedItems: agent1Data.items,
         sessionId,
@@ -1315,8 +1315,8 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       if (hasSourceText) {
         auditPayload.sourceText = sourceForAudit;
         console.log("[process-plan] Step 2: text-based audit");
-      } else if (useVision && pageImages) {
-        const images = pageImages as string[];
+      } else if (useVision && filteredPageImages) {
+        const images = filteredPageImages as string[];
         const auditImages = images.length <= 10 ? images : selectAuditImages(images);
         auditPayload.pageImages = auditImages;
         console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
