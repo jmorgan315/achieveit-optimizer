@@ -280,7 +280,14 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
+    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels, dedupRemovedNames } = body;
+
+    // Build dedup exclusion note for the prompt
+    let dedupExclusionNote = "";
+    if (Array.isArray(dedupRemovedNames) && dedupRemovedNames.length > 0) {
+      dedupExclusionNote = `\n\n=== DEDUP EXCLUSIONS ===\nThe following items were identified as duplicates and intentionally removed during deduplication. Do NOT flag them as missing:\n- ${dedupRemovedNames.join("\n- ")}\n`;
+      console.log(`[audit-completeness] Excluding ${dedupRemovedNames.length} dedup-removed items from audit`);
+    }
 
     const isVisionMode = !!(pageImages && Array.isArray(pageImages) && pageImages.length > 0);
     const hasText = !!(sourceText && sourceText.length > 100);

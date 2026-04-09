@@ -449,23 +449,40 @@ const Index = () => {
     const removedParent = (raw.parent_name as string) || detail.removed_parent || '';
     const keptParent = detail.kept_parent_name || detail.kept_parent || '';
 
-    const normalize = (s: string) => s.toLowerCase().trim();
+    const normalize = (s: string) => s.toLowerCase().trim().replace(/\s+/g, ' ');
+    const firstNWords = (s: string, n: number) => normalize(s).split(' ').slice(0, n).join(' ');
 
-    // Fuzzy match: check if either string includes the other
-    const fuzzyMatch = (itemName: string, target: string) => {
-      if (!target) return false;
-      const a = normalize(itemName);
-      const b = normalize(target);
-      return a === b || a.includes(b) || b.includes(a);
+    // Tiered matching: exact → startsWith → first-4-words
+    const tieredMatch = (items: PlanItem[], target: string): PlanItem | undefined => {
+      if (!target) return undefined;
+      const nt = normalize(target);
+      const ntWords = firstNWords(target, 4);
+      // Tier 1: exact
+      let match = items.find(i => normalize(i.name) === nt);
+      if (match) return match;
+      // Tier 2: startsWith
+      match = items.find(i => normalize(i.name).startsWith(nt) || nt.startsWith(normalize(i.name)));
+      if (match) return match;
+      // Tier 3: first 4 words
+      if (ntWords.split(' ').length >= 2) {
+        match = items.find(i => firstNWords(i.name, 4) === ntWords);
+      }
+      return match;
     };
 
     let parentId: string | null = null;
     let parentDepth = 0;
     let matchPath = 'root (no match)';
 
+    const allItemNames = state.items.map(i => i.name);
+    console.log(`[Dedup Restore] Attempting restore of "${detail.removed_name}"`);
+    console.log(`[Dedup Restore]   removed_parent: "${removedParent}"`);
+    console.log(`[Dedup Restore]   kept_parent: "${keptParent}"`);
+    console.log(`[Dedup Restore]   available items (${allItemNames.length}):`, allItemNames);
+
     // Step 1: Try removed_parent
     if (removedParent) {
-      const parent = state.items.find(i => fuzzyMatch(i.name, removedParent));
+      const parent = tieredMatch(state.items, removedParent);
       if (parent) {
         parentId = parent.id;
         parentDepth = parent.levelDepth;
@@ -475,7 +492,7 @@ const Index = () => {
 
     // Step 2: Fallback to kept_parent
     if (!parentId && keptParent) {
-      const parent = state.items.find(i => fuzzyMatch(i.name, keptParent));
+      const parent = tieredMatch(state.items, keptParent);
       if (parent) {
         parentId = parent.id;
         parentDepth = parent.levelDepth;
