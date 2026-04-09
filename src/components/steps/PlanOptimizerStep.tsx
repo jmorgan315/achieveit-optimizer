@@ -70,6 +70,7 @@ interface PlanOptimizerStepProps {
   onBack?: () => void;
   onStartOver?: () => void;
   onRestoreDedupItem?: (detail: DedupRemovedDetail) => void;
+  onDismissDedupItem?: (detail: DedupRemovedDetail) => void;
 }
 
 interface MetricSuggestion {
@@ -100,6 +101,7 @@ export function PlanOptimizerStep({
   onBack,
   onStartOver,
   onRestoreDedupItem,
+  onDismissDedupItem,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
     if (items.length <= 80) return new Set(items.map((i) => i.id));
@@ -447,9 +449,12 @@ export function PlanOptimizerStep({
       {showConfidence && <ConfidenceBanner items={items} />}
 
       {/* Dedup Summary — between confidence banner and stats */}
-      {dedupResults && dedupResults.length > 0 && onRestoreDedupItem && (
-        <DedupSummaryCard dedupResults={dedupResults} onRestore={onRestoreDedupItem} />
-      )}
+      {dedupResults && dedupResults.length > 0 && onRestoreDedupItem && (() => {
+        const filtered = dedupResults.filter(d => d.removed_name !== d.kept_name);
+        return filtered.length > 0 ? (
+          <DedupSummaryCard dedupResults={filtered} onRestore={onRestoreDedupItem} onDismiss={onDismissDedupItem} />
+        ) : null;
+      })()}
 
       {/* View Mode Toggle + Stats Bar */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

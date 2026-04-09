@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { PlanItem } from '@/types/plan';
+import { PlanItem, DedupRemovedDetail } from '@/types/plan';
 
 export type SaveStatus = 'idle' | 'saving' | 'saved';
 
@@ -54,6 +54,7 @@ function buildTree(items: PlanItem[]): Record<string, unknown>[] {
 
 export function useAutoSave(
   items: PlanItem[],
+  dedupResults: DedupRemovedDetail[],
   sessionId: string | undefined,
   delayMs = 2000
 ): SaveStatus {
@@ -62,12 +63,13 @@ export function useAutoSave(
   const isFirstRender = useRef(true);
   const lastSavedRef = useRef<string>('');
 
-  const save = useCallback(async (currentItems: PlanItem[], sid: string) => {
+  const save = useCallback(async (currentItems: PlanItem[], currentDedup: DedupRemovedDetail[], sid: string) => {
     const treeItems = buildTree(currentItems);
-    const itemsJson = JSON.stringify(treeItems);
+    const payload = { items: treeItems, dedup: currentDedup };
+    const payloadJson = JSON.stringify(payload);
     
     // Skip if nothing changed
-    if (itemsJson === lastSavedRef.current) return;
+    if (payloadJson === lastSavedRef.current) return;
 
     setSaveStatus('saving');
     try {
@@ -87,6 +89,7 @@ export function useAutoSave(
           ...existingData,
           items: treeItems as unknown,
         },
+        dedupResults: currentDedup as unknown,
       } as Record<string, unknown>;
 
       const { error } = await supabase
@@ -98,7 +101,7 @@ export function useAutoSave(
         console.error('[AutoSave] Failed:', error.message);
         setSaveStatus('idle');
       } else {
-        lastSavedRef.current = itemsJson;
+        lastSavedRef.current = payloadJson;
         setSaveStatus('saved');
         // Reset to idle after 3s
         setTimeout(() => setSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 3000);
@@ -120,13 +123,13 @@ export function useAutoSave(
 
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
-      save(items, sessionId);
+      save(items, dedupResults, sessionId);
     }, delayMs);
 
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [items, sessionId, delayMs, save]);
+  }, [items, dedupResults, sessionId, delayMs, save]);
 
   return saveStatus;
 }

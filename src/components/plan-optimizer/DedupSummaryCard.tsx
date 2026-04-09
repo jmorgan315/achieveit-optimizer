@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, ChevronDown, Undo2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, Undo2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DedupRemovedDetail } from '@/types/plan';
 import {
@@ -11,9 +11,10 @@ import {
 interface DedupSummaryCardProps {
   dedupResults: DedupRemovedDetail[];
   onRestore: (detail: DedupRemovedDetail) => void;
+  onDismiss?: (detail: DedupRemovedDetail) => void;
 }
 
-export function DedupSummaryCard({ dedupResults, onRestore }: DedupSummaryCardProps) {
+export function DedupSummaryCard({ dedupResults, onRestore, onDismiss }: DedupSummaryCardProps) {
   const [open, setOpen] = useState(false);
 
   if (!dedupResults || dedupResults.length === 0) return null;
@@ -49,15 +50,28 @@ export function DedupSummaryCard({ dedupResults, onRestore }: DedupSummaryCardPr
                     {detail.removed_parent ? ` under ${detail.removed_parent}` : ''}
                   </p>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0 text-xs h-7 px-2 text-muted-foreground hover:text-foreground"
-                  onClick={() => onRestore(detail)}
-                >
-                  <Undo2 className="h-3 w-3 mr-1" />
-                  Restore
-                </Button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground"
+                    onClick={() => onRestore(detail)}
+                  >
+                    <Undo2 className="h-3 w-3 mr-1" />
+                    Restore
+                  </Button>
+                  {onDismiss && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground"
+                      onClick={() => onDismiss(detail)}
+                    >
+                      <X className="h-3 w-3 mr-1" />
+                      Dismiss
+                    </Button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

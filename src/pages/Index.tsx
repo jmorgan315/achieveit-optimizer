@@ -106,7 +106,7 @@ const Index = () => {
     resetState,
   } = usePlanState();
 
-  const saveStatus = useAutoSave(state.items, state.sessionId);
+  const saveStatus = useAutoSave(state.items, dedupResults, state.sessionId);
 
   const sessionIdRef = useRef<string | null>(null);
   const sessionPromiseRef = useRef<Promise<string> | null>(null);
@@ -440,19 +440,50 @@ const Index = () => {
     updateLevelsAndRecalculate(levels);
   };
 
+  const handleDismissDedupItem = (detail: DedupRemovedDetail) => {
+    setDedupResults(prev => prev.filter(d => d !== detail));
+  };
+
   const handleRestoreDedupItem = (detail: DedupRemovedDetail) => {
     const raw = detail.removed_item;
-    const parentName = (raw.parent_name as string) || detail.removed_parent || '';
-    
+    const removedParent = (raw.parent_name as string) || detail.removed_parent || '';
+    const keptParent = detail.kept_parent_name || detail.kept_parent || '';
+
+    const normalize = (s: string) => s.toLowerCase().trim();
+
+    // Fuzzy match: check if either string includes the other
+    const fuzzyMatch = (itemName: string, target: string) => {
+      if (!target) return false;
+      const a = normalize(itemName);
+      const b = normalize(target);
+      return a === b || a.includes(b) || b.includes(a);
+    };
+
     let parentId: string | null = null;
     let parentDepth = 0;
-    if (parentName) {
-      const parent = state.items.find(i => i.name.toLowerCase().trim() === parentName.toLowerCase().trim());
+    let matchPath = 'root (no match)';
+
+    // Step 1: Try removed_parent
+    if (removedParent) {
+      const parent = state.items.find(i => fuzzyMatch(i.name, removedParent));
       if (parent) {
         parentId = parent.id;
         parentDepth = parent.levelDepth;
+        matchPath = `removed_parent "${removedParent}" → "${parent.name}"`;
       }
     }
+
+    // Step 2: Fallback to kept_parent
+    if (!parentId && keptParent) {
+      const parent = state.items.find(i => fuzzyMatch(i.name, keptParent));
+      if (parent) {
+        parentId = parent.id;
+        parentDepth = parent.levelDepth;
+        matchPath = `kept_parent "${keptParent}" → "${parent.name}"`;
+      }
+    }
+
+    console.log(`[Dedup Restore] "${detail.removed_name}" matched via: ${matchPath}`);
 
     const levelDepth = parentDepth + 1;
     const levelName = state.levels.find(l => l.depth === levelDepth)?.name || (raw.level_name as string) || (raw.levelType as string) || `Level ${levelDepth}`;
@@ -709,6 +740,7 @@ const Index = () => {
               onBack={handleBack}
               onStartOver={handleStartOver}
               onRestoreDedupItem={handleRestoreDedupItem}
+              onDismissDedupItem={handleDismissDedupItem}
             />
           )}
         </div>
