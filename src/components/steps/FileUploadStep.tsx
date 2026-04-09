@@ -842,7 +842,7 @@ export function FileUploadStep({
           const quality = evaluateTextQuality(textResult.text, textResult.pageCount);
           console.log(`Text quality: ${Math.round(quality.charsPerPage)} chars/page, threshold: ${CHARS_PER_PAGE_THRESHOLD}. Decision: ${quality.useText ? 'text' : 'vision'}. ${quality.reason}`);
 
-          if (quality.useText) {
+          if (quality.useText && !orgProfile?.pageRange) {
             // Text path
             setFileContent(textResult.text);
             setIsProcessing(false);

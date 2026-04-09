@@ -695,6 +695,20 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
     let useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
 
+    // Filter page images by user-specified page range EARLY — before classification
+    if (useVision && typeof pageRange === "string" && (pageRange as string).trim()) {
+      let imgs = pageImages as string[];
+      const maxPage = imgs.length;
+      const allowedPages = parsePageRange(pageRange as string, maxPage);
+      if (allowedPages.size > 0) {
+        const beforeCount = imgs.length;
+        imgs = imgs.filter((_, idx) => allowedPages.has(idx + 1));
+        console.log(`[process-plan] pageRange "${pageRange}" early filter: ${beforeCount} → ${imgs.length} images`);
+        (body as Record<string, unknown>).pageImages = imgs;
+        pageImages = imgs;
+      }
+    }
+
     // ==============================
     // AGENT 0: Document Classification
     // ==============================
@@ -798,16 +812,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       extractionMethod = "vision";
       let images = pageImages as string[];
 
-      // Apply user-specified page range FIRST (safety net before Agent 0 annotations)
-      if (typeof pageRange === "string" && (pageRange as string).trim()) {
-        const maxPage = images.length;
-        const allowedPages = parsePageRange(pageRange as string, maxPage);
-        if (allowedPages.size > 0) {
-          const beforeCount = images.length;
-          images = images.filter((_, idx) => allowedPages.has(idx + 1));
-          console.log(`[process-plan] pageRange "${pageRange}" filter: ${beforeCount} → ${images.length} images (pages: ${[...allowedPages].sort((a,b)=>a-b).join(", ")})`);
-        }
-      }
+      // (pageRange filtering already applied early, before classification)
 
       // Use Agent 0's page_annotations to filter pages (all modes)
       const pageAnnotationsArr = classification?.page_annotations as Array<{ page?: number; contains_plan_items?: boolean; notes?: string }> | undefined;
