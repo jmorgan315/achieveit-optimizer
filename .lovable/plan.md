@@ -1,36 +1,29 @@
 
 
-## Two Fixes for Review & Export
+## Three Dedup Card Fixes
 
-### Fix 1: Restore dedup items to original position
+### Changes
 
-**Problem**: Restored items are appended to the end of the items array, so they appear at the bottom after `recalculateOrders` runs.
+**1. `src/hooks/useAutoSave.ts`** — Accept `dedupResults` as a parameter alongside `items`. Include it in the save payload (`step_results.dedupResults`). Use both `items` and `dedupResults` for the change-detection hash.
 
-**Current data available in `DedupRemovedDetail`**: The server-side dedup stores `removed_item` (the raw AI item with `parent_name`, `name`, etc.), `removed_parent`, and `kept_name`. There's no positional index stored.
+**2. `src/pages/Index.tsx`** — 
+- Pass `dedupResults` to `useAutoSave`: `useAutoSave(state.items, dedupResults, state.sessionId)`
+- Add `handleDismissDedupItem` handler that removes the detail from `dedupResults` state
+- Improve `handleRestoreDedupItem` parent matching: (a) fuzzy match `removed_parent` against all item names using normalized `includes` comparison, (b) if no match, try `kept_parent` field, (c) if still no match, insert at root. Add `console.log` for debug tracing of which path was used.
+- Pass `onDismissDedupItem` to `PlanOptimizerStep`
 
-**Approach**: 
-- **Server side** (`supabase/functions/process-plan/index.ts`): Add `removed_sibling_index` to `DedupRemovedDetail`. When an item is discarded, compute its index among siblings sharing the same `parent_name` in the items array at that point.
-- **Type** (`src/types/plan.ts`): Add `removed_sibling_index?: number` to `DedupRemovedDetail`.
-- **Restore logic** (`src/pages/Index.tsx` — `handleRestoreDedupItem`): Instead of `[...state.items, newItem]`, insert the new item at the correct position among its siblings. Find all siblings with the same `parentId`, then splice the new item at `removed_sibling_index` (clamped to bounds). If parent not found, append at root. Then call `updateLevelsAndRecalculate` as before — `recalculateOrders` will assign correct order strings based on array position.
+**3. `src/components/steps/PlanOptimizerStep.tsx`** — Accept and pass `onDismissDedupItem` prop to `DedupSummaryCard`. Filter out ghost dupes (where `removed_name === kept_name`) before passing to the card.
 
-### Fix 2: Auto-save edits to database
+**4. `src/components/plan-optimizer/DedupSummaryCard.tsx`** — Add `onDismiss` prop. Render a "Dismiss" button (X icon, ghost style) next to the existing Restore button.
 
-**Problem**: User edits on the Review & Export screen are lost if the page is refreshed (only in-memory state).
+**5. `src/types/plan.ts`** — Add optional `kept_parent?: string` to `DedupRemovedDetail` (if not already present).
 
-**Approach**:
-- **New hook** `src/hooks/useAutoSave.ts`: A small hook that accepts `items`, `sessionId`, and a debounce delay (2s). On items change, debounce a Supabase update: `supabase.from('processing_sessions').update({ step_results: { ...existing, data: { ...existingData, items: convertedItems } } }).eq('id', sessionId)`. The saved items need to be converted back to the raw AI format that `convertAIResponseToPlanItems` expects on hydration.
-- **Save indicator**: The hook returns a `saveStatus` state (`'idle' | 'saving' | 'saved'`). 
-- **UI** (`src/components/steps/PlanOptimizerStep.tsx`): Accept and display `saveStatus` as a subtle indicator near the Export button — e.g., a small "Saving..." or "Saved ✓" text.
-- **Index.tsx**: Wire the hook with `state.items`, `state.sessionId`, and pass `saveStatus` to `PlanOptimizerStep`.
-- **Hydration**: Already reads from `step_results.data.items`, so auto-saved changes load automatically on resume.
+### Parent Matching Logic (Fix 3)
 
-### Files to modify
-
-| File | Change |
-|------|--------|
-| `supabase/functions/process-plan/index.ts` | Add `removed_sibling_index` to dedup detail |
-| `src/types/plan.ts` | Add `removed_sibling_index` to `DedupRemovedDetail` |
-| `src/pages/Index.tsx` | Fix restore position logic; wire auto-save hook |
-| `src/hooks/useAutoSave.ts` | New hook: debounced save of items to session |
-| `src/components/steps/PlanOptimizerStep.tsx` | Add save status indicator prop + UI |
+```text
+1. Normalize removed_parent → find item where normalize(item.name) includes normalize(removed_parent) or vice versa
+2. If not found, try same with kept_parent  
+3. If not found, parentId = null (root)
+4. console.log('[Dedup Restore] matched via: ...') for debugging
+```
 
