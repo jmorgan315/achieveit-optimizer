@@ -280,6 +280,28 @@ export default function SessionDetailPage() {
               return totalCost > 0 ? <div><span className="text-muted-foreground">Cost:</span> ${totalCost.toFixed(2)}</div> : null;
             })()}
           </div>
+          <div className="flex items-center gap-3 mt-4 pt-4 border-t border-border text-sm">
+            <span className="text-muted-foreground">User:</span>
+            <Select
+              value={session.user_id || '__unassigned__'}
+              onValueChange={handleAssignUser}
+              disabled={assigning}
+            >
+              <SelectTrigger className="w-[320px] h-8 text-sm">
+                <SelectValue>
+                  {assignedUser ? userDisplayName(assignedUser) : 'Unassigned'}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unassigned__">Unassigned</SelectItem>
+                {users.map(u => (
+                  <SelectItem key={u.id} value={u.id}>
+                    {userDisplayName(u)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </CardContent>
       </Card>
 
