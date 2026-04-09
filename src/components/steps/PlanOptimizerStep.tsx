@@ -36,6 +36,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { PlanItem, PlanLevel, OrgProfile, DedupRemovedDetail } from '@/types/plan';
+import { SaveStatus } from '@/hooks/useAutoSave';
 import { SortableTreeItem, DropPosition } from '@/components/plan-optimizer/SortableTreeItem';
 import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
@@ -58,6 +59,7 @@ interface PlanOptimizerStepProps {
   orgProfile?: OrgProfile;
   sessionId?: string;
   dedupResults?: DedupRemovedDetail[];
+  saveStatus?: SaveStatus;
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
@@ -87,6 +89,7 @@ export function PlanOptimizerStep({
   orgProfile,
   sessionId,
   dedupResults,
+  saveStatus,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
@@ -484,10 +487,18 @@ export function PlanOptimizerStep({
               {needsReviewCount} Need Review
             </Button>
           )}
-          <Button onClick={() => setShowExportDialog(true)} size="sm">
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
+          <div className="flex items-center gap-3">
+            {saveStatus === 'saving' && (
+              <span className="text-xs text-muted-foreground animate-pulse">Saving...</span>
+            )}
+            {saveStatus === 'saved' && (
+              <span className="text-xs text-muted-foreground">Saved ✓</span>
+            )}
+            <Button onClick={() => setShowExportDialog(true)} size="sm">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </div>
         </div>
       </div>
 

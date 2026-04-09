@@ -14,6 +14,7 @@ import { LoginPage } from '@/components/LoginPage';
 import { useAuth } from '@/hooks/useAuth';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
+import { useAutoSave } from '@/hooks/useAutoSave';
 import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
@@ -104,6 +105,8 @@ const Index = () => {
     deleteItem,
     resetState,
   } = usePlanState();
+
+  const saveStatus = useAutoSave(state.items, state.sessionId);
 
   const sessionIdRef = useRef<string | null>(null);
   const sessionPromiseRef = useRef<Promise<string> | null>(null);
@@ -481,7 +484,27 @@ const Index = () => {
       confidence: 80,
     };
 
-    const updatedItems = [...state.items, newItem];
+    // Insert at original position among siblings instead of appending
+    const updatedItems = [...state.items];
+    const siblings = updatedItems.filter(i => i.parentId === parentId);
+    const siblingIndex = detail.removed_sibling_index ?? siblings.length;
+    const clampedIndex = Math.min(Math.max(0, siblingIndex), siblings.length);
+
+    if (clampedIndex >= siblings.length) {
+      // Insert after last sibling
+      if (siblings.length > 0) {
+        const lastSiblingIdx = updatedItems.indexOf(siblings[siblings.length - 1]);
+        updatedItems.splice(lastSiblingIdx + 1, 0, newItem);
+      } else {
+        updatedItems.push(newItem);
+      }
+    } else {
+      // Insert before the sibling currently at clampedIndex
+      const targetSibling = siblings[clampedIndex];
+      const targetIdx = updatedItems.indexOf(targetSibling);
+      updatedItems.splice(targetIdx, 0, newItem);
+    }
+
     setItems(updatedItems, state.personMappings);
     updateLevelsAndRecalculate(state.levels);
     setDedupResults(prev => prev.filter(d => d !== detail));
@@ -675,6 +698,7 @@ const Index = () => {
               orgProfile={state.orgProfile}
               sessionId={state.sessionId}
               dedupResults={dedupResults}
+              saveStatus={saveStatus}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}

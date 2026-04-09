@@ -373,6 +373,7 @@ interface DedupRemovedDetail {
   removed_page: number;
   removed_parent: string;
   removed_item: Record<string, unknown>;
+  removed_sibling_index: number;
   kept_name: string;
   kept_page: number;
   kept_parent: string;
@@ -454,11 +455,22 @@ function deduplicateItems(items: unknown[]): DedupResult {
           keeper.parent_name = discarded.parent_name;
         }
 
+        // Compute sibling index: count items before discardIdx with the same parent_name
+        const discardedParent = (discarded.parent_name || "").toLowerCase().trim();
+        let siblingIndex = 0;
+        for (let si = 0; si < discardIdx; si++) {
+          if (removed.has(si)) continue;
+          const siItem = itemsArr[si] as { parent_name?: string };
+          const siParent = ((siItem.parent_name || "").toLowerCase().trim());
+          if (siParent === discardedParent) siblingIndex++;
+        }
+
         removedDetails.push({
           removed_name: discarded.name || "",
           removed_page: discarded.source_page || 0,
           removed_parent: (discarded as Record<string, unknown>).parent_name as string || "",
           removed_item: { ...(itemsArr[discardIdx] as Record<string, unknown>) },
+          removed_sibling_index: siblingIndex,
           kept_name: keeper.name || "",
           kept_page: keeper.source_page || 0,
           kept_parent: (keeper as Record<string, unknown>).parent_name as string || "",
