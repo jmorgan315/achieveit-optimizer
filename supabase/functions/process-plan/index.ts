@@ -738,7 +738,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
       try {
         const classifyResult = await callEdgeFunction("classify-document", {
-          pageImages,
+          pageImages: filteredPageImages,
           orgName: organizationName || "",
           industry: industry || "",
           userPlanLevels: planLevels || null,
@@ -809,7 +809,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
     if (useVision) {
       extractionMethod = "vision";
-      let images = pageImages as string[];
+      let images = filteredPageImages as string[];
 
       // (pageRange filtering already applied early, before classification)
 
