@@ -694,18 +694,17 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
     let useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
+    let filteredPageImages = pageImages as string[] | undefined;
 
     // Filter page images by user-specified page range EARLY — before classification
     if (useVision && typeof pageRange === "string" && (pageRange as string).trim()) {
-      let imgs = pageImages as string[];
+      const imgs = filteredPageImages!;
       const maxPage = imgs.length;
       const allowedPages = parsePageRange(pageRange as string, maxPage);
       if (allowedPages.size > 0) {
         const beforeCount = imgs.length;
-        imgs = imgs.filter((_, idx) => allowedPages.has(idx + 1));
-        console.log(`[process-plan] pageRange "${pageRange}" early filter: ${beforeCount} → ${imgs.length} images`);
-        (body as Record<string, unknown>).pageImages = imgs;
-        pageImages = imgs;
+        filteredPageImages = imgs.filter((_, idx) => allowedPages.has(idx + 1));
+        console.log(`[process-plan] pageRange "${pageRange}" early filter: ${beforeCount} → ${filteredPageImages.length} images`);
       }
     }
 
