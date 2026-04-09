@@ -694,6 +694,19 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
     let useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
+    let filteredPageImages = pageImages as string[] | undefined;
+
+    // Filter page images by user-specified page range EARLY — before classification
+    if (useVision && typeof pageRange === "string" && (pageRange as string).trim()) {
+      const imgs = filteredPageImages!;
+      const maxPage = imgs.length;
+      const allowedPages = parsePageRange(pageRange as string, maxPage);
+      if (allowedPages.size > 0) {
+        const beforeCount = imgs.length;
+        filteredPageImages = imgs.filter((_, idx) => allowedPages.has(idx + 1));
+        console.log(`[process-plan] pageRange "${pageRange}" early filter: ${beforeCount} → ${filteredPageImages.length} images`);
+      }
+    }
 
     // ==============================
     // AGENT 0: Document Classification
@@ -725,7 +738,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
       try {
         const classifyResult = await callEdgeFunction("classify-document", {
-          pageImages,
+          pageImages: filteredPageImages,
           orgName: organizationName || "",
           industry: industry || "",
           userPlanLevels: planLevels || null,
@@ -796,18 +809,9 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
     if (useVision) {
       extractionMethod = "vision";
-      let images = pageImages as string[];
+      let images = filteredPageImages as string[];
 
-      // Apply user-specified page range FIRST (safety net before Agent 0 annotations)
-      if (typeof pageRange === "string" && (pageRange as string).trim()) {
-        const maxPage = images.length;
-        const allowedPages = parsePageRange(pageRange as string, maxPage);
-        if (allowedPages.size > 0) {
-          const beforeCount = images.length;
-          images = images.filter((_, idx) => allowedPages.has(idx + 1));
-          console.log(`[process-plan] pageRange "${pageRange}" filter: ${beforeCount} → ${images.length} images (pages: ${[...allowedPages].sort((a,b)=>a-b).join(", ")})`);
-        }
-      }
+      // (pageRange filtering already applied early, before classification)
 
       // Use Agent 0's page_annotations to filter pages (all modes)
       const pageAnnotationsArr = classification?.page_annotations as Array<{ page?: number; contains_plan_items?: boolean; notes?: string }> | undefined;
@@ -1160,7 +1164,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     // ==============================
     // SAFETY NET: Low-item fallback to standard mode
     // ==============================
-    const totalPages = (pageImages as string[]).length;
+    const totalPages = (filteredPageImages as string[]).length;
     if (useVision && agent1ItemCount < 5 && totalPages > 10) {
       console.warn(`[process-plan] Safety net triggered: only ${agent1ItemCount} items from ${totalPages} pages. Re-running in standard mode...`);
 
@@ -1171,7 +1175,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         status: "success",
       });
 
-      const fallbackBatches = batchImages(pageImages as string[], 5);
+      const fallbackBatches = batchImages(filteredPageImages as string[], 5);
       let fallbackItems: unknown[] = [];
       let fallbackLevels: { depth: number; name: string }[] = [];
       let fallbackContext = "";
@@ -1298,7 +1302,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
 
     let auditFindings: AuditFindings | null = null;
 
-    if (hasSourceText || (useVision && pageImages)) {
+    if (hasSourceText || (useVision && filteredPageImages)) {
       const auditPayload: Record<string, unknown> = {
         extractedItems: agent1Data.items,
         sessionId,
@@ -1311,8 +1315,8 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       if (hasSourceText) {
         auditPayload.sourceText = sourceForAudit;
         console.log("[process-plan] Step 2: text-based audit");
-      } else if (useVision && pageImages) {
-        const images = pageImages as string[];
+      } else if (useVision && filteredPageImages) {
+        const images = filteredPageImages as string[];
         const auditImages = images.length <= 10 ? images : selectAuditImages(images);
         auditPayload.pageImages = auditImages;
         console.log(`[process-plan] Step 2: vision-based audit with ${auditImages.length} of ${images.length} images`);
