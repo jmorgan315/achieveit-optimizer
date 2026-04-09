@@ -1,29 +1,58 @@
 
 
-## Three Dedup Card Fixes
+## Four Dedup Fixes
 
-### Changes
+### 1. Fix ghost dupe filter (too aggressive)
 
-**1. `src/hooks/useAutoSave.ts`** — Accept `dedupResults` as a parameter alongside `items`. Include it in the save payload (`step_results.dedupResults`). Use both `items` and `dedupResults` for the change-detection hash.
+**File: `src/components/steps/PlanOptimizerStep.tsx` (~line 453)**
 
-**2. `src/pages/Index.tsx`** — 
-- Pass `dedupResults` to `useAutoSave`: `useAutoSave(state.items, dedupResults, state.sessionId)`
-- Add `handleDismissDedupItem` handler that removes the detail from `dedupResults` state
-- Improve `handleRestoreDedupItem` parent matching: (a) fuzzy match `removed_parent` against all item names using normalized `includes` comparison, (b) if no match, try `kept_parent` field, (c) if still no match, insert at root. Add `console.log` for debug tracing of which path was used.
-- Pass `onDismissDedupItem` to `PlanOptimizerStep`
-
-**3. `src/components/steps/PlanOptimizerStep.tsx`** — Accept and pass `onDismissDedupItem` prop to `DedupSummaryCard`. Filter out ghost dupes (where `removed_name === kept_name`) before passing to the card.
-
-**4. `src/components/plan-optimizer/DedupSummaryCard.tsx`** — Add `onDismiss` prop. Render a "Dismiss" button (X icon, ghost style) next to the existing Restore button.
-
-**5. `src/types/plan.ts`** — Add optional `kept_parent?: string` to `DedupRemovedDetail` (if not already present).
-
-### Parent Matching Logic (Fix 3)
-
-```text
-1. Normalize removed_parent → find item where normalize(item.name) includes normalize(removed_parent) or vice versa
-2. If not found, try same with kept_parent  
-3. If not found, parentId = null (root)
-4. console.log('[Dedup Restore] matched via: ...') for debugging
+Change filter from:
+```typescript
+d.removed_name !== d.kept_name
 ```
+to:
+```typescript
+!(d.removed_name === d.kept_name && d.removed_parent === d.kept_parent)
+```
+
+### 2. Fix restore parent matching
+
+**File: `src/pages/Index.tsx` (~lines 455-484)**
+
+Replace the fuzzy `includes` matching with a tiered approach:
+1. Exact match (normalized)
+2. `startsWith` match (normalized)
+3. First-N-words match (compare first 4 words)
+4. Fallback to `kept_parent` with same tiers
+5. Root as last resort
+
+Add enhanced debug logging that prints `removed_parent`, `kept_parent`, and all available item names so mismatches are diagnosable.
+
+### 3. Pass dedup context to Agent 2
+
+**File: `supabase/functions/process-plan/index.ts` (~lines 1317-1334)**
+
+Add `dedupRemovedNames` to the audit payload — a list of `removed_name` values from `dedupResult.removedDetails`.
+
+**File: `supabase/functions/audit-completeness/index.ts`**
+
+In both `TEXT_AUDIT_SYSTEM_PROMPT` and `VISION_AUDIT_SYSTEM_PROMPT`, append a dynamic section when dedup names are provided:
+```
+The following items were identified as duplicates and intentionally removed. Do NOT flag them as missing: [list]
+```
+
+Read `dedupRemovedNames` from the request body and inject it into the prompt sent to Claude.
+
+### 4. Keep restore debugging logs
+
+No changes needed — the existing `console.log` calls in `handleRestoreDedupItem` will be preserved. The enhanced logging from fix #2 adds more detail.
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `src/components/steps/PlanOptimizerStep.tsx` | Fix ghost dupe filter condition |
+| `src/pages/Index.tsx` | Tiered parent matching + enhanced debug logs |
+| `supabase/functions/process-plan/index.ts` | Pass dedup removed names to audit payload |
+| `supabase/functions/audit-completeness/index.ts` | Inject dedup exclusion list into audit prompt |
 
