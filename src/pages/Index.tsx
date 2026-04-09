@@ -740,6 +740,7 @@ const Index = () => {
               onBack={handleBack}
               onStartOver={handleStartOver}
               onRestoreDedupItem={handleRestoreDedupItem}
+              onDismissDedupItem={handleDismissDedupItem}
             />
           )}
         </div>
