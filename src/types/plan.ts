@@ -88,6 +88,7 @@ export interface DedupRemovedDetail {
   kept_name: string;
   kept_page: number;
   kept_parent: string;
+  kept_parent_name?: string;
   match_reason: string;
 }
 
