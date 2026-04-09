@@ -29,6 +29,7 @@ function calcCost(model: string | null, inputTokens: number | null, outputTokens
 interface Session {
   id: string;
   created_at: string;
+  user_id: string | null;
   org_name: string | null;
   org_industry: string | null;
   document_name: string | null;
@@ -43,6 +44,13 @@ interface Session {
   document_type: string | null;
   classification_result: Json;
   step_results: Json;
+}
+
+interface UserProfile {
+  id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
 }
 
 interface ApiLog {
