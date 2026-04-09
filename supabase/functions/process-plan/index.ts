@@ -1314,6 +1314,11 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     let auditFindings: AuditFindings | null = null;
 
     if (hasSourceText || (useVision && filteredPageImages)) {
+      // Collect dedup removed names so Agent 2 won't re-add them
+      const dedupRemovedNames = dedupResult.removedDetails
+        .map((d: { removed_name?: string }) => d.removed_name)
+        .filter(Boolean);
+
       const auditPayload: Record<string, unknown> = {
         extractedItems: agent1Data.items,
         sessionId,
@@ -1321,6 +1326,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         industry,
         planLevels,
         classification: classification || null,
+        dedupRemovedNames: dedupRemovedNames.length > 0 ? dedupRemovedNames : undefined,
       };
 
       if (hasSourceText) {

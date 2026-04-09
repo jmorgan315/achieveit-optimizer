@@ -280,7 +280,14 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels } = body;
+    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels, dedupRemovedNames } = body;
+
+    // Build dedup exclusion note for the prompt
+    let dedupExclusionNote = "";
+    if (Array.isArray(dedupRemovedNames) && dedupRemovedNames.length > 0) {
+      dedupExclusionNote = `\n\n=== DEDUP EXCLUSIONS ===\nThe following items were identified as duplicates and intentionally removed during deduplication. Do NOT flag them as missing:\n- ${dedupRemovedNames.join("\n- ")}\n`;
+      console.log(`[audit-completeness] Excluding ${dedupRemovedNames.length} dedup-removed items from audit`);
+    }
 
     const isVisionMode = !!(pageImages && Array.isArray(pageImages) && pageImages.length > 0);
     const hasText = !!(sourceText && sourceText.length > 100);
@@ -312,10 +319,11 @@ serve(async (req) => {
 
       const anthropicContent = buildVisionContent(imagesToSend, itemListing, contextPrefix, extractedItems.length);
 
+      const visionSystemPrompt = dedupExclusionNote ? VISION_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : VISION_AUDIT_SYSTEM_PROMPT;
       requestBody = {
         model: "claude-sonnet-4-20250514",
         max_tokens: 16384,
-        system: VISION_AUDIT_SYSTEM_PROMPT,
+        system: visionSystemPrompt,
         messages: [{ role: "user", content: anthropicContent }],
         tools: [{
           name: "report_audit_findings",
@@ -344,10 +352,11 @@ ${truncatedText}${truncationNote}
 
 Please audit the extraction above against the source document. Identify any missing items, merged items, or rephrased items.`;
 
+      const textSystemPrompt = dedupExclusionNote ? TEXT_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : TEXT_AUDIT_SYSTEM_PROMPT;
       requestBody = {
         model: "claude-sonnet-4-20250514",
         max_tokens: 16384,
-        system: TEXT_AUDIT_SYSTEM_PROMPT,
+        system: textSystemPrompt,
         messages: [{ role: "user", content: userMessage }],
         tools: [{
           name: "report_audit_findings",

@@ -450,7 +450,7 @@ export function PlanOptimizerStep({
 
       {/* Dedup Summary — between confidence banner and stats */}
       {dedupResults && dedupResults.length > 0 && onRestoreDedupItem && (() => {
-        const filtered = dedupResults.filter(d => d.removed_name !== d.kept_name);
+        const filtered = dedupResults.filter(d => !(d.removed_name === d.kept_name && d.removed_parent === d.kept_parent));
         return filtered.length > 0 ? (
           <DedupSummaryCard dedupResults={filtered} onRestore={onRestoreDedupItem} onDismiss={onDismissDedupItem} />
         ) : null;
