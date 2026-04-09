@@ -696,16 +696,11 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
     let useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
     let filteredPageImages = pageImages as string[] | undefined;
 
-    // Filter page images by user-specified page range EARLY — before classification
-    if (useVision && typeof pageRange === "string" && (pageRange as string).trim()) {
-      const imgs = filteredPageImages!;
-      const maxPage = imgs.length;
-      const allowedPages = parsePageRange(pageRange as string, maxPage);
-      if (allowedPages.size > 0) {
-        const beforeCount = imgs.length;
-        filteredPageImages = imgs.filter((_, idx) => allowedPages.has(idx + 1));
-        console.log(`[process-plan] pageRange "${pageRange}" early filter: ${beforeCount} → ${filteredPageImages.length} images`);
-      }
+    // Page-range filtering is done CLIENT-SIDE in FileUploadStep before upload.
+    // The images array already contains only the user-scoped pages.
+    const hasUserPageRange = typeof pageRange === "string" && (pageRange as string).trim().length > 0;
+    if (hasUserPageRange) {
+      console.log(`[process-plan] pageRange="${pageRange}" — ${(filteredPageImages || []).length} images received (pre-filtered by client)`);
     }
 
     // ==============================
@@ -814,8 +809,11 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       // (pageRange filtering already applied early, before classification)
 
       // Use Agent 0's page_annotations to filter pages (all modes)
+      // BUT: skip when user specified a pageRange — images are already scoped by the frontend
       const pageAnnotationsArr = classification?.page_annotations as Array<{ page?: number; contains_plan_items?: boolean; notes?: string }> | undefined;
-      if (Array.isArray(pageAnnotationsArr) && pageAnnotationsArr.length > 0) {
+      if (hasUserPageRange) {
+        console.log(`[process-plan] Skipping annotation filter — images already scoped by pageRange "${pageRange}" (${images.length} images)`);
+      } else if (Array.isArray(pageAnnotationsArr) && pageAnnotationsArr.length > 0) {
         const planPages = pageAnnotationsArr
           .filter(a => a.contains_plan_items === true && typeof a.page === 'number')
           .map(a => a.page!)

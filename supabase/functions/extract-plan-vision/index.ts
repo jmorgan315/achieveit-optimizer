@@ -753,7 +753,8 @@ serve(async (req) => {
       if (industry) parts.push(`Industry: ${industry}`);
       if (documentHints) parts.push(`User-provided document hints: ${documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
       if (pageRange) {
-        parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${pageRange.startPage} through ${pageRange.endPage} of the original document. Focus your extraction ONLY on content from those pages.`);
+        const rangeStr = typeof pageRange === "string" ? pageRange : `${(pageRange as any).startPage} through ${(pageRange as any).endPage}`;
+        parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${rangeStr} of the original document. Focus your extraction ONLY on content from those pages.`);
       }
       if (planLevels && Array.isArray(planLevels) && planLevels.length > 0) {
         const levelsList = planLevels.map((l: { depth: number; name: string }, idx: number) => {
