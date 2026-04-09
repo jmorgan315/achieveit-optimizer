@@ -1,77 +1,66 @@
 
 
-## Fix: Preserve Page Identity Through the Pipeline
+## Fix: `user` Missing from `ensureSessionId` Closure
 
 ### Root Cause
 
-When the frontend filters images by page range, it sends a flat array of 3 images (pages 61-63) to `process-plan`. The server has no way to know these are pages 61-63 — it treats them as pages 1, 2, 3. This causes three cascading problems:
-
-1. **Server-side early filter is a no-op**: `parsePageRange("61-63", 3)` produces an empty set because pages 61-63 all exceed `maxPage=3`. The filter correctly does nothing (images are already filtered), but this is fragile.
-
-2. **Agent 0 page_annotations mismatch**: The quick scan classified all 65 pages, so annotations reference original page numbers (1-65). When the annotation filter runs against 3 images, it checks `p <= images.length` (3), discarding annotations for pages 61-63. Instead, annotations for pages 1-3 might accidentally match — page 3's annotation ("plan content overview") passes, which refers to a completely different page than what's actually in the image array.
-
-3. **Extraction prompt says "pages undefined through undefined"**: The page range start/end values aren't being passed to the extraction prompt builder, so the LLM gets no page-scoping instruction.
-
-The first run (85 items, mostly correct) got lucky — the annotation filter happened to keep the right images, and the LLM extracted from what it saw. The second run (59 items) likely had different annotation matching or LLM behavior.
-
-### Fix Strategy
-
-Rather than sending page numbers alongside images (which would require changes to every downstream function), fix the two specific broken behaviors:
-
-#### 1. Skip annotation-based page filtering when pageRange is set
-
-In `process-plan/index.ts`, when the user specified a `pageRange`, the frontend already filtered the images. The annotation-based filter (lines 816-868) uses original page numbers that don't correspond to the filtered image indices. Skip it.
-
-**File**: `supabase/functions/process-plan/index.ts` (~line 816)
-
-**Current**:
+Line 132 of `Index.tsx`:
 ```typescript
-const pageAnnotationsArr = classification?.page_annotations as ...;
-if (Array.isArray(pageAnnotationsArr) && pageAnnotationsArr.length > 0) {
+}, [state.sessionId, setSessionId]);
 ```
 
-**New**:
+`user` is **not** in the `useCallback` dependency array. Here's the race:
+
+1. Component mounts → `user` is `null` → `useCallback` creates `ensureSessionId` capturing `user = null`
+2. Auth loads → `user` becomes the real user → re-render fires
+3. But `useCallback` deps (`state.sessionId`, `setSessionId`) haven't changed, so **the same function with the stale `null` user closure is returned**
+4. User clicks "Scan" → `ensureSessionId()` runs → `user!.id` throws `TypeError` (can't read `.id` of null)
+5. But line 118 already set `sessionIdRef.current = id` **before** the crash, so the session ID is "committed" in memory
+6. The thrown error propagates but doesn't prevent edge functions from being called with that session ID
+7. Edge functions call `ensureSession(id)` → creates the row **without `user_id`**
+8. The frontend upsert at line 121 never executed (it crashed before reaching `supabase.from`)
+
+The earlier sessions (14:20, 13:55) had `user_id` because `state.sessionId` or `sessionIdRef.current` happened to be set in a render where deps changed, causing `useCallback` to re-capture a non-null `user`.
+
+### Fix
+
+**`src/pages/Index.tsx`** — Add `user` to the dependency array:
+
 ```typescript
-const hasUserPageRange = typeof pageRange === "string" && (pageRange as string).trim();
-const pageAnnotationsArr = classification?.page_annotations as ...;
-if (!hasUserPageRange && Array.isArray(pageAnnotationsArr) && pageAnnotationsArr.length > 0) {
+}, [state.sessionId, setSessionId, user]);
 ```
 
-When `pageRange` is set, skip the annotation filter entirely — the images are already scoped by the frontend. Add a log line: `"[process-plan] Skipping annotation filter — images already scoped by pageRange"`.
+Also add a guard so the upsert gracefully handles a null user instead of crashing:
 
-#### 2. Pass page range to extraction prompt
-
-In the extraction call builder (where the prompt includes "pages undefined through undefined"), replace the undefined start/end with the actual `pageRange` string.
-
-**File**: `supabase/functions/process-plan/index.ts` (extraction prompt construction, ~line 930-960)
-
-Find where the extraction prompt is built and ensure it uses `pageRange` correctly. The current code likely does something like:
 ```typescript
-`pages ${startPage} through ${endPage}`
-```
-where `startPage`/`endPage` are derived from the (now-filtered) image array indices. Replace with the user's actual pageRange string when available:
-```typescript
-const scopeNote = hasUserPageRange
-  ? `The user has indicated that the actionable plan content is on pages ${pageRange} of the original document. Focus your extraction ONLY on content from those pages.`
-  : '';
+sessionPromiseRef.current = (async () => {
+  const id = crypto.randomUUID();
+  sessionIdRef.current = id;
+  console.log('[Session] Creating new session:', id);
+  setSessionId(id);
+  const upsertPayload: Record<string, unknown> = { id, status: 'in_progress' };
+  if (user?.id) upsertPayload.user_id = user.id;
+  const { error } = await supabase.from('processing_sessions').upsert(
+    upsertPayload, { onConflict: 'id' }
+  );
+  if (error) console.error('[Session] Failed to create session row:', error);
+  else console.log('[Session] Row created successfully:', id);
+  return id;
+})();
 ```
 
-#### 3. Remove the redundant server-side early filter
+And backfill the two null sessions:
 
-The early filter at lines 700-709 is now a permanent no-op (the frontend pre-filters, so `parsePageRange("61-63", 3)` always returns empty). Remove it to avoid confusion, and add a comment explaining that page filtering is done client-side.
+```sql
+UPDATE processing_sessions 
+SET user_id = 'ee58c766-cc3c-4196-a404-1ed9ebf3847d' 
+WHERE user_id IS NULL AND document_name IS NOT NULL;
+```
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
-| `supabase/functions/process-plan/index.ts` | (1) Skip annotation filter when `pageRange` is set; (2) Fix extraction prompt to use actual page range; (3) Remove dead early filter code |
-
-### What stays the same
-- Frontend image filtering in `FileUploadStep.tsx` — working correctly
-- `classify-document` — operates on all pages during quick scan, as intended
-- `text_heavy` override guard — stays as-is
-- `extract-plan-items` function — no changes needed
-
-### Verification
-After deploying, the extraction prompt should say "pages 61-63" instead of "pages undefined through undefined", and the annotation filter should be skipped for page-scoped runs.
+| `src/pages/Index.tsx` | Add `user` to `useCallback` deps; add null guard on `user?.id` |
+| Migration | Backfill 2 null `user_id` rows |
 
