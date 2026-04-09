@@ -499,6 +499,7 @@ export function PlanOptimizerStep({
               Export
             </Button>
           </div>
+        </div>
       </div>
 
       {/* Stats Bar */}
