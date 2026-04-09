@@ -14,6 +14,7 @@ import { LoginPage } from '@/components/LoginPage';
 import { useAuth } from '@/hooks/useAuth';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
+import { useAutoSave } from '@/hooks/useAutoSave';
 import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
 import { exportToExcel } from '@/utils/exportToExcel';
 import { toast } from '@/hooks/use-toast';
@@ -104,6 +105,8 @@ const Index = () => {
     deleteItem,
     resetState,
   } = usePlanState();
+
+  const saveStatus = useAutoSave(state.items, state.sessionId);
 
   const sessionIdRef = useRef<string | null>(null);
   const sessionPromiseRef = useRef<Promise<string> | null>(null);
@@ -695,6 +698,7 @@ const Index = () => {
               orgProfile={state.orgProfile}
               sessionId={state.sessionId}
               dedupResults={dedupResults}
+              saveStatus={saveStatus}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}
