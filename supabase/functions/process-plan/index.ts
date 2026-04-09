@@ -1274,6 +1274,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       },
       audit: null,
       validation: null,
+      dedupResults: dedupResult.removedDetails,
     };
     await updateSessionProgress(sessionId, {
       current_step: "extraction_complete",
@@ -1471,6 +1472,7 @@ async function runResume(sessionId: string): Promise<void> {
             extraction: { items: dedupedItems, detectedLevels, completed_at: new Date().toISOString() },
             classification,
             pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
+            dedupResults: dedupResult.removedDetails,
           },
         });
 
@@ -1579,6 +1581,7 @@ async function runResume(sessionId: string): Promise<void> {
             extraction: { items: dedupedItems, detectedLevels, completed_at: new Date().toISOString() },
             classification,
             pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
+            dedupResults: dedupResult.removedDetails,
           },
         });
 
@@ -1707,6 +1710,7 @@ async function runResume(sessionId: string): Promise<void> {
           extraction: { items: dedupedItems, detectedLevels, completed_at: new Date().toISOString() },
           classification,
           pipelineContext: { organizationName, industry, planLevels, documentText, extractionMethod, useVision },
+          dedupResults: dedupResult.removedDetails,
         },
       });
 
@@ -2109,6 +2113,7 @@ async function runAgent3Only(
       extractionMethod,
       pipelineComplete: true,
       sessionId,
+      dedupResults: existingStepResults?.dedupResults || [],
     },
     total_items_extracted: finalItemCount,
   });
