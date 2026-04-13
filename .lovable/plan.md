@@ -1,26 +1,41 @@
 
 
-## Fix: Update CORS headers in invite-user Edge Function
+## Inline Editing on Review & Export — Part A (Core Table) — Revised
 
-### Problem
-The `invite-user` function's CORS `Access-Control-Allow-Headers` only lists `authorization, x-client-info, apikey, content-type`. The Supabase JS client v2 sends additional headers (`x-supabase-client-platform`, `x-supabase-client-platform-version`, `x-supabase-client-runtime`, `x-supabase-client-runtime-version`). The browser's preflight OPTIONS check fails because these headers aren't allowed, blocking the actual POST request.
+### Revision from previous plan
 
-### Fix
+The mobile/desktop rendering decision moves entirely into `PlanOptimizerStep.tsx`. `InlineEditableTable` has no mobile guard — it always renders the table. PlanOptimizerStep uses a `useMediaQuery(1024)` check to conditionally render either `InlineEditableTable` or the existing `SortableTreeItem` list.
 
-**File: `supabase/functions/invite-user/index.ts`** — Update the CORS headers to include all headers the client sends:
+### New Files
 
-```typescript
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+**1. `src/components/plan-optimizer/EditableCell.tsx`** (~400 lines)
+
+Generic click-to-edit cell. Props: `value`, `onChange`, `type` (text | textarea | dropdown | date), `options`, `placeholder`, `readOnly`. Handles display/edit mode, Enter/Escape/onBlur, auto-resizing textarea for Name, Radix Select for dropdowns, Popover+Calendar for dates.
+
+**2. `src/components/plan-optimizer/InlineEditableTable.tsx`** (~300 lines)
+
+The table component. No mobile guard — always renders the full table. Sticky header. Columns: # (60px), Level (100px), Name (flex-grow, wraps, indented by depth, chevron for expand/collapse, confidence dot), Start Date (100px), Due Date (100px), Assigned To (160px), Actions (100px). Each row uses `useSortable` for drag-and-drop. Zebra striping, highlight rows missing name. Each cell edit calls `onUpdateItem(id, { field: value })`.
+
+### Modified File
+
+**3. `src/components/steps/PlanOptimizerStep.tsx`** (~80 lines changed)
+
+- Add `useIsMobile` or a `useMediaQuery` hook with a 1024px breakpoint (e.g. `const isDesktop = useMediaQuery("(min-width: 1024px)")`)
+- Remove the `viewMode` state and Summary/Full Editor toggle
+- In the tree rendering section, conditionally render:
+
+```text
+{isDesktop
+  ? <InlineEditableTable ... />
+  : <SortableContext ...>
+      {flatList.map(item => <SortableTreeItem ... />)}
+    </SortableContext>
+}
 ```
 
-Then redeploy and test the function.
+- The rendering decision lives in one place (PlanOptimizerStep), not split across components
+- All other existing features unchanged: stats bar, confidence banner, dedup cards, export, drag-and-drop, auto-save, edit modal fallback via gear icon
 
-### Files to modify
-
-| File | Change |
-|------|--------|
-| `supabase/functions/invite-user/index.ts` | Expand CORS allowed headers |
+### What stays unchanged
+All backend/edge functions, PlanItem type, export logic, auto-save hook, EditItemDialog, admin panel, processing pipeline, summary cards.
 
