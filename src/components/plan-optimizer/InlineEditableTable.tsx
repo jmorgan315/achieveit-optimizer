@@ -129,7 +129,10 @@ function InlineEditableRow({
 
       <div
         ref={setNodeRef}
-        style={style}
+        style={{
+          ...style,
+          gridTemplateColumns: '36px 60px 100px 1fr 110px 110px 160px 110px',
+        }}
         data-id={item.id}
         className={`grid items-center gap-0 border-b transition-colors ${
           needsReview ? 'bg-amber-50 dark:bg-amber-950/20' : ''
@@ -138,10 +141,6 @@ function InlineEditableRow({
         } ${showInsideHighlight ? 'bg-primary/10 border-l-4 border-l-primary' : ''} ${
           dimmed ? 'opacity-40' : ''
         }`}
-        style={{
-          ...style,
-          gridTemplateColumns: '36px 60px 100px 1fr 110px 110px 160px 110px',
-        }}
       >
         {/* Drag handle */}
         <div className="flex items-center justify-center py-2">
