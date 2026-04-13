@@ -116,8 +116,8 @@ export function PlanOptimizerStep({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
   const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | 'needs-review' | null>(null);
-  const [viewMode, setViewMode] = useState<'summary' | 'full'>('full');
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [includeConfidence, setIncludeConfidence] = useState(false);
   const [showConfidence, setShowConfidence] = useState(() => {
     return localStorage.getItem('achieveit-show-confidence') === 'true';
