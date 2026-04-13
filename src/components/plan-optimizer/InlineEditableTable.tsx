@@ -133,7 +133,7 @@ function InlineEditableRow({
           gridTemplateColumns: '36px 60px 100px 1fr 110px 110px 160px 110px',
         }}
         data-id={item.id}
-        className={`grid items-center gap-0 border-b transition-colors ${
+        className={`group grid items-center gap-0 border-b transition-colors ${
           needsReview ? 'bg-amber-50 dark:bg-amber-950/20' : ''
         } ${!item.name ? 'bg-destructive/5' : ''} ${
           isDragging ? 'bg-muted shadow-lg z-50' : 'hover:bg-muted/50'
@@ -149,10 +149,8 @@ function InlineEditableRow({
         </div>
 
         {/* # (order) */}
-        <div className="px-1 py-2">
-          <Badge variant="outline" className="text-[11px] font-normal">
-            {item.order}
-          </Badge>
+        <div className="px-1 py-1">
+          <span className="text-sm text-muted-foreground">{item.order}</span>
         </div>
 
         {/* Level */}
@@ -168,7 +166,7 @@ function InlineEditableRow({
               }
             }}
             renderDisplay={() => (
-              <Badge variant="secondary" className="text-[11px]">
+              <Badge variant="secondary" className="text-xs max-w-[80px] truncate">
                 {item.levelName}
               </Badge>
             )}
@@ -236,12 +234,12 @@ function InlineEditableRow({
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-0.5 px-1 py-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onOptimize(item)} title="Optimize with AI">
-            <Sparkles className="h-3.5 w-3.5" />
+        <div className="flex items-center gap-0.5 px-1 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onOptimize(item)} title="Optimize with AI">
+            <Sparkles className="h-3 w-3" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(item)} title="Edit all fields">
-            <Settings2 className="h-3.5 w-3.5" />
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => onEdit(item)} title="Edit all fields">
+            <Settings2 className="h-3 w-3" />
           </Button>
           {onDelete && (
             <AlertDialog>
@@ -249,10 +247,10 @@ function InlineEditableRow({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
                   title="Delete item"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 className="h-3 w-3" />
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
