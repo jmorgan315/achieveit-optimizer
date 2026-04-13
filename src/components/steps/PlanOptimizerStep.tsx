@@ -565,68 +565,15 @@ export function PlanOptimizerStep({
         </Card>
       </div>
 
-      {/* Summary View */}
-      {viewMode === 'summary' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Plan Summary</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Items per Level */}
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-3">Items by Level</h3>
-              <div className="space-y-2">
-                {levels.map((level) => {
-                  const count = items.filter((i) => i.levelDepth === level.depth).length;
-                  const pct = items.length > 0 ? (count / items.length) * 100 : 0;
-                  return (
-                    <div key={level.id} className="flex items-center gap-3">
-                      <span className="text-sm w-36 truncate">{level.name}</span>
-                      <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-primary transition-all"
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span className="text-sm font-medium w-8 text-right">{count}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Coverage Stats */}
-            <div>
-              <h3 className="text-sm font-medium text-muted-foreground mb-3">Coverage</h3>
-              <div className="grid grid-cols-3 gap-4">
-                {[
-                  { label: 'Owners Assigned', value: items.length - issueStats.missingOwner, color: ownerColor },
-                  { label: 'Dates Set', value: items.length - issueStats.missingDates, color: datesColor },
-                  { label: 'With Metrics', value: itemsWithMetrics, color: metricsColor },
-                ].map(({ label, value, color }) => {
-                  const pct = items.length > 0 ? Math.round((value / items.length) * 100) : 0;
-                  return (
-                    <div key={label} className="text-center p-4 rounded-lg bg-muted/50">
-                      <div className={`text-3xl font-bold ${color.text}`}>{pct}%</div>
-                      <div className="text-sm text-muted-foreground mt-1">{label}</div>
-                      <div className="text-xs text-muted-foreground">{value} / {items.length}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Tree View with Drag and Drop — Full Editor only */}
-      {viewMode === 'full' && (
-        <Card>
+      {/* Plan Structure — Desktop: inline table, Mobile: tree items */}
+      <Card>
         <CardHeader className="border-b">
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="text-lg">Plan Structure</CardTitle>
-              <p className="text-sm text-muted-foreground">Drag items to reorganize hierarchy</p>
+              <p className="text-sm text-muted-foreground">
+                {isDesktop ? 'Click any cell to edit inline' : 'Drag items to reorganize hierarchy'}
+              </p>
             </div>
             {onUpdateLevels && (
               <Button
@@ -653,38 +600,57 @@ export function PlanOptimizerStep({
               items={flatList.map((f) => f.item.id)}
               strategy={verticalListSortingStrategy}
             >
-              <div className="divide-y">
-                {flatList.map(({ item, depth }) => {
-                  const targetItem = dropInfo?.itemId === item.id ? item : null;
-                  const nestLevelName = targetItem
-                    ? levels.find(l => l.depth === targetItem.levelDepth + 1)?.name || `Level ${targetItem.levelDepth + 1}`
-                    : '';
-                  const reorderLevelName = targetItem
-                    ? targetItem.levelName
-                    : '';
-                  return (
-                  <SortableTreeItem
-                    key={item.id}
-                    item={item}
-                    depth={depth}
-                    hasChildren={getChildren(item.id).length > 0}
-                    isExpanded={expandedItems.has(item.id)}
-                    onToggleExpand={toggleExpand}
-                    onOptimize={handleOptimize}
-                    onEdit={handleEdit}
-                    onDelete={onDeleteItem ? handleDelete : undefined}
-                    isOver={dropInfo?.itemId === item.id}
-                    dropPosition={dropInfo?.itemId === item.id ? dropInfo.position : null}
-                    targetItemName={item.name}
-                    nestLevelName={nestLevelName}
-                    reorderLevelName={reorderLevelName}
-                    sessionId={sessionId}
-                    showConfidence={showConfidence}
-                    dimmed={showConfidence && activeFilter === 'needs-review' && (item.confidence ?? 100) >= 80}
-                  />
-                  );
-                })}
-              </div>
+              {isDesktop ? (
+                <InlineEditableTable
+                  flatList={flatList}
+                  items={items}
+                  levels={levels}
+                  expandedItems={expandedItems}
+                  onToggleExpand={toggleExpand}
+                  onUpdateItem={onUpdateItem}
+                  onChangeLevel={onChangeLevel}
+                  onOptimize={handleOptimize}
+                  onEdit={handleEdit}
+                  onDelete={onDeleteItem ? handleDelete : undefined}
+                  showConfidence={showConfidence}
+                  activeFilter={activeFilter}
+                  dropInfo={dropInfo}
+                  sessionId={sessionId}
+                />
+              ) : (
+                <div className="divide-y">
+                  {flatList.map(({ item, depth }) => {
+                    const targetItem = dropInfo?.itemId === item.id ? item : null;
+                    const nestLevelName = targetItem
+                      ? levels.find(l => l.depth === targetItem.levelDepth + 1)?.name || `Level ${targetItem.levelDepth + 1}`
+                      : '';
+                    const reorderLevelName = targetItem
+                      ? targetItem.levelName
+                      : '';
+                    return (
+                    <SortableTreeItem
+                      key={item.id}
+                      item={item}
+                      depth={depth}
+                      hasChildren={getChildren(item.id).length > 0}
+                      isExpanded={expandedItems.has(item.id)}
+                      onToggleExpand={toggleExpand}
+                      onOptimize={handleOptimize}
+                      onEdit={handleEdit}
+                      onDelete={onDeleteItem ? handleDelete : undefined}
+                      isOver={dropInfo?.itemId === item.id}
+                      dropPosition={dropInfo?.itemId === item.id ? dropInfo.position : null}
+                      targetItemName={item.name}
+                      nestLevelName={nestLevelName}
+                      reorderLevelName={reorderLevelName}
+                      sessionId={sessionId}
+                      showConfidence={showConfidence}
+                      dimmed={showConfidence && activeFilter === 'needs-review' && (item.confidence ?? 100) >= 80}
+                    />
+                    );
+                  })}
+                </div>
+              )}
             </SortableContext>
 
             <DragOverlay>
@@ -715,8 +681,7 @@ export function PlanOptimizerStep({
             </DragOverlay>
           </DndContext>
         </CardContent>
-        </Card>
-      )}
+      </Card>
 
       {/* Metric Suggestion Dialog */}
       <Dialog open={showMetricDialog} onOpenChange={setShowMetricDialog}>
