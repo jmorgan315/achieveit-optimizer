@@ -130,7 +130,7 @@ function InlineEditableRow({
         ref={setNodeRef}
         style={{
           ...style,
-          gridTemplateColumns: '36px 60px 100px 1fr 110px 110px 160px 110px',
+          gridTemplateColumns: '36px 60px 110px 1fr 110px 110px 160px 110px',
         }}
         data-id={item.id}
         className={`group grid items-center gap-0 border-b transition-colors ${
@@ -326,7 +326,7 @@ export function InlineEditableTable({
       {/* Sticky header */}
       <div
         className="grid items-center gap-0 border-b bg-muted/50 text-xs font-medium text-muted-foreground sticky top-0 z-20"
-        style={{ gridTemplateColumns: '36px 60px 100px 1fr 110px 110px 160px 110px' }}
+        style={{ gridTemplateColumns: '36px 60px 110px 1fr 110px 110px 160px 110px' }}
       >
         <div className="px-1 py-2" />
         <div className="px-2 py-2">#</div>
