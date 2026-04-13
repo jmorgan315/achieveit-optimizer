@@ -123,6 +123,13 @@ export function PlanOptimizerStep({
     return localStorage.getItem('achieveit-show-confidence') === 'true';
   });
   
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => setIsDesktop(mql.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
@@ -457,19 +464,8 @@ export function PlanOptimizerStep({
         ) : null;
       })()}
 
-      {/* View Mode Toggle + Stats Bar */}
+      {/* Stats Bar Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <LayoutList className={`h-4 w-4 ${viewMode === 'summary' ? 'text-primary' : 'text-muted-foreground'}`} />
-          <Switch
-            checked={viewMode === 'full'}
-            onCheckedChange={(checked) => setViewMode(checked ? 'full' : 'summary')}
-          />
-          <TreePine className={`h-4 w-4 ${viewMode === 'full' ? 'text-primary' : 'text-muted-foreground'}`} />
-          <Label className="text-sm text-muted-foreground">
-            {viewMode === 'full' ? 'Full Editor' : 'Summary'}
-          </Label>
-        </div>
         <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
           {/* AI Confidence toggle */}
           <div className="flex items-center gap-2">
