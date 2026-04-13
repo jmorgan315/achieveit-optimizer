@@ -165,11 +165,21 @@ function InlineEditableRow({
                 onChangeLevel(item.id, newDepth);
               }
             }}
-            renderDisplay={() => (
-              <Badge variant="secondary" className="text-xs max-w-[80px] truncate">
-                {item.levelName}
-              </Badge>
-            )}
+            renderDisplay={() => {
+              const depthColors = [
+                'text-blue-600 dark:text-blue-400',
+                'text-violet-600 dark:text-violet-400',
+                'text-emerald-600 dark:text-emerald-400',
+                'text-amber-600 dark:text-amber-400',
+                'text-rose-600 dark:text-rose-400',
+              ];
+              const colorClass = depthColors[item.levelDepth % depthColors.length];
+              return (
+                <span className={`text-xs font-medium max-w-[100px] truncate ${colorClass}`}>
+                  {item.levelName}
+                </span>
+              );
+            }}
           />
         </div>
 
