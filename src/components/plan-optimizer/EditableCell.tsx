@@ -176,7 +176,7 @@ export function EditableCell({
       >
         <SelectTrigger
           className={cn(
-            'h-auto min-h-[28px] border-0 shadow-none bg-transparent hover:bg-muted/60 px-2 py-1 text-sm focus:ring-0 focus:ring-offset-0',
+            'h-auto min-h-[28px] border-0 shadow-none bg-transparent hover:bg-muted/60 px-2 py-1 text-sm focus:ring-0 focus:ring-offset-0 [&>svg:last-child]:opacity-0 [&>svg:last-child]:group-hover:opacity-100 [&>svg:last-child]:transition-opacity',
             className,
           )}
         >
