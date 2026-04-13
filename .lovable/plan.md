@@ -1,41 +1,27 @@
 
 
-## Inline Editing on Review & Export — Part A (Core Table) — Revised
+## UI Polish: Inline Table Styling Fixes
 
-### Revision from previous plan
+Four CSS-only changes to `InlineEditableTable.tsx` and `EditableCell.tsx`.
 
-The mobile/desktop rendering decision moves entirely into `PlanOptimizerStep.tsx`. `InlineEditableTable` has no mobile guard — it always renders the table. PlanOptimizerStep uses a `useMediaQuery(1024)` check to conditionally render either `InlineEditableTable` or the existing `SortableTreeItem` list.
+### Changes
 
-### New Files
+**1. `src/components/plan-optimizer/InlineEditableTable.tsx`**
 
-**1. `src/components/plan-optimizer/EditableCell.tsx`** (~400 lines)
+- **Order numbers (line 152-156)**: Replace `<Badge variant="outline">` with plain `<span className="text-sm text-muted-foreground">`
+- **Level badge (line 170-174)**: Add `max-w-[80px] truncate text-xs` to the Badge inside `renderDisplay`
+- **Row group class (line 136)**: Add `group` to the row's className so child elements can use `group-hover:`
+- **Action buttons (line 239-277)**: Wrap the actions div with `opacity-0 group-hover:opacity-100 transition-opacity`. Reduce button size classes from `h-7 w-7` to `h-6 w-6`. Reduce icon sizes from `h-3.5 w-3.5` to `h-3 w-3`
+- **Row padding**: Change all `py-2` and `py-1` on cells to `py-1` consistently for compact rows
 
-Generic click-to-edit cell. Props: `value`, `onChange`, `type` (text | textarea | dropdown | date), `options`, `placeholder`, `readOnly`. Handles display/edit mode, Enter/Escape/onBlur, auto-resizing textarea for Name, Radix Select for dropdowns, Popover+Calendar for dates.
+**2. `src/components/plan-optimizer/EditableCell.tsx`**
 
-**2. `src/components/plan-optimizer/InlineEditableTable.tsx`** (~300 lines)
+- **Dropdown trigger (line ~178-188)**: Add `[&>svg:last-child]:opacity-0 [&>svg:last-child]:group-hover:opacity-100` to the `SelectTrigger` className to hide the caret by default and show on row hover. (The `group` class on the parent row enables this.)
 
-The table component. No mobile guard — always renders the full table. Sticky header. Columns: # (60px), Level (100px), Name (flex-grow, wraps, indented by depth, chevron for expand/collapse, confidence dot), Start Date (100px), Due Date (100px), Assigned To (160px), Actions (100px). Each row uses `useSortable` for drag-and-drop. Zebra striping, highlight rows missing name. Each cell edit calls `onUpdateItem(id, { field: value })`.
+### Files to modify
 
-### Modified File
-
-**3. `src/components/steps/PlanOptimizerStep.tsx`** (~80 lines changed)
-
-- Add `useIsMobile` or a `useMediaQuery` hook with a 1024px breakpoint (e.g. `const isDesktop = useMediaQuery("(min-width: 1024px)")`)
-- Remove the `viewMode` state and Summary/Full Editor toggle
-- In the tree rendering section, conditionally render:
-
-```text
-{isDesktop
-  ? <InlineEditableTable ... />
-  : <SortableContext ...>
-      {flatList.map(item => <SortableTreeItem ... />)}
-    </SortableContext>
-}
-```
-
-- The rendering decision lives in one place (PlanOptimizerStep), not split across components
-- All other existing features unchanged: stats bar, confidence banner, dedup cards, export, drag-and-drop, auto-save, edit modal fallback via gear icon
-
-### What stays unchanged
-All backend/edge functions, PlanItem type, export logic, auto-save hook, EditItemDialog, admin panel, processing pipeline, summary cards.
+| File | Change |
+|------|--------|
+| `src/components/plan-optimizer/InlineEditableTable.tsx` | Order as plain text, level badge sizing, action icons hover-only, compact padding, add `group` class |
+| `src/components/plan-optimizer/EditableCell.tsx` | Hide dropdown caret until row hover |
 
