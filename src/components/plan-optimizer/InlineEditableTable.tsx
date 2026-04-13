@@ -1,7 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+
 import { PlanItem, PlanLevel } from '@/types/plan';
 import {
   AlertDialog,
@@ -130,7 +130,7 @@ function InlineEditableRow({
         ref={setNodeRef}
         style={{
           ...style,
-          gridTemplateColumns: '36px 60px 100px 1fr 110px 110px 160px 110px',
+          gridTemplateColumns: '36px 60px 110px 1fr 110px 110px 160px 110px',
         }}
         data-id={item.id}
         className={`group grid items-center gap-0 border-b transition-colors ${
@@ -165,11 +165,21 @@ function InlineEditableRow({
                 onChangeLevel(item.id, newDepth);
               }
             }}
-            renderDisplay={() => (
-              <Badge variant="secondary" className="text-xs max-w-[80px] truncate">
-                {item.levelName}
-              </Badge>
-            )}
+            renderDisplay={() => {
+              const depthColors = [
+                'text-blue-600 dark:text-blue-400',
+                'text-violet-600 dark:text-violet-400',
+                'text-emerald-600 dark:text-emerald-400',
+                'text-amber-600 dark:text-amber-400',
+                'text-rose-600 dark:text-rose-400',
+              ];
+              const colorClass = depthColors[item.levelDepth % depthColors.length];
+              return (
+                <span className={`text-xs font-medium max-w-[100px] truncate ${colorClass}`}>
+                  {item.levelName}
+                </span>
+              );
+            }}
           />
         </div>
 
@@ -316,7 +326,7 @@ export function InlineEditableTable({
       {/* Sticky header */}
       <div
         className="grid items-center gap-0 border-b bg-muted/50 text-xs font-medium text-muted-foreground sticky top-0 z-20"
-        style={{ gridTemplateColumns: '36px 60px 100px 1fr 110px 110px 160px 110px' }}
+        style={{ gridTemplateColumns: '36px 60px 110px 1fr 110px 110px 160px 110px' }}
       >
         <div className="px-1 py-2" />
         <div className="px-2 py-2">#</div>
