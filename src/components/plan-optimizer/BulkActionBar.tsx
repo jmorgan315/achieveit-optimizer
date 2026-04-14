@@ -25,33 +25,126 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { X, UserPlus, CalendarIcon, Trash2, ListChecks } from 'lucide-react';
+import { X, Trash2, Pencil, Check } from 'lucide-react';
 import { format } from 'date-fns';
-import { PlanItem } from '@/types/plan';
-import { STATUS_OPTIONS } from './columnDefs';
+import { ALL_COLUMNS, ColumnDef } from './columnDefs';
 import { cn } from '@/lib/utils';
+
+const EDITABLE_FIELDS = ALL_COLUMNS.filter(
+  (c) => !['order', 'name'].includes(c.key) && c.editType !== 'readonly'
+);
 
 interface BulkActionBarProps {
   selectedCount: number;
-  onSetOwner: (email: string) => void;
-  onSetStatus: (status: string) => void;
-  onSetDueDate: (date: string) => void;
+  onBulkUpdate: (field: string, value: string) => void;
   onBulkDelete: () => void;
   onClearSelection: () => void;
 }
 
 export function BulkActionBar({
   selectedCount,
-  onSetOwner,
-  onSetStatus,
-  onSetDueDate,
+  onBulkUpdate,
   onBulkDelete,
   onClearSelection,
 }: BulkActionBarProps) {
-  const [ownerEmail, setOwnerEmail] = useState('');
-  const [ownerOpen, setOwnerOpen] = useState(false);
+  const [selectedField, setSelectedField] = useState<ColumnDef | null>(null);
+  const [fieldValue, setFieldValue] = useState('');
+  const [fieldPickerOpen, setFieldPickerOpen] = useState(false);
 
   if (selectedCount === 0) return null;
+
+  const handleApply = () => {
+    if (selectedField && fieldValue.trim()) {
+      onBulkUpdate(selectedField.key, fieldValue.trim());
+      setSelectedField(null);
+      setFieldValue('');
+    }
+  };
+
+  const handleSelectField = (col: ColumnDef) => {
+    setSelectedField(col);
+    setFieldValue('');
+    setFieldPickerOpen(false);
+  };
+
+  const handleDropdownChange = (value: string) => {
+    if (selectedField) {
+      onBulkUpdate(selectedField.key, value);
+      setSelectedField(null);
+      setFieldValue('');
+    }
+  };
+
+  const handleDateSelect = (date: Date | undefined) => {
+    if (selectedField && date) {
+      onBulkUpdate(selectedField.key, format(date, 'yyyy-MM-dd'));
+      setSelectedField(null);
+      setFieldValue('');
+    }
+  };
+
+  const renderInlineEditor = () => {
+    if (!selectedField) return null;
+
+    if (selectedField.editType === 'dropdown' && selectedField.options) {
+      return (
+        <Select onValueChange={handleDropdownChange}>
+          <SelectTrigger className="h-8 w-40 text-sm">
+            <SelectValue placeholder={`Select ${selectedField.label}...`} />
+          </SelectTrigger>
+          <SelectContent>
+            {selectedField.options.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    if (selectedField.editType === 'date') {
+      return (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8 text-sm">
+              Pick date...
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="center" side="top">
+            <Calendar
+              mode="single"
+              onSelect={handleDateSelect}
+              className={cn('p-3 pointer-events-auto')}
+            />
+          </PopoverContent>
+        </Popover>
+      );
+    }
+
+    // text / textarea
+    return (
+      <div className="flex items-center gap-1">
+        <Input
+          value={fieldValue}
+          onChange={(e) => setFieldValue(e.target.value)}
+          placeholder={selectedField.placeholder || `Enter ${selectedField.label.toLowerCase()}...`}
+          className="h-8 w-44 text-sm"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleApply();
+          }}
+        />
+        <Button
+          size="sm"
+          className="h-8 px-2"
+          disabled={!fieldValue.trim()}
+          onClick={handleApply}
+        >
+          <Check className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  };
 
   return (
     <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-card border shadow-lg rounded-lg px-4 py-3">
@@ -61,72 +154,33 @@ export function BulkActionBar({
 
       <div className="w-px h-6 bg-border mx-1" />
 
-      {/* Set Owner */}
-      <Popover open={ownerOpen} onOpenChange={setOwnerOpen}>
+      {/* Edit Field picker */}
+      <Popover open={fieldPickerOpen} onOpenChange={setFieldPickerOpen}>
         <PopoverTrigger asChild>
-          <Button variant="outline" size="sm">
-            <UserPlus className="h-3.5 w-3.5 mr-1" />
-            Set Assigned To
+          <Button variant="outline" size="sm" className="h-8">
+            <Pencil className="h-3.5 w-3.5 mr-1" />
+            {selectedField ? selectedField.label : 'Edit Field'}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-64 p-3" align="center" side="top">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Email</label>
-            <Input
-              value={ownerEmail}
-              onChange={(e) => setOwnerEmail(e.target.value)}
-              placeholder="name@email.com"
-              className="h-8 text-sm"
-            />
-            <Button
-              size="sm"
-              className="w-full"
-              disabled={!ownerEmail.trim()}
-              onClick={() => {
-                onSetOwner(ownerEmail.trim());
-                setOwnerEmail('');
-                setOwnerOpen(false);
-              }}
-            >
-              Apply
-            </Button>
+        <PopoverContent className="w-48 p-1" align="start" side="top">
+          <div className="max-h-64 overflow-y-auto">
+            {EDITABLE_FIELDS.map((col) => (
+              <button
+                key={col.key}
+                className="w-full text-left px-3 py-1.5 text-sm rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                onClick={() => handleSelectField(col)}
+              >
+                {col.label}
+              </button>
+            ))}
           </div>
         </PopoverContent>
       </Popover>
 
-      {/* Set Status */}
-      <Select onValueChange={(v) => onSetStatus(v)}>
-        <SelectTrigger className="h-8 w-auto gap-1 text-sm border">
-          <ListChecks className="h-3.5 w-3.5" />
-          <span>Set Status</span>
-        </SelectTrigger>
-        <SelectContent>
-          {STATUS_OPTIONS.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value}>
-              {opt.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {/* Inline editor */}
+      {renderInlineEditor()}
 
-      {/* Set Due Date */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="outline" size="sm">
-            <CalendarIcon className="h-3.5 w-3.5 mr-1" />
-            Set Due Date
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="center" side="top">
-          <Calendar
-            mode="single"
-            onSelect={(date) => {
-              if (date) onSetDueDate(format(date, 'yyyy-MM-dd'));
-            }}
-            className={cn("p-3 pointer-events-auto")}
-          />
-        </PopoverContent>
-      </Popover>
+      <div className="w-px h-6 bg-border mx-1" />
 
       {/* Delete */}
       <AlertDialog>
