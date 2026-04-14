@@ -13,6 +13,7 @@ import SessionsPage from "./pages/admin/SessionsPage";
 import SessionDetailPage from "./pages/admin/SessionDetailPage";
 import ApiLogsPage from "./pages/admin/ApiLogsPage";
 import UsersPage from "./pages/admin/UsersPage";
+import FeedbackPage from "./pages/admin/FeedbackPage";
 
 const queryClient = new QueryClient();
 
@@ -33,6 +34,7 @@ const App = () => (
               <Route path="sessions/:id" element={<SessionDetailPage />} />
               <Route path="logs" element={<ApiLogsPage />} />
               <Route path="users" element={<UsersPage />} />
+              <Route path="feedback" element={<FeedbackPage />} />
             </Route>
           </Route>
           <Route path="*" element={<NotFound />} />

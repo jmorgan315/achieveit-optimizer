@@ -21,6 +21,7 @@ interface UserProfile {
   is_admin: boolean;
   is_active: boolean;
   created_at: string;
+  feature_flags: Record<string, boolean>;
 }
 
 export default function UsersPage() {
@@ -39,7 +40,10 @@ export default function UsersPage() {
     if (error) {
       toast.error('Failed to load users');
     } else {
-      setUsers(data ?? []);
+      setUsers((data ?? []).map(u => ({
+        ...u,
+        feature_flags: (typeof (u as any).feature_flags === 'object' && (u as any).feature_flags !== null ? (u as any).feature_flags : {}) as Record<string, boolean>,
+      })));
     }
     setLoading(false);
   };
@@ -59,6 +63,22 @@ export default function UsersPage() {
       toast.success('User updated');
     }
     setTogglingId(null);
+  };
+
+  const toggleFlag = async (userId: string, flag: string, current: boolean) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+    const updated = { ...user.feature_flags, [flag]: !current };
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ feature_flags: updated } as any)
+      .eq('id', userId);
+    if (error) {
+      toast.error(`Failed to update flag: ${error.message}`);
+    } else {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, feature_flags: updated } : u));
+      toast.success('Feature flag updated');
+    }
   };
 
   const handleInvite = async () => {
@@ -110,6 +130,8 @@ export default function UsersPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Admin</TableHead>
                 <TableHead>Active</TableHead>
+                <TableHead>Feedback</TableHead>
+                <TableHead>Re-import</TableHead>
                 <TableHead>Joined</TableHead>
               </TableRow>
             </TableHeader>
@@ -132,6 +154,18 @@ export default function UsersPage() {
                       onCheckedChange={() => toggleField(u.id, 'is_active', u.is_active)}
                     />
                   </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={u.feature_flags?.showFeedback ?? false}
+                      onCheckedChange={() => toggleFlag(u.id, 'showFeedback', u.feature_flags?.showFeedback ?? false)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={u.feature_flags?.showReimport ?? false}
+                      onCheckedChange={() => toggleFlag(u.id, 'showReimport', u.feature_flags?.showReimport ?? false)}
+                    />
+                  </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {new Date(u.created_at).toLocaleDateString()}
                   </TableCell>
@@ -139,7 +173,7 @@ export default function UsersPage() {
               ))}
               {users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                     No users found
                   </TableCell>
                 </TableRow>

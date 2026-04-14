@@ -41,7 +41,7 @@ const WIZARD_STEPS = [
 ];
 
 const Index = () => {
-  const { user, isAdmin, displayName, loading: authLoading, domainError, signIn, signUp, resetPassword, signOut } = useAuth();
+  const { user, isAdmin, displayName, featureFlags, loading: authLoading, domainError, signIn, signUp, resetPassword, signOut } = useAuth();
   const [activeView, setActiveView] = useState<'sessions' | 'wizard'>('sessions');
   const [currentStep, setCurrentStep] = useState(0);
   const [showLevelModal, setShowLevelModal] = useState(false);
@@ -800,6 +800,13 @@ const Index = () => {
               sessionId={state.sessionId}
               dedupResults={dedupResults}
               saveStatus={saveStatus}
+              userId={user?.id}
+              featureFlags={featureFlags}
+              initialItemCount={(() => {
+                const sr = state.sessionId ? undefined : undefined;
+                // Try to get initial count from step_results
+                return undefined;
+              })()}
               onUpdateItem={updateItem}
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}

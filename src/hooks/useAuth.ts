@@ -6,6 +6,7 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [displayName, setDisplayName] = useState<string | null>(null);
+  const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [domainError, setDomainError] = useState<string | null>(null);
 
@@ -24,7 +25,7 @@ export function useAuth() {
     // Check profile (auto-created by DB trigger on signup)
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('is_admin, is_active, first_name, last_name')
+      .select('is_admin, is_active, first_name, last_name, feature_flags')
       .eq('id', currentUser.id)
       .single();
 
@@ -50,6 +51,8 @@ export function useAuth() {
       setIsAdmin(profile.is_admin ?? false);
       const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
       setDisplayName(name || null);
+      const flags = (profile as any).feature_flags;
+      setFeatureFlags(typeof flags === 'object' && flags !== null ? flags : {});
     }
   }, []);
 
@@ -118,5 +121,5 @@ export function useAuth() {
     return await supabase.auth.signOut();
   };
 
-  return { user, isAdmin, displayName, loading, domainError, signIn, signUp, resetPassword, signOut };
+  return { user, isAdmin, displayName, featureFlags, loading, domainError, signIn, signUp, resetPassword, signOut };
 }

@@ -136,10 +136,64 @@ export type Database = {
         }
         Relationships: []
       }
+      session_feedback: {
+        Row: {
+          actual_item_count: number
+          created_at: string
+          expected_item_count: number | null
+          hierarchy_rating: number | null
+          id: string
+          item_count_delta: number | null
+          open_feedback: string | null
+          overall_rating: number | null
+          session_id: string
+          time_saved: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          actual_item_count: number
+          created_at?: string
+          expected_item_count?: number | null
+          hierarchy_rating?: number | null
+          id?: string
+          item_count_delta?: number | null
+          open_feedback?: string | null
+          overall_rating?: number | null
+          session_id: string
+          time_saved?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          actual_item_count?: number
+          created_at?: string
+          expected_item_count?: number | null
+          hierarchy_rating?: number | null
+          id?: string
+          item_count_delta?: number | null
+          open_feedback?: string | null
+          overall_rating?: number | null
+          session_id?: string
+          time_saved?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "session_feedback_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "processing_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_profiles: {
         Row: {
           created_at: string
           email: string | null
+          feature_flags: Json
           first_name: string | null
           id: string
           is_active: boolean
@@ -150,6 +204,7 @@ export type Database = {
         Insert: {
           created_at?: string
           email?: string | null
+          feature_flags?: Json
           first_name?: string | null
           id: string
           is_active?: boolean
@@ -160,6 +215,7 @@ export type Database = {
         Update: {
           created_at?: string
           email?: string | null
+          feature_flags?: Json
           first_name?: string | null
           id?: string
           is_active?: boolean

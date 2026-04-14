@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import {
   DndContext,
   DragEndEvent,
@@ -42,7 +43,8 @@ import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
 import { ConfidenceBanner } from '@/components/plan-optimizer/ConfidenceBanner';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye, MessageSquare } from 'lucide-react';
+import { FeedbackDialog } from '@/components/plan-optimizer/FeedbackDialog';
 import { InlineEditableTable } from '@/components/plan-optimizer/InlineEditableTable';
 import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
 import { ColumnVisibilityPopover } from '@/components/plan-optimizer/ColumnVisibilityPopover';
@@ -64,6 +66,9 @@ interface PlanOptimizerStepProps {
   sessionId?: string;
   dedupResults?: DedupRemovedDetail[];
   saveStatus?: SaveStatus;
+  userId?: string;
+  featureFlags?: Record<string, boolean>;
+  initialItemCount?: number;
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
@@ -96,6 +101,9 @@ export function PlanOptimizerStep({
   sessionId,
   dedupResults,
   saveStatus,
+  userId,
+  featureFlags,
+  initialItemCount,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
@@ -122,6 +130,8 @@ export function PlanOptimizerStep({
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
   const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | 'needs-review' | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
+  const [hasFeedback, setHasFeedback] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [includeConfidence, setIncludeConfidence] = useState(false);
   const [showConfidence, setShowConfidence] = useState(() => {
@@ -150,6 +160,18 @@ export function PlanOptimizerStep({
   // Bulk selection state
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   
+  // Check if feedback exists
+  useEffect(() => {
+    if (!sessionId || !userId) return;
+    supabase
+      .from('session_feedback')
+      .select('id')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(({ data }) => setHasFeedback(!!data));
+  }, [sessionId, userId]);
+
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 1024px)');
     const onChange = () => setIsDesktop(mql.matches);
@@ -532,6 +554,12 @@ export function PlanOptimizerStep({
             )}
             {saveStatus === 'saved' && (
               <span className="text-xs text-muted-foreground">Saved ✓</span>
+            )}
+            {featureFlags?.showFeedback && sessionId && userId && (
+              <Button variant={hasFeedback ? 'outline' : 'secondary'} size="sm" onClick={() => setShowFeedbackDialog(true)}>
+                <MessageSquare className="h-4 w-4 mr-2" />
+                {hasFeedback ? 'Edit Feedback' : 'Rate This Import'}
+              </Button>
             )}
             <Button onClick={() => setShowExportDialog(true)} size="sm">
               <Download className="h-4 w-4 mr-2" />
@@ -994,6 +1022,17 @@ export function PlanOptimizerStep({
             }
           }}
           onClearSelection={() => setSelectedItems(new Set())}
+        />
+      )}
+
+      {featureFlags?.showFeedback && sessionId && userId && (
+        <FeedbackDialog
+          open={showFeedbackDialog}
+          onOpenChange={setShowFeedbackDialog}
+          sessionId={sessionId}
+          userId={userId}
+          actualItemCount={initialItemCount ?? items.length}
+          onSubmitted={() => setHasFeedback(true)}
         />
       )}
     </div>
