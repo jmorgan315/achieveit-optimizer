@@ -12,10 +12,10 @@ export interface PersonMapping {
 }
 
 // Status options matching AchieveIt template
-export type PlanItemStatus = 'On Track' | 'At Risk' | 'Off Track' | 'Complete' | 'Not Started' | '';
+export type PlanItemStatus = 'On Track' | 'At Risk' | 'Off Track' | 'Complete' | 'Not Started' | 'Achieved' | 'Not Achieved' | 'Cancelled' | '';
 
 // Update frequency options matching AchieveIt template
-export type UpdateFrequency = 'Weekly' | 'Monthly' | 'Quarterly' | 'Not Required' | '';
+export type UpdateFrequency = 'Weekly' | 'Monthly' | 'Quarterly' | 'Not Required' | 'Daily' | 'Biweekly' | '';
 
 // Metric description types matching AchieveIt template
 export type MetricDescription = 'Track to Target' | 'Maintain' | 'Stay Above' | 'Stay Below' | '';
