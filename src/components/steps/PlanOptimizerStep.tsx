@@ -125,6 +125,28 @@ export function PlanOptimizerStep({
   const [showConfidence, setShowConfidence] = useState(() => {
     return localStorage.getItem('achieveit-show-confidence') === 'true';
   });
+
+  // Column visibility state
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+    if (sessionId) {
+      const saved = localStorage.getItem(`achieveit-columns-${sessionId}`);
+      if (saved) {
+        try {
+          const arr = JSON.parse(saved) as string[];
+          // Ensure always-visible columns are included
+          const s = new Set(arr);
+          for (const col of ALL_COLUMNS) {
+            if (col.alwaysVisible) s.add(col.key);
+          }
+          return s;
+        } catch {}
+      }
+    }
+    return new Set(DEFAULT_VISIBLE_COLUMNS);
+  });
+
+  // Bulk selection state
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 1024px)');
