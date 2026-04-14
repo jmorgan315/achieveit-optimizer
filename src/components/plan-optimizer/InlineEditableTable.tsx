@@ -1,3 +1,4 @@
+import { useState, useCallback, useRef } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Button } from '@/components/ui/button';
@@ -23,8 +24,28 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { EditableCell, DropdownOption } from './EditableCell';
-import { ConfidencePopover, getConfidenceColor, hasDiscrepancy } from './ConfidencePopover';
+import { ConfidencePopover, getConfidenceColor } from './ConfidencePopover';
 import { DropPosition } from './SortableTreeItem';
+
+interface ColumnWidths {
+  order: number;
+  level: number;
+  startDate: number;
+  dueDate: number;
+  assignedTo: number;
+  actions: number;
+}
+
+const DEFAULT_WIDTHS: ColumnWidths = {
+  order: 60,
+  level: 110,
+  startDate: 110,
+  dueDate: 110,
+  assignedTo: 160,
+  actions: 110,
+};
+
+const MIN_COL_WIDTH = 60;
 
 interface InlineEditableTableProps {
   flatList: { item: PlanItem; depth: number }[];
@@ -41,6 +62,50 @@ interface InlineEditableTableProps {
   activeFilter: string | null;
   dropInfo: { itemId: string; position: DropPosition } | null;
   sessionId?: string;
+}
+
+function buildGridTemplate(w: ColumnWidths) {
+  return `36px ${w.order}px ${w.level}px 1fr ${w.startDate}px ${w.dueDate}px ${w.assignedTo}px ${w.actions}px`;
+}
+
+function ResizableHeaderCell({
+  children,
+  columnKey,
+  onResize,
+}: {
+  children: React.ReactNode;
+  columnKey: keyof ColumnWidths;
+  onResize: (key: keyof ColumnWidths, delta: number) => void;
+}) {
+  const handleRef = useRef<HTMLDivElement>(null);
+
+  const onMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const onMouseMove = (ev: MouseEvent) => {
+        onResize(columnKey, ev.clientX - startX);
+      };
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    },
+    [columnKey, onResize]
+  );
+
+  return (
+    <div className="px-2 py-2 relative select-none">
+      {children}
+      <div
+        ref={handleRef}
+        onMouseDown={onMouseDown}
+        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors"
+      />
+    </div>
+  );
 }
 
 function InlineEditableRow({
@@ -63,6 +128,7 @@ function InlineEditableRow({
   nestLevelName,
   reorderLevelName,
   sessionId,
+  columnTemplate,
 }: {
   item: PlanItem;
   depth: number;
@@ -83,6 +149,7 @@ function InlineEditableRow({
   nestLevelName: string;
   reorderLevelName: string;
   sessionId?: string;
+  columnTemplate: string;
 }) {
   const {
     attributes,
@@ -130,7 +197,7 @@ function InlineEditableRow({
         ref={setNodeRef}
         style={{
           ...style,
-          gridTemplateColumns: '36px 60px 110px 1fr 110px 110px 160px 110px',
+          gridTemplateColumns: columnTemplate,
         }}
         data-id={item.id}
         className={`group grid items-center gap-0 border-b transition-colors ${
@@ -142,7 +209,7 @@ function InlineEditableRow({
         }`}
       >
         {/* Drag handle */}
-        <div className="flex items-center justify-center py-2">
+        <div className="flex items-center justify-center py-1">
           <button {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing touch-none">
             <GripVertical className="h-4 w-4 text-muted-foreground" />
           </button>
@@ -165,21 +232,11 @@ function InlineEditableRow({
                 onChangeLevel(item.id, newDepth);
               }
             }}
-            renderDisplay={() => {
-              const depthColors = [
-                'text-blue-600 dark:text-blue-400',
-                'text-violet-600 dark:text-violet-400',
-                'text-emerald-600 dark:text-emerald-400',
-                'text-amber-600 dark:text-amber-400',
-                'text-rose-600 dark:text-rose-400',
-              ];
-              const colorClass = depthColors[item.levelDepth % depthColors.length];
-              return (
-                <span className={`text-xs font-medium max-w-[100px] truncate ${colorClass}`}>
-                  {item.levelName}
-                </span>
-              );
-            }}
+            renderDisplay={() => (
+              <span className="text-sm text-foreground max-w-[100px] truncate">
+                {item.levelName}
+              </span>
+            )}
           />
         </div>
 
@@ -319,28 +376,83 @@ export function InlineEditableTable({
   dropInfo,
   sessionId,
 }: InlineEditableTableProps) {
+  const [colWidths, setColWidths] = useState<ColumnWidths>({ ...DEFAULT_WIDTHS });
+  const baseWidthsRef = useRef<ColumnWidths>({ ...DEFAULT_WIDTHS });
+
+  const handleResizeStart = useCallback((key: keyof ColumnWidths) => {
+    baseWidthsRef.current = { ...colWidths };
+  }, [colWidths]);
+
+  const handleResize = useCallback((key: keyof ColumnWidths, delta: number) => {
+    setColWidths((prev) => ({
+      ...prev,
+      [key]: Math.max(MIN_COL_WIDTH, baseWidthsRef.current[key] + delta),
+    }));
+  }, []);
+
+  const columnTemplate = buildGridTemplate(colWidths);
   const getChildren = (parentId: string) => items.filter((i) => i.parentId === parentId);
+
+  // Wrapper that captures base on mousedown then delegates delta
+  const makeResizeHandler = (key: keyof ColumnWidths) => {
+    return (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const baseWidth = colWidths[key];
+      const onMouseMove = (ev: MouseEvent) => {
+        const delta = ev.clientX - startX;
+        setColWidths((prev) => ({
+          ...prev,
+          [key]: Math.max(MIN_COL_WIDTH, baseWidth + delta),
+        }));
+      };
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+      };
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    };
+  };
 
   return (
     <div className="w-full overflow-x-auto">
       {/* Sticky header */}
       <div
         className="grid items-center gap-0 border-b bg-muted/50 text-xs font-medium text-muted-foreground sticky top-0 z-20"
-        style={{ gridTemplateColumns: '36px 60px 110px 1fr 110px 110px 160px 110px' }}
+        style={{ gridTemplateColumns: columnTemplate }}
       >
         <div className="px-1 py-2" />
-        <div className="px-2 py-2">#</div>
-        <div className="px-2 py-2">Level</div>
+        <div className="px-2 py-2 relative select-none">
+          #
+          <div onMouseDown={makeResizeHandler('order')} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors" />
+        </div>
+        <div className="px-2 py-2 relative select-none">
+          Level
+          <div onMouseDown={makeResizeHandler('level')} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors" />
+        </div>
         <div className="px-2 py-2">Name</div>
-        <div className="px-2 py-2">Start Date</div>
-        <div className="px-2 py-2">Due Date</div>
-        <div className="px-2 py-2">Assigned To</div>
-        <div className="px-2 py-2">Actions</div>
+        <div className="px-2 py-2 relative select-none">
+          Start Date
+          <div onMouseDown={makeResizeHandler('startDate')} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors" />
+        </div>
+        <div className="px-2 py-2 relative select-none">
+          Due Date
+          <div onMouseDown={makeResizeHandler('dueDate')} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors" />
+        </div>
+        <div className="px-2 py-2 relative select-none">
+          Assigned To
+          <div onMouseDown={makeResizeHandler('assignedTo')} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors" />
+        </div>
+        <div className="px-2 py-2 relative select-none">
+          Actions
+          <div onMouseDown={makeResizeHandler('actions')} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 transition-colors" />
+        </div>
       </div>
 
       {/* Rows */}
       <div>
-        {flatList.map(({ item, depth }, index) => {
+        {flatList.map(({ item, depth }) => {
           const targetItem = dropInfo?.itemId === item.id ? item : null;
           const nestLevelName = targetItem
             ? levels.find((l) => l.depth === targetItem.levelDepth + 1)?.name || `Level ${targetItem.levelDepth + 1}`
@@ -369,6 +481,7 @@ export function InlineEditableTable({
               nestLevelName={nestLevelName}
               reorderLevelName={reorderLevelName}
               sessionId={sessionId}
+              columnTemplate={columnTemplate}
             />
           );
         })}
