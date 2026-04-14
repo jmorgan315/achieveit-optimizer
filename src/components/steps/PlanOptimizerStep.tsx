@@ -555,6 +555,12 @@ export function PlanOptimizerStep({
             {saveStatus === 'saved' && (
               <span className="text-xs text-muted-foreground">Saved ✓</span>
             )}
+            {featureFlags?.showFeedback && sessionId && userId && (
+              <Button variant={hasFeedback ? 'outline' : 'secondary'} size="sm" onClick={() => setShowFeedbackDialog(true)}>
+                <MessageSquare className="h-4 w-4 mr-2" />
+                {hasFeedback ? 'Edit Feedback' : 'Rate This Import'}
+              </Button>
+            )}
             <Button onClick={() => setShowExportDialog(true)} size="sm">
               <Download className="h-4 w-4 mr-2" />
               Export
