@@ -155,6 +155,24 @@ export function PlanOptimizerStep({
     return () => mql.removeEventListener('change', onChange);
   }, []);
 
+  // Save column visibility when it changes
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...visibleColumns]));
+    }
+  }, [visibleColumns, sessionId]);
+
+  // Keyboard shortcuts for bulk selection
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedItems.size > 0) {
+        setSelectedItems(new Set());
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [selectedItems.size]);
+
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
   const [isLoadingSuggestion, setIsLoadingSuggestion] = useState(false);
