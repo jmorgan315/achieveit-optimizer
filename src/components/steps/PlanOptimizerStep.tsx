@@ -309,11 +309,11 @@ export function PlanOptimizerStep({
     }
   };
 
-  const EDGE_ZONE_PX = 12;
-
   const computeDropPosition = useCallback((rect: DOMRect, mouseY: number): DropPosition => {
-    if (mouseY < rect.top + EDGE_ZONE_PX) return 'before';
-    if (mouseY > rect.bottom - EDGE_ZONE_PX) return 'after';
+    const height = rect.height;
+    const relativeY = mouseY - rect.top;
+    if (relativeY < height * 0.25) return 'before';
+    if (relativeY > height * 0.75) return 'after';
     return 'inside';
   }, []);
 
