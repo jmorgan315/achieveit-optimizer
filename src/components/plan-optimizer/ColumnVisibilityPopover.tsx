@@ -25,8 +25,7 @@ export function ColumnVisibilityPopover({
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="outline" size="sm">
-          <Columns3 className="h-4 w-4 sm:mr-2" />
-          <span className="hidden sm:inline">Columns</span>
+          <Columns3 className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-3" align="end" side="bottom">
