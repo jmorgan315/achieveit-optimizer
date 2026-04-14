@@ -42,7 +42,8 @@ import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
 import { ConfidenceBanner } from '@/components/plan-optimizer/ConfidenceBanner';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye, MessageSquare } from 'lucide-react';
+import { FeedbackDialog } from '@/components/plan-optimizer/FeedbackDialog';
 import { InlineEditableTable } from '@/components/plan-optimizer/InlineEditableTable';
 import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
 import { ColumnVisibilityPopover } from '@/components/plan-optimizer/ColumnVisibilityPopover';
@@ -64,6 +65,9 @@ interface PlanOptimizerStepProps {
   sessionId?: string;
   dedupResults?: DedupRemovedDetail[];
   saveStatus?: SaveStatus;
+  userId?: string;
+  featureFlags?: Record<string, boolean>;
+  initialItemCount?: number;
   onUpdateItem: (id: string, updates: Partial<PlanItem>) => void;
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
@@ -96,6 +100,9 @@ export function PlanOptimizerStep({
   sessionId,
   dedupResults,
   saveStatus,
+  userId,
+  featureFlags,
+  initialItemCount,
   onUpdateItem,
   onMoveItem,
   onChangeLevel,
