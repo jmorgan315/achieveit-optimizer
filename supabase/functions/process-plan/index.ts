@@ -360,11 +360,11 @@ function isDuplicate(nameA: string, nameB: string, parentA?: string | null, pare
   const normA = normalizeItemName(nameA);
   const normB = normalizeItemName(nameB);
   if (normA === normB) return { match: true, reason: "exact_match" };
-  // Prefix match (first 40 chars)
-  const prefix = 40;
-  if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return { match: true, reason: "starts_with_40" };
+  // Prefix match (first 50 chars)
+  const prefix = 50;
+  if (normA.length >= prefix && normB.length >= prefix && normA.substring(0, prefix) === normB.substring(0, prefix)) return { match: true, reason: "starts_with_50" };
   const overlap = wordOverlap(wordSet(nameA), wordSet(nameB));
-  if (overlap >= 0.70) return { match: true, reason: `word_overlap_${Math.round(overlap * 100)}%` };
+  if (overlap >= 0.95) return { match: true, reason: `word_overlap_${Math.round(overlap * 100)}%` };
   return { match: false, reason: "" };
 }
 
@@ -421,8 +421,8 @@ function deduplicateItems(items: unknown[]): DedupResult {
           const normA = normalizeItemName(itemA.name);
           const normB = normalizeItemName(itemB.name);
           const namesMatch = normA === normB ||
-            (normA.length >= 40 && normB.length >= 40 && normA.substring(0, 40) === normB.substring(0, 40)) ||
-            wordOverlap(wordSet(itemA.name), wordSet(itemB.name)) >= 0.70;
+            (normA.length >= 50 && normB.length >= 50 && normA.substring(0, 50) === normB.substring(0, 50)) ||
+            wordOverlap(wordSet(itemA.name), wordSet(itemB.name)) >= 0.95;
           if (namesMatch) {
             skippedDetails.push({
               name: itemA.name,
