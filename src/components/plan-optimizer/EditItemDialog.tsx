@@ -44,7 +44,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
-import { PlanItem, PlanLevel, MetricDescription, MetricUnit, MetricRollup } from '@/types/plan';
+import { PlanItem, PlanLevel, PlanItemStatus, UpdateFrequency, MetricDescription, MetricUnit, MetricRollup } from '@/types/plan';
 import { Trash2, Target, X } from 'lucide-react';
 
 interface EditItemDialogProps {
@@ -61,10 +61,13 @@ interface EditFormData {
   name: string;
   description: string;
   levelDepth: number;
+  status: PlanItemStatus;
   startDate: Date | undefined;
   dueDate: Date | undefined;
   assignedTo: string;
+  updateFrequency: UpdateFrequency;
   members: string[];
+  administrators: string[];
   tags: string[];
   metricDescription: MetricDescription;
   metricUnit: MetricUnit;
@@ -87,10 +90,13 @@ export function EditItemDialog({
     name: '',
     description: '',
     levelDepth: 1,
+    status: '',
     startDate: undefined,
     dueDate: undefined,
     assignedTo: '',
+    updateFrequency: '',
     members: [],
+    administrators: [],
     tags: [],
     metricDescription: '',
     metricUnit: '',
@@ -101,6 +107,7 @@ export function EditItemDialog({
   });
   const [metricsOpen, setMetricsOpen] = useState(false);
   const [newMember, setNewMember] = useState('');
+  const [newAdmin, setNewAdmin] = useState('');
   const [newTag, setNewTag] = useState('');
 
   useEffect(() => {
@@ -109,10 +116,13 @@ export function EditItemDialog({
         name: item.name,
         description: item.description,
         levelDepth: item.levelDepth,
+        status: item.status,
         startDate: item.startDate ? (() => { const d = new Date(item.startDate); return Number.isNaN(d.getTime()) ? undefined : d; })() : undefined,
         dueDate: item.dueDate ? (() => { const d = new Date(item.dueDate); return Number.isNaN(d.getTime()) ? undefined : d; })() : undefined,
         assignedTo: item.assignedTo,
+        updateFrequency: item.updateFrequency,
         members: item.members ?? [],
+        administrators: item.administrators ?? [],
         tags: item.tags ?? [],
         metricDescription: item.metricDescription,
         metricUnit: item.metricUnit,
@@ -123,6 +133,7 @@ export function EditItemDialog({
       });
       setMetricsOpen(!!item.metricDescription);
       setNewMember('');
+      setNewAdmin('');
       setNewTag('');
     }
   }, [item]);
@@ -143,10 +154,13 @@ export function EditItemDialog({
     onSave(item.id, {
       name: formData.name,
       description: formData.description,
+      status: formData.status,
       startDate: formData.startDate ? format(formData.startDate, 'yyyy-MM-dd') : '',
       dueDate: formData.dueDate ? format(formData.dueDate, 'yyyy-MM-dd') : '',
       assignedTo: formData.assignedTo,
+      updateFrequency: formData.updateFrequency,
       members: formData.members,
+      administrators: formData.administrators,
       tags: formData.tags,
       metricDescription: formData.metricDescription,
       metricUnit: formData.metricUnit,
@@ -213,6 +227,31 @@ export function EditItemDialog({
                     {level.name} (Level {level.depth})
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Status */}
+          <div className="space-y-2">
+            <Label>Status</Label>
+            <Select
+              value={formData.status || 'none'}
+              onValueChange={(value) =>
+                setFormData((prev) => ({ ...prev, status: (value === 'none' ? '' : value) as PlanItemStatus }))
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="Not Started">Not Started</SelectItem>
+                <SelectItem value="On Track">On Track</SelectItem>
+                <SelectItem value="Off Track">Off Track</SelectItem>
+                <SelectItem value="At Risk">At Risk</SelectItem>
+                <SelectItem value="Achieved">Achieved</SelectItem>
+                <SelectItem value="Not Achieved">Not Achieved</SelectItem>
+                <SelectItem value="Cancelled">Cancelled</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -295,6 +334,30 @@ export function EditItemDialog({
             />
           </div>
 
+          {/* Update Frequency */}
+          <div className="space-y-2">
+            <Label>Update Frequency</Label>
+            <Select
+              value={formData.updateFrequency || 'none'}
+              onValueChange={(value) =>
+                setFormData((prev) => ({ ...prev, updateFrequency: (value === 'none' ? '' : value) as UpdateFrequency }))
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select frequency" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                <SelectItem value="Not Required">Not Required</SelectItem>
+                <SelectItem value="Daily">Daily</SelectItem>
+                <SelectItem value="Weekly">Weekly</SelectItem>
+                <SelectItem value="Biweekly">Biweekly</SelectItem>
+                <SelectItem value="Monthly">Monthly</SelectItem>
+                <SelectItem value="Quarterly">Quarterly</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           {/* Members */}
           <div className="space-y-2">
             <Label>Members</Label>
@@ -332,6 +395,49 @@ export function EditItemDialog({
                 size="sm"
                 className="h-8 text-xs shrink-0"
                 onClick={() => { const v = newMember.trim(); if (v) { setFormData(prev => ({ ...prev, members: [...prev.members, v] })); setNewMember(''); } }}
+              >
+                Add
+              </Button>
+            </div>
+          </div>
+
+          {/* Administrators */}
+          <div className="space-y-2">
+            <Label>Administrators</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {formData.administrators.map((a, i) => (
+                <Badge key={i} variant="secondary" className="text-xs gap-1 pr-1">
+                  {a}
+                  <button
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, administrators: prev.administrators.filter((_, j) => j !== i) }))}
+                    className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={newAdmin}
+                onChange={(e) => setNewAdmin(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const v = newAdmin.trim();
+                    if (v) { setFormData(prev => ({ ...prev, administrators: [...prev.administrators, v] })); setNewAdmin(''); }
+                  }
+                }}
+                placeholder="Add administrator…"
+                className="h-8 text-xs"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs shrink-0"
+                onClick={() => { const v = newAdmin.trim(); if (v) { setFormData(prev => ({ ...prev, administrators: [...prev.administrators, v] })); setNewAdmin(''); } }}
               >
                 Add
               </Button>
