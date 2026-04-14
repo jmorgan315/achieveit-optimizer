@@ -247,6 +247,7 @@ const Index = () => {
         const data = stepResults?.data as Record<string, unknown> | undefined;
         const aiItems = data?.items as unknown[];
         const detectedLvls = (data?.detectedLevels as Array<{ depth: number; name: string }>) || [];
+        const savedFormat = data?.format as string | undefined;
 
         if (aiItems && aiItems.length > 0) {
           // Build levels from detected levels
@@ -254,20 +255,71 @@ const Index = () => {
             ? detectedLvls.map((l) => ({ id: String(l.depth), name: l.name, depth: l.depth }))
             : DEFAULT_LEVELS;
 
-          // Convert AI response to plan items
-          const aiResponse: AIExtractionResponse = {
-            items: aiItems as AIExtractionResponse['items'],
-            detectedLevels: detectedLvls,
-          };
-          const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
-
           // Hydrate dedup results for DedupSummaryCard
           const dedupData = (stepResults?.dedupResults || []) as DedupRemovedDetail[];
           setDedupResults(dedupData);
 
-          setLevels(levels);
-          setItems(items, personMappings);
-          updateLevelsAndRecalculate(levels);
+          if (savedFormat === 'planItem') {
+            // Direct hydration — items already in PlanItem format
+            const flattenTree = (nodes: unknown[]): PlanItem[] => {
+              const result: PlanItem[] = [];
+              for (const node of nodes) {
+                const n = node as Record<string, unknown>;
+                const children = (n.children as unknown[]) || [];
+                const item: PlanItem = {
+                  id: (n.id as string) || crypto.randomUUID(),
+                  order: (n.order as string) || '',
+                  levelName: (n.levelName as string) || '',
+                  levelDepth: (n.levelDepth as number) || 1,
+                  name: (n.name as string) || '',
+                  description: (n.description as string) || '',
+                  status: (n.status as PlanItem['status']) || 'Not Started',
+                  startDate: (n.startDate as string) || '',
+                  dueDate: (n.dueDate as string) || '',
+                  assignedTo: (n.assignedTo as string) || '',
+                  members: (n.members as string[]) || [],
+                  administrators: (n.administrators as string[]) || [],
+                  updateFrequency: (n.updateFrequency as PlanItem['updateFrequency']) || '',
+                  metricDescription: (n.metricDescription as PlanItem['metricDescription']) || '',
+                  metricUnit: (n.metricUnit as PlanItem['metricUnit']) || '',
+                  metricRollup: (n.metricRollup as PlanItem['metricRollup']) || '',
+                  metricBaseline: (n.metricBaseline as string) || '',
+                  metricTarget: (n.metricTarget as string) || '',
+                  currentValue: (n.currentValue as string) || '',
+                  tags: (n.tags as string[]) || [],
+                  parentId: (n.parentId as string | null) ?? null,
+                  children: [],
+                  issues: [],
+                  confidence: n.confidence as number | undefined,
+                  corrections: n.corrections as string[] | undefined,
+                };
+                result.push(item);
+                if (children.length > 0) {
+                  const childItems = flattenTree(children);
+                  // Ensure children have correct parentId
+                  childItems.forEach(c => {
+                    if (!c.parentId) c.parentId = item.id;
+                  });
+                  result.push(...childItems);
+                }
+              }
+              return result;
+            };
+
+            const items = flattenTree(aiItems);
+            setLevels(levels);
+            setItems(items, []);
+          } else {
+            // Legacy path — convert from AI extraction format
+            const aiResponse: AIExtractionResponse = {
+              items: aiItems as AIExtractionResponse['items'],
+              detectedLevels: detectedLvls,
+            };
+            const { items, personMappings } = convertAIResponseToPlanItems(aiResponse, levels);
+            setLevels(levels);
+            setItems(items, personMappings);
+            updateLevelsAndRecalculate(levels);
+          }
 
           setHighestCompletedStep(3);
           setCurrentStep(4);
