@@ -100,6 +100,7 @@ const Index = () => {
     updateItem,
     moveItem,
     reorderSiblings,
+    moveAndReorder,
     updateLevelsAndRecalculate,
     changeItemLevel,
     deleteItem,
