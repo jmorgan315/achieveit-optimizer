@@ -42,11 +42,8 @@ export default function UsersPage() {
     } else {
       setUsers((data ?? []).map(u => ({
         ...u,
-        feature_flags: (typeof u.feature_flags === 'object' && u.feature_flags !== null ? u.feature_flags : {}) as Record<string, boolean>,
+        feature_flags: (typeof (u as any).feature_flags === 'object' && (u as any).feature_flags !== null ? (u as any).feature_flags : {}) as Record<string, boolean>,
       })));
-    }
-    } else {
-      setUsers(data ?? []);
     }
     setLoading(false);
   };
