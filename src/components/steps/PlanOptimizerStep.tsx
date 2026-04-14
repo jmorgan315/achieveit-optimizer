@@ -159,6 +159,18 @@ export function PlanOptimizerStep({
   // Bulk selection state
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   
+  // Check if feedback exists
+  useEffect(() => {
+    if (!sessionId || !userId) return;
+    supabase
+      .from('session_feedback')
+      .select('id')
+      .eq('session_id', sessionId)
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(({ data }) => setHasFeedback(!!data));
+  }, [sessionId, userId]);
+
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 1024px)');
     const onChange = () => setIsDesktop(mql.matches);
