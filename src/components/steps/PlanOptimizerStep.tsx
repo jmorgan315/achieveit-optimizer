@@ -959,6 +959,37 @@ export function PlanOptimizerStep({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Action Bar */}
+      {isDesktop && (
+        <BulkActionBar
+          selectedCount={selectedItems.size}
+          onSetOwner={(email) => {
+            selectedItems.forEach((id) => onUpdateItem(id, { assignedTo: email }));
+            setSelectedItems(new Set());
+            toast({ title: 'Owner updated', description: `Set owner for ${selectedItems.size} items` });
+          }}
+          onSetStatus={(status) => {
+            selectedItems.forEach((id) => onUpdateItem(id, { status: status as PlanItem['status'] }));
+            setSelectedItems(new Set());
+            toast({ title: 'Status updated', description: `Set status for ${selectedItems.size} items` });
+          }}
+          onSetDueDate={(date) => {
+            selectedItems.forEach((id) => onUpdateItem(id, { dueDate: date }));
+            setSelectedItems(new Set());
+            toast({ title: 'Due date updated', description: `Set due date for ${selectedItems.size} items` });
+          }}
+          onBulkDelete={() => {
+            if (onDeleteItem) {
+              const count = selectedItems.size;
+              selectedItems.forEach((id) => onDeleteItem(id));
+              setSelectedItems(new Set());
+              toast({ title: 'Items deleted', description: `Deleted ${count} items` });
+            }
+          }}
+          onClearSelection={() => setSelectedItems(new Set())}
+        />
+      )}
     </div>
   );
 }
