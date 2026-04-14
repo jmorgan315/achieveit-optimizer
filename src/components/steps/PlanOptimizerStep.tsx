@@ -654,12 +654,30 @@ export function PlanOptimizerStep({
                   items={items}
                   levels={levels}
                   expandedItems={expandedItems}
+                  visibleColumns={visibleColumns}
+                  selectedItems={selectedItems}
                   onToggleExpand={toggleExpand}
                   onUpdateItem={onUpdateItem}
                   onChangeLevel={onChangeLevel}
                   onOptimize={handleOptimize}
                   onEdit={handleEdit}
                   onDelete={onDeleteItem ? handleDelete : undefined}
+                  onSelectItem={(id) => {
+                    setSelectedItems((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      return next;
+                    });
+                  }}
+                  onSelectAll={() => {
+                    setSelectedItems((prev) => {
+                      const allIds = flatList.map((f) => f.item.id);
+                      const allSelected = allIds.every((id) => prev.has(id));
+                      if (allSelected) return new Set();
+                      return new Set(allIds);
+                    });
+                  }}
                   showConfidence={showConfidence}
                   activeFilter={activeFilter}
                   dropInfo={dropInfo}
