@@ -1,37 +1,77 @@
 
 
-## Make Plan Structure Table Full-Width
+## Fix 3 Database Security Issues
 
-### Problem
-The entire `PlanOptimizerStep` is constrained to `max-w-6xl` (~1152px), limiting the table workspace.
+Single SQL migration covering all three fixes.
 
-### Approach
-Split the component's layout so the stats bar and top controls stay at `max-w-6xl`, but the Plan Structure `<Card>` breaks out to full width. The parent page container (`main.container` in `Index.tsx`) already provides `px-4` padding.
+### 1. Lock down `processing_sessions`
 
-### Changes
+- Drop the permissive "Allow all operations" policy
+- Add 4 scoped policies for authenticated users (SELECT, INSERT, UPDATE, DELETE) using `user_id = auth.uid()`
+- Add admin SELECT-all policy using `is_admin(auth.uid())`
+- Edge functions use service role key (verified in `process-plan` and `_shared/logging.ts`), so they bypass RLS
 
-**`src/components/steps/PlanOptimizerStep.tsx`**
+### 2. Fix `user_profiles` INSERT policy
 
-1. Remove `max-w-6xl` from the outer wrapper div (line 497). Replace with just `w-full space-y-6`.
-2. Wrap the top section (confidence banner, dedup summary, stats bar, controls — everything before the Plan Structure card) in a `<div className="max-w-6xl mx-auto space-y-6">` to keep those elements centered at their current width.
-3. The Plan Structure `<Card>` (line 612) and everything after it (bulk action bar, dialogs) stays outside that inner wrapper, so the card stretches to full container width.
+- Drop existing "Users can insert own profile" policy
+- Re-create with `WITH CHECK (id = auth.uid() AND is_admin = false AND is_active = true)` to prevent self-escalation
 
-This means the layout becomes:
-```text
-<div className="w-full space-y-6">
-  <div className="max-w-6xl mx-auto space-y-6">
-    <!-- confidence, dedup, stats, controls -->
-  </div>
-  <Card>  <!-- Plan Structure — full width -->
-    ...
-  </Card>
-  <!-- dialogs, bulk bar -->
-</div>
+### 3. Lock down `api_call_logs`
+
+- Drop the permissive "Allow all operations" policy
+- Add authenticated SELECT policy scoped to own sessions: `session_id IN (SELECT id FROM processing_sessions WHERE user_id = auth.uid())`
+- Add admin SELECT-all policy
+- No INSERT/UPDATE/DELETE policies for authenticated users (only service role writes)
+
+### Frontend impact
+
+All frontend queries already filter by `user_id` or session ownership. Admin pages are behind `AdminGuard` and the admin user will match the admin policies. No frontend code changes needed.
+
+### Migration SQL
+
+```sql
+-- 1. processing_sessions
+DROP POLICY "Allow all operations on processing_sessions" ON processing_sessions;
+
+CREATE POLICY "Users select own sessions" ON processing_sessions
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
+
+CREATE POLICY "Admins select all sessions" ON processing_sessions
+  FOR SELECT TO authenticated USING (is_admin(auth.uid()));
+
+CREATE POLICY "Users insert own sessions" ON processing_sessions
+  FOR INSERT TO authenticated WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "Users update own sessions" ON processing_sessions
+  FOR UPDATE TO authenticated USING (user_id = auth.uid());
+
+CREATE POLICY "Users delete own sessions" ON processing_sessions
+  FOR DELETE TO authenticated USING (user_id = auth.uid());
+
+-- 2. user_profiles INSERT fix
+DROP POLICY "Users can insert own profile" ON user_profiles;
+
+CREATE POLICY "Users can insert own profile" ON user_profiles
+  FOR INSERT TO authenticated
+  WITH CHECK (id = auth.uid() AND is_admin = false AND is_active = true);
+
+-- 3. api_call_logs
+DROP POLICY "Allow all operations on api_call_logs" ON api_call_logs;
+
+CREATE POLICY "Users select own logs" ON api_call_logs
+  FOR SELECT TO authenticated
+  USING (session_id IN (SELECT id FROM processing_sessions WHERE user_id = auth.uid()));
+
+CREATE POLICY "Admins select all logs" ON api_call_logs
+  FOR SELECT TO authenticated
+  USING (is_admin(auth.uid()));
 ```
 
 ### Files modified
 
 | File | Change |
 |------|--------|
-| `src/components/steps/PlanOptimizerStep.tsx` | Split layout: constrained top section, full-width table card |
+| New SQL migration | All 3 security fixes above |
+
+No frontend code changes required.
 
