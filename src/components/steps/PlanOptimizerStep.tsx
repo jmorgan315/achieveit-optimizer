@@ -982,20 +982,12 @@ export function PlanOptimizerStep({
       {isDesktop && (
         <BulkActionBar
           selectedCount={selectedItems.size}
-          onSetOwner={(email) => {
-            selectedItems.forEach((id) => onUpdateItem(id, { assignedTo: email }));
+          onBulkUpdate={(field, value) => {
+            const count = selectedItems.size;
+            selectedItems.forEach((id) => onUpdateItem(id, { [field]: value }));
             setSelectedItems(new Set());
-            toast({ title: 'Assigned To updated', description: `Set assigned to for ${selectedItems.size} items` });
-          }}
-          onSetStatus={(status) => {
-            selectedItems.forEach((id) => onUpdateItem(id, { status: status as PlanItem['status'] }));
-            setSelectedItems(new Set());
-            toast({ title: 'Status updated', description: `Set status for ${selectedItems.size} items` });
-          }}
-          onSetDueDate={(date) => {
-            selectedItems.forEach((id) => onUpdateItem(id, { dueDate: date }));
-            setSelectedItems(new Set());
-            toast({ title: 'Due date updated', description: `Set due date for ${selectedItems.size} items` });
+            const label = ALL_COLUMNS.find((c) => c.key === field)?.label ?? field;
+            toast({ title: `${label} updated`, description: `Set ${label.toLowerCase()} for ${count} items` });
           }}
           onBulkDelete={() => {
             if (onDeleteItem) {
