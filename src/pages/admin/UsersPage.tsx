@@ -177,8 +177,6 @@ export default function UsersPage() {
                     No users found
                   </TableCell>
                 </TableRow>
-                  </TableCell>
-                </TableRow>
               )}
             </TableBody>
           </Table>
