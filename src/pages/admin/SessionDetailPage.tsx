@@ -203,6 +203,82 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function FeedbackSection({ sessionId }: { sessionId: string }) {
+  const [feedback, setFeedback] = useState<any>(null);
+  const [fbLoading, setFbLoading] = useState(true);
+  const [submitter, setSubmitter] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from('session_feedback')
+        .select('*')
+        .eq('session_id', sessionId);
+      if (data && data.length > 0) {
+        setFeedback(data[0]);
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('email, first_name, last_name')
+          .eq('id', data[0].user_id)
+          .single();
+        if (profile) {
+          const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
+          setSubmitter(name ? `${profile.email} (${name})` : profile.email);
+        }
+      }
+      setFbLoading(false);
+    })();
+  }, [sessionId]);
+
+  if (fbLoading) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">User Feedback</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {!feedback ? (
+          <p className="text-sm text-muted-foreground">No feedback submitted.</p>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+            <div>
+              <span className="text-muted-foreground">Expected Items:</span> {feedback.expected_item_count ?? '—'}
+            </div>
+            <div>
+              <span className="text-muted-foreground">Actual Items:</span> {feedback.actual_item_count}
+            </div>
+            <div>
+              <span className="text-muted-foreground">Delta:</span>{' '}
+              <Badge variant="secondary">
+                {feedback.item_count_delta != null ? (feedback.item_count_delta > 0 ? '+' : '') + feedback.item_count_delta : '—'}
+              </Badge>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Hierarchy Rating:</span> {feedback.hierarchy_rating ?? '—'}/5
+            </div>
+            <div>
+              <span className="text-muted-foreground">Overall Rating:</span> {feedback.overall_rating ?? '—'}/5
+            </div>
+            <div>
+              <span className="text-muted-foreground">Time Saved:</span> {feedback.time_saved ?? '—'}
+            </div>
+            {feedback.open_feedback && (
+              <div className="col-span-full">
+                <span className="text-muted-foreground">Feedback:</span>
+                <p className="mt-1">{feedback.open_feedback}</p>
+              </div>
+            )}
+            <div className="col-span-full text-xs text-muted-foreground">
+              Submitted by {submitter ?? 'Unknown'} on {format(new Date(feedback.created_at), 'MMM d, yyyy HH:mm')}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SessionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { toast } = useToast();
