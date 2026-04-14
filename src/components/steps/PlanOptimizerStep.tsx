@@ -45,6 +45,9 @@ import { LevelVerificationModal } from '@/components/steps/LevelVerificationModa
 import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye } from 'lucide-react';
 import { InlineEditableTable } from '@/components/plan-optimizer/InlineEditableTable';
 import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
+import { ColumnVisibilityPopover } from '@/components/plan-optimizer/ColumnVisibilityPopover';
+import { BulkActionBar } from '@/components/plan-optimizer/BulkActionBar';
+import { DEFAULT_VISIBLE_COLUMNS, ALL_COLUMNS } from '@/components/plan-optimizer/columnDefs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
