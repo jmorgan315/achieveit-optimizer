@@ -45,6 +45,9 @@ import { LevelVerificationModal } from '@/components/steps/LevelVerificationModa
 import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye } from 'lucide-react';
 import { InlineEditableTable } from '@/components/plan-optimizer/InlineEditableTable';
 import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
+import { ColumnVisibilityPopover } from '@/components/plan-optimizer/ColumnVisibilityPopover';
+import { BulkActionBar } from '@/components/plan-optimizer/BulkActionBar';
+import { DEFAULT_VISIBLE_COLUMNS, ALL_COLUMNS } from '@/components/plan-optimizer/columnDefs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -122,6 +125,28 @@ export function PlanOptimizerStep({
   const [showConfidence, setShowConfidence] = useState(() => {
     return localStorage.getItem('achieveit-show-confidence') === 'true';
   });
+
+  // Column visibility state
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+    if (sessionId) {
+      const saved = localStorage.getItem(`achieveit-columns-${sessionId}`);
+      if (saved) {
+        try {
+          const arr = JSON.parse(saved) as string[];
+          // Ensure always-visible columns are included
+          const s = new Set(arr);
+          for (const col of ALL_COLUMNS) {
+            if (col.alwaysVisible) s.add(col.key);
+          }
+          return s;
+        } catch {}
+      }
+    }
+    return new Set(DEFAULT_VISIBLE_COLUMNS);
+  });
+
+  // Bulk selection state
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   
   useEffect(() => {
     const mql = window.matchMedia('(min-width: 1024px)');
@@ -129,6 +154,24 @@ export function PlanOptimizerStep({
     mql.addEventListener('change', onChange);
     return () => mql.removeEventListener('change', onChange);
   }, []);
+
+  // Save column visibility when it changes
+  useEffect(() => {
+    if (sessionId) {
+      localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...visibleColumns]));
+    }
+  }, [visibleColumns, sessionId]);
+
+  // Keyboard shortcuts for bulk selection
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && selectedItems.size > 0) {
+        setSelectedItems(new Set());
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [selectedItems.size]);
 
   const pointerPositionRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   
@@ -576,14 +619,37 @@ export function PlanOptimizerStep({
               </p>
             </div>
             {onUpdateLevels && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowLevelModal(true)}
-              >
-                <Settings className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Configure Levels</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <ColumnVisibilityPopover
+                  visibleColumns={visibleColumns}
+                  onToggleColumn={(key) => {
+                    setVisibleColumns((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      if (sessionId) localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...next]));
+                      return next;
+                    });
+                  }}
+                  onShowAll={() => {
+                    const all = new Set(ALL_COLUMNS.map((c) => c.key));
+                    setVisibleColumns(all);
+                    if (sessionId) localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...all]));
+                  }}
+                  onResetDefaults={() => {
+                    setVisibleColumns(new Set(DEFAULT_VISIBLE_COLUMNS));
+                    if (sessionId) localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...DEFAULT_VISIBLE_COLUMNS]));
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowLevelModal(true)}
+                >
+                  <Settings className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Configure Levels</span>
+                </Button>
+              </div>
             )}
           </div>
         </CardHeader>
@@ -606,12 +672,30 @@ export function PlanOptimizerStep({
                   items={items}
                   levels={levels}
                   expandedItems={expandedItems}
+                  visibleColumns={visibleColumns}
+                  selectedItems={selectedItems}
                   onToggleExpand={toggleExpand}
                   onUpdateItem={onUpdateItem}
                   onChangeLevel={onChangeLevel}
                   onOptimize={handleOptimize}
                   onEdit={handleEdit}
                   onDelete={onDeleteItem ? handleDelete : undefined}
+                  onSelectItem={(id) => {
+                    setSelectedItems((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(id)) next.delete(id);
+                      else next.add(id);
+                      return next;
+                    });
+                  }}
+                  onSelectAll={() => {
+                    setSelectedItems((prev) => {
+                      const allIds = flatList.map((f) => f.item.id);
+                      const allSelected = allIds.every((id) => prev.has(id));
+                      if (allSelected) return new Set();
+                      return new Set(allIds);
+                    });
+                  }}
                   showConfidence={showConfidence}
                   activeFilter={activeFilter}
                   dropInfo={dropInfo}
@@ -893,6 +977,37 @@ export function PlanOptimizerStep({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Action Bar */}
+      {isDesktop && (
+        <BulkActionBar
+          selectedCount={selectedItems.size}
+          onSetOwner={(email) => {
+            selectedItems.forEach((id) => onUpdateItem(id, { assignedTo: email }));
+            setSelectedItems(new Set());
+            toast({ title: 'Owner updated', description: `Set owner for ${selectedItems.size} items` });
+          }}
+          onSetStatus={(status) => {
+            selectedItems.forEach((id) => onUpdateItem(id, { status: status as PlanItem['status'] }));
+            setSelectedItems(new Set());
+            toast({ title: 'Status updated', description: `Set status for ${selectedItems.size} items` });
+          }}
+          onSetDueDate={(date) => {
+            selectedItems.forEach((id) => onUpdateItem(id, { dueDate: date }));
+            setSelectedItems(new Set());
+            toast({ title: 'Due date updated', description: `Set due date for ${selectedItems.size} items` });
+          }}
+          onBulkDelete={() => {
+            if (onDeleteItem) {
+              const count = selectedItems.size;
+              selectedItems.forEach((id) => onDeleteItem(id));
+              setSelectedItems(new Set());
+              toast({ title: 'Items deleted', description: `Deleted ${count} items` });
+            }
+          }}
+          onClearSelection={() => setSelectedItems(new Set())}
+        />
+      )}
     </div>
   );
 }
