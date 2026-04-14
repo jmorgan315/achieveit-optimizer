@@ -1024,6 +1024,17 @@ export function PlanOptimizerStep({
           onClearSelection={() => setSelectedItems(new Set())}
         />
       )}
+
+      {featureFlags?.showFeedback && sessionId && userId && (
+        <FeedbackDialog
+          open={showFeedbackDialog}
+          onOpenChange={setShowFeedbackDialog}
+          sessionId={sessionId}
+          userId={userId}
+          actualItemCount={initialItemCount ?? items.length}
+          onSubmitted={() => setHasFeedback(true)}
+        />
+      )}
     </div>
   );
 }
