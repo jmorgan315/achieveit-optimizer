@@ -601,14 +601,37 @@ export function PlanOptimizerStep({
               </p>
             </div>
             {onUpdateLevels && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowLevelModal(true)}
-              >
-                <Settings className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Configure Levels</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <ColumnVisibilityPopover
+                  visibleColumns={visibleColumns}
+                  onToggleColumn={(key) => {
+                    setVisibleColumns((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      if (sessionId) localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...next]));
+                      return next;
+                    });
+                  }}
+                  onShowAll={() => {
+                    const all = new Set(ALL_COLUMNS.map((c) => c.key));
+                    setVisibleColumns(all);
+                    if (sessionId) localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...all]));
+                  }}
+                  onResetDefaults={() => {
+                    setVisibleColumns(new Set(DEFAULT_VISIBLE_COLUMNS));
+                    if (sessionId) localStorage.setItem(`achieveit-columns-${sessionId}`, JSON.stringify([...DEFAULT_VISIBLE_COLUMNS]));
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowLevelModal(true)}
+                >
+                  <Settings className="h-4 w-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Configure Levels</span>
+                </Button>
+              </div>
             )}
           </div>
         </CardHeader>
