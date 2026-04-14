@@ -329,6 +329,7 @@ export function usePlanState() {
     updateItemIssues,
     moveItem,
     reorderSiblings,
+    moveAndReorder,
     updateLevelsAndRecalculate,
     changeItemLevel,
     deleteItem,
