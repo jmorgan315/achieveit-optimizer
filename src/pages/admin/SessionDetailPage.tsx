@@ -413,6 +413,9 @@ export default function SessionDetailPage() {
         )}
       </div>
 
+      {/* User Feedback */}
+      <FeedbackSection sessionId={session.id} />
+
       {/* Results Preview */}
       {(() => {
         const sr = session.step_results as Record<string, Json> | null;
