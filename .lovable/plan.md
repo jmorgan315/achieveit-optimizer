@@ -1,28 +1,65 @@
 
 
-## Rename "Owner" → "Assigned To" in User-Facing Text
+## Refactor Bulk Action Bar: Single "Edit Field" Dropdown
 
-All changes are label/string-only — no variable, prop, or field renames.
+### Design
 
-### Files to modify
+Replace 3 separate buttons (Set Assigned To, Set Status, Set Due Date) with one "Edit Field" dropdown. The dropdown lists all editable fields from `ALL_COLUMNS` (excluding `order` and `name` which are readonly/structural). Selecting a field opens an inline input in the bar matching the field's `editType`. An "Apply" button commits the value.
 
-| File | Line(s) | Change |
-|------|---------|--------|
-| `src/components/plan-optimizer/EditItemDialog.tsx` | ~327 | Label `"Owner Email"` → `"Assigned To"`, placeholder `"owner@company.com"` → `"name@company.com"` |
-| `src/components/plan-optimizer/BulkActionBar.tsx` | ~64-78 | Button text `"Set Owner"` → `"Set Assigned To"`, popover label `"Owner Email"` → `"Email"`, placeholder `"owner@email.com"` → `"name@email.com"` |
-| `src/components/steps/PlanOptimizerStep.tsx` | ~570 | Stats card label `"Missing Owners"` → `"Missing Assigned To"` |
-| `src/components/steps/PlanOptimizerStep.tsx` | ~988 | Toast title `'Owner updated'` → `'Assigned To updated'`, description `'Set owner for…'` → `'Set assigned to for…'` |
-| `src/components/steps/PeopleMapperStep.tsx` | ~59 | CardTitle `"Resolve Plan Owners"` → `"Resolve Assigned To"` |
-| `src/components/steps/PeopleMapperStep.tsx` | ~133 | Button `"Continue with X Resolved Owners"` → `"Continue with X Resolved"` |
-| `src/components/steps/PeopleMapperStep.tsx` | ~123-124 | Pro tip text: `"multiple owners"` → `"multiple assignees"`, `"primary owner's"` → `"primary assignee's"`, `"Additional owners"` → `"Additional assignees"` |
-| `src/components/spreadsheet/MappingInterface.tsx` | ~29 | Column role label `'Owner'` → `'Assigned To'` |
-| `src/types/plan.ts` | sample data (~212-388) | All `message: 'Missing assigned owner email'` → `'Missing assigned to email'` (these surface in tooltips via `SortableTreeItem`) |
+Layout: `[N items selected] | [Edit Field ▼] [inline input + Apply] | [Delete] | [X]`
 
-### What stays unchanged
-- All internal variable names (`ownerEmail`, `ownerOpen`, `onSetOwner`, `missingOwner`, `ownerColor`, `ownerCol`, etc.)
-- All prop names and interfaces
-- Database field `owner` in autoSave
-- Backend/edge functions
-- The `ColumnRole` type value `'owner'`
-- The issue type string `'missing-owner'` (internal enum, not user-facing)
+### Changes
+
+**1. `BulkActionBar.tsx` — Full rewrite**
+
+- Replace `onSetOwner`, `onSetStatus`, `onSetDueDate` props with a single `onBulkUpdate: (field: string, value: string) => void`
+- State: `selectedField: ColumnDef | null`, `fieldValue: string`
+- Render an "Edit Field" dropdown (using Popover + list, not Select, to avoid auto-closing issues) listing editable fields from `ALL_COLUMNS` filtered to exclude `order`, `name`, `level`
+- When a field is selected, show the appropriate inline editor:
+  - `text`/`textarea` → Input + Apply button
+  - `dropdown` → Select with the field's options, auto-applies on selection
+  - `date` → Calendar popover, auto-applies on date selection
+- "Apply" calls `onBulkUpdate(field.key, fieldValue)`, resets state
+- Keep Delete button and clear selection unchanged
+
+**2. `PlanOptimizerStep.tsx` — Simplify props**
+
+- Replace `onSetOwner`, `onSetStatus`, `onSetDueDate` with single `onBulkUpdate` handler:
+  ```
+  onBulkUpdate={(field, value) => {
+    selectedItems.forEach(id => onUpdateItem(id, { [field]: value }));
+    setSelectedItems(new Set());
+    toast({ title: 'Updated', description: `Set ${fieldLabel} for ${count} items` });
+  }}
+  ```
+
+### Editable fields list (15 fields)
+
+From `ALL_COLUMNS`, excluding `order` (readonly) and `name` (structural, always visible):
+
+| Field | Input Type |
+|-------|-----------|
+| Level | dropdown (dynamic from levels) |
+| Description | text input |
+| Status | dropdown (STATUS_OPTIONS) |
+| Start Date | date picker |
+| Due Date | date picker |
+| Assigned To | text input |
+| Members | text input |
+| Administrators | text input |
+| Metric Description | dropdown |
+| Metric Unit | dropdown |
+| Metric Rollup | dropdown |
+| Metric Baseline | text input |
+| Metric Target | text input |
+| Current Value | text input |
+| Update Frequency | dropdown |
+| Tags | text input |
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `src/components/plan-optimizer/BulkActionBar.tsx` | Full rewrite — single Edit Field dropdown with inline editors |
+| `src/components/steps/PlanOptimizerStep.tsx` | Replace 3 callback props with single `onBulkUpdate` |
 
