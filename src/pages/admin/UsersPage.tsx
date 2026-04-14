@@ -21,6 +21,7 @@ interface UserProfile {
   is_admin: boolean;
   is_active: boolean;
   created_at: string;
+  feature_flags: Record<string, boolean>;
 }
 
 export default function UsersPage() {
@@ -38,6 +39,12 @@ export default function UsersPage() {
       .order('created_at', { ascending: true });
     if (error) {
       toast.error('Failed to load users');
+    } else {
+      setUsers((data ?? []).map(u => ({
+        ...u,
+        feature_flags: (typeof u.feature_flags === 'object' && u.feature_flags !== null ? u.feature_flags : {}) as Record<string, boolean>,
+      })));
+    }
     } else {
       setUsers(data ?? []);
     }
