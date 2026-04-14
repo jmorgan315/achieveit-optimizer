@@ -342,7 +342,17 @@ function recalculateOrders(items: PlanItem[], levels: PlanLevel[]): PlanItem[] {
   const result: PlanItem[] = [];
 
   function processLevel(parentId: string | null, prefix: string, treeDepth: number) {
-    const children = items.filter((i) => i.parentId === parentId);
+    const children = items
+      .filter((i) => i.parentId === parentId)
+      .sort((a, b) => {
+        const aParts = a.order.split('.').map(Number);
+        const bParts = b.order.split('.').map(Number);
+        for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+          const diff = (aParts[i] ?? 0) - (bParts[i] ?? 0);
+          if (diff !== 0) return diff;
+        }
+        return 0;
+      });
     children.forEach((child, index) => {
       const order = prefix ? `${prefix}.${index + 1}` : `${index + 1}`;
       const levelName = levels.find((l) => l.depth === treeDepth)?.name || `Level ${treeDepth}`;
