@@ -120,7 +120,7 @@ export function usePlanState() {
         const issues: PlanItem['issues'] = [];
 
         if (!item.assignedTo || !item.assignedTo.includes('@')) {
-          issues.push({ type: 'missing-owner', message: 'Missing assigned owner email' });
+          issues.push({ type: 'missing-owner', message: 'Missing assigned to email' });
         }
 
         if (!item.startDate || !item.dueDate) {
