@@ -68,6 +68,52 @@ export function usePlanState() {
     });
   }, []);
 
+  const moveAndReorder = useCallback((itemId: string, newParentId: string | null, newIndex: number) => {
+    setState((prev) => {
+      const item = prev.items.find((i) => i.id === itemId);
+      if (!item) return prev;
+
+      const newLevelDepth = newParentId
+        ? (prev.items.find((i) => i.id === newParentId)?.levelDepth ?? 0) + 1
+        : 1;
+      const levelName = prev.levels.find((l) => l.depth === newLevelDepth)?.name || item.levelName;
+
+      // Reparent and update level
+      let updatedItems = prev.items.map((i) =>
+        i.id === itemId
+          ? { ...i, parentId: newParentId, levelDepth: newLevelDepth, levelName }
+          : i
+      );
+
+      // Reorder among new siblings
+      const siblings = updatedItems
+        .filter((i) => i.parentId === newParentId && i.id !== itemId)
+        // preserve current relative order
+        .sort((a, b) => {
+          const ai = prev.items.findIndex((x) => x.id === a.id);
+          const bi = prev.items.findIndex((x) => x.id === b.id);
+          return ai - bi;
+        });
+
+      const movedItem = updatedItems.find((i) => i.id === itemId)!;
+      const clampedIndex = Math.max(0, Math.min(newIndex, siblings.length));
+      siblings.splice(clampedIndex, 0, movedItem);
+
+      // Build id→order map for quick lookup
+      const siblingOrder = new Map(siblings.map((s, idx) => [s.id, idx]));
+
+      // Update order values based on new sibling positions
+      updatedItems = updatedItems.map((i) => {
+        if (siblingOrder.has(i.id)) {
+          return { ...i, order: String(siblingOrder.get(i.id)! + 1) };
+        }
+        return i;
+      });
+
+      return { ...prev, items: recalculateOrders(updatedItems, prev.levels) };
+    });
+  }, []);
+
 
   const updatePersonMapping = useCallback((id: string, email: string) => {
     setState((prev) => ({
@@ -283,6 +329,7 @@ export function usePlanState() {
     updateItemIssues,
     moveItem,
     reorderSiblings,
+    moveAndReorder,
     updateLevelsAndRecalculate,
     changeItemLevel,
     deleteItem,

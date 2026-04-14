@@ -148,7 +148,10 @@ export function SortableTreeItem({
     <div className="relative">
       {showBeforeLine && (
         <div className="absolute top-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
-          <div className="h-0.5 bg-primary rounded-full" />
+          <div className="flex items-center">
+            <div className="h-3 w-3 rounded-full bg-primary border-2 border-background shrink-0 -ml-1.5" />
+            <div className="h-1 bg-primary rounded-full flex-1" />
+          </div>
           <span className="absolute left-10 -top-4 text-[10px] font-medium text-primary bg-background px-1.5 py-0.5 rounded shadow-sm border border-primary/20">
             Reorder before "{targetItemName}"{reorderLevelName ? ` as ${reorderLevelName}` : ''}
           </span>
@@ -340,7 +343,10 @@ export function SortableTreeItem({
       
       {showAfterLine && (
         <div className="absolute bottom-0 left-0 right-0 z-10" style={{ paddingLeft: `${depth * 24 + 8}px` }}>
-          <div className="h-0.5 bg-primary rounded-full" />
+          <div className="flex items-center">
+            <div className="h-3 w-3 rounded-full bg-primary border-2 border-background shrink-0 -ml-1.5" />
+            <div className="h-1 bg-primary rounded-full flex-1" />
+          </div>
           <span className="absolute left-10 top-0.5 text-[10px] font-medium text-primary bg-background px-1.5 py-0.5 rounded shadow-sm border border-primary/20">
             Reorder after "{targetItemName}"{reorderLevelName ? ` as ${reorderLevelName}` : ''}
           </span>
