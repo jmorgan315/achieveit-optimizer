@@ -494,7 +494,8 @@ export function PlanOptimizerStep({
   const metricLabel = activeFilter === 'has-metric' ? 'With Metrics' : activeFilter === 'missing-metric' ? 'Missing Metrics' : 'With Metrics';
 
   return (
-    <div className="w-full max-w-6xl mx-auto space-y-6">
+    <div className="w-full space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
       {/* Session Summary + Confidence Banner — only when toggle is on */}
       {showConfidence && <SessionSummaryCard sessionId={sessionId} items={items} />}
       {showConfidence && <ConfidenceBanner items={items} />}
