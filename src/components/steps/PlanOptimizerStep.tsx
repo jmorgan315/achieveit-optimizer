@@ -129,6 +129,8 @@ export function PlanOptimizerStep({
   const [dropInfo, setDropInfo] = useState<DropInfo | null>(null);
   const [activeFilter, setActiveFilter] = useState<'missing-owner' | 'missing-dates' | 'orphan' | 'has-metric' | 'missing-metric' | 'needs-review' | null>(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
+  const [hasFeedback, setHasFeedback] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [includeConfidence, setIncludeConfidence] = useState(false);
   const [showConfidence, setShowConfidence] = useState(() => {
