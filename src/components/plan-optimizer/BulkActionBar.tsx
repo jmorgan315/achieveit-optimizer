@@ -66,16 +66,16 @@ export function BulkActionBar({
         <PopoverTrigger asChild>
           <Button variant="outline" size="sm">
             <UserPlus className="h-3.5 w-3.5 mr-1" />
-            Set Owner
+            Set Assigned To
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-64 p-3" align="center" side="top">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Owner Email</label>
+            <label className="text-sm font-medium">Email</label>
             <Input
               value={ownerEmail}
               onChange={(e) => setOwnerEmail(e.target.value)}
-              placeholder="owner@email.com"
+              placeholder="name@email.com"
               className="h-8 text-sm"
             />
             <Button

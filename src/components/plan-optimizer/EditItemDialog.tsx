@@ -324,13 +324,13 @@ export function EditItemDialog({
 
           {/* Owner */}
           <div className="space-y-2">
-            <Label htmlFor="assignedTo">Owner Email</Label>
+            <Label htmlFor="assignedTo">Assigned To</Label>
             <Input
               id="assignedTo"
               type="email"
               value={formData.assignedTo}
               onChange={(e) => setFormData((prev) => ({ ...prev, assignedTo: e.target.value }))}
-              placeholder="owner@company.com"
+              placeholder="name@company.com"
             />
           </div>
 

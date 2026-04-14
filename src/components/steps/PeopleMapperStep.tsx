@@ -56,7 +56,7 @@ export function PeopleMapperStep({
                 <Users className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle>Resolve Plan Owners</CardTitle>
+                <CardTitle>Resolve Assigned To</CardTitle>
                 <CardDescription>
                   Map names and departments to email addresses for AchieveIt import
                 </CardDescription>
@@ -130,7 +130,7 @@ export function PeopleMapperStep({
               onClick={handleComplete}
               className="w-full h-12"
             >
-              Continue with {resolvedCount} Resolved Owners
+              Continue with {resolvedCount} Resolved
             </Button>
           </div>
         </CardContent>

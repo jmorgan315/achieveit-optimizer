@@ -567,7 +567,7 @@ export function PlanOptimizerStep({
         >
           <CardContent className="p-4">
             <div className={`text-2xl font-bold ${ownerColor.text}`}>{issueStats.missingOwner}</div>
-            <div className="text-sm text-muted-foreground">Missing Owners</div>
+            <div className="text-sm text-muted-foreground">Missing Assigned To</div>
           </CardContent>
         </Card>
 
@@ -985,7 +985,7 @@ export function PlanOptimizerStep({
           onSetOwner={(email) => {
             selectedItems.forEach((id) => onUpdateItem(id, { assignedTo: email }));
             setSelectedItems(new Set());
-            toast({ title: 'Owner updated', description: `Set owner for ${selectedItems.size} items` });
+            toast({ title: 'Assigned To updated', description: `Set assigned to for ${selectedItems.size} items` });
           }}
           onSetStatus={(status) => {
             selectedItems.forEach((id) => onUpdateItem(id, { status: status as PlanItem['status'] }));
