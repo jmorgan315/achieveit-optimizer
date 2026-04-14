@@ -63,7 +63,7 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { key: 'dueDate', label: 'Due Date', group: 'dates', defaultVisible: true, defaultWidth: 110, editType: 'date' },
 
   // People
-  { key: 'assignedTo', label: 'Assigned To', group: 'people', defaultVisible: true, defaultWidth: 160, editType: 'text', placeholder: 'owner@email.com' },
+  { key: 'assignedTo', label: 'Assigned To', group: 'people', defaultVisible: true, defaultWidth: 160, editType: 'text', placeholder: '—' },
   { key: 'members', label: 'Members', group: 'people', defaultVisible: false, defaultWidth: 160, editType: 'text', placeholder: 'emails...' },
   { key: 'administrators', label: 'Administrators', group: 'people', defaultVisible: false, defaultWidth: 160, editType: 'text', placeholder: 'emails...' },
 
