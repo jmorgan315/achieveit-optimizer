@@ -803,6 +803,7 @@ const Index = () => {
               onMoveItem={moveItem}
               onChangeLevel={changeItemLevel}
               onReorderSiblings={reorderSiblings}
+              onMoveAndReorder={moveAndReorder}
               onExport={handleExport}
               onUpdateLevels={handleUpdateLevels}
               onDeleteItem={deleteItem}
