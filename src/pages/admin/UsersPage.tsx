@@ -65,6 +65,22 @@ export default function UsersPage() {
     setTogglingId(null);
   };
 
+  const toggleFlag = async (userId: string, flag: string, current: boolean) => {
+    const user = users.find(u => u.id === userId);
+    if (!user) return;
+    const updated = { ...user.feature_flags, [flag]: !current };
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ feature_flags: updated } as any)
+      .eq('id', userId);
+    if (error) {
+      toast.error(`Failed to update flag: ${error.message}`);
+    } else {
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, feature_flags: updated } : u));
+      toast.success('Feature flag updated');
+    }
+  };
+
   const handleInvite = async () => {
     if (!inviteEmail.endsWith('@achieveit.com')) {
       toast.error('Only @achieveit.com emails can be invited.');
