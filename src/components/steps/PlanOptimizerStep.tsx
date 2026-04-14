@@ -609,6 +609,8 @@ export function PlanOptimizerStep({
         </Card>
       </div>
 
+      </div>
+
       {/* Plan Structure — Desktop: inline table, Mobile: tree items */}
       <Card>
         <CardHeader className="border-b">
