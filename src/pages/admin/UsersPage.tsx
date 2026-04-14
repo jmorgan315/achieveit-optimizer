@@ -130,6 +130,8 @@ export default function UsersPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Admin</TableHead>
                 <TableHead>Active</TableHead>
+                <TableHead>Feedback</TableHead>
+                <TableHead>Re-import</TableHead>
                 <TableHead>Joined</TableHead>
               </TableRow>
             </TableHeader>
@@ -152,6 +154,18 @@ export default function UsersPage() {
                       onCheckedChange={() => toggleField(u.id, 'is_active', u.is_active)}
                     />
                   </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={u.feature_flags?.showFeedback ?? false}
+                      onCheckedChange={() => toggleFlag(u.id, 'showFeedback', u.feature_flags?.showFeedback ?? false)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={u.feature_flags?.showReimport ?? false}
+                      onCheckedChange={() => toggleFlag(u.id, 'showReimport', u.feature_flags?.showReimport ?? false)}
+                    />
+                  </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {new Date(u.created_at).toLocaleDateString()}
                   </TableCell>
@@ -159,8 +173,10 @@ export default function UsersPage() {
               ))}
               {users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                     No users found
+                  </TableCell>
+                </TableRow>
                   </TableCell>
                 </TableRow>
               )}
