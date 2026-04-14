@@ -26,7 +26,7 @@ interface MappingInterfaceProps {
 
 const COLUMN_ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
   { value: 'item_name', label: 'Item Name' },
-  { value: 'owner', label: 'Owner' },
+  { value: 'owner', label: 'Assigned To' },
   { value: 'date', label: 'Date / Deadline' },
   { value: 'metric', label: 'Metric / Measurement' },
   { value: 'member', label: 'Member' },

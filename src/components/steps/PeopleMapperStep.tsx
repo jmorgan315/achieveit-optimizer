@@ -56,7 +56,7 @@ export function PeopleMapperStep({
                 <Users className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <CardTitle>Resolve Plan Owners</CardTitle>
+                <CardTitle>Resolve Assigned To</CardTitle>
                 <CardDescription>
                   Map names and departments to email addresses for AchieveIt import
                 </CardDescription>
@@ -120,8 +120,8 @@ export function PeopleMapperStep({
           <div className="mt-6 p-4 rounded-lg bg-muted/50 border">
             <h4 className="font-medium text-sm mb-2">💡 Pro Tip</h4>
             <p className="text-sm text-muted-foreground">
-              For items with multiple owners (like "Mike Chen and Lisa Wang"), enter the primary owner's 
-              email here. Additional owners will be added to the "Members" column in the export.
+              For items with multiple assignees (like "Mike Chen and Lisa Wang"), enter the primary assignee's 
+              email here. Additional assignees will be added to the "Members" column in the export.
             </p>
           </div>
 
@@ -130,7 +130,7 @@ export function PeopleMapperStep({
               onClick={handleComplete}
               className="w-full h-12"
             >
-              Continue with {resolvedCount} Resolved Owners
+              Continue with {resolvedCount} Resolved
             </Button>
           </div>
         </CardContent>

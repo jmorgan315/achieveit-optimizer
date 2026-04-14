@@ -500,7 +500,7 @@ function rebuildHierarchyFromFlatItems(
     // Build issues list
     const issues: PlanItem['issues'] = [];
     if (!aiItem.owner) {
-      issues.push({ type: 'missing-owner', message: 'Missing assigned owner email' });
+      issues.push({ type: 'missing-owner', message: 'Missing assigned to email' });
     }
     if (!aiItem.startDate || !aiItem.dueDate) {
       issues.push({ type: 'missing-dates', message: 'Missing start or due date' });
@@ -667,7 +667,7 @@ export function convertAIResponseToPlanItems(
     // Build issues list
     const issues: PlanItem['issues'] = [];
     if (!aiItem.owner) {
-      issues.push({ type: 'missing-owner', message: 'Missing assigned owner email' });
+      issues.push({ type: 'missing-owner', message: 'Missing assigned to email' });
     }
     if (!aiItem.startDate || !aiItem.dueDate) {
       issues.push({ type: 'missing-dates', message: 'Missing start or due date' });
@@ -783,7 +783,7 @@ export function parseTextToPlanItems(rawText: string, levels: PlanLevel[]): Pars
     // Create issues array
     const issues: PlanItem['issues'] = [];
     if (!extracted.owners.length) {
-      issues.push({ type: 'missing-owner', message: 'Missing assigned owner email' });
+      issues.push({ type: 'missing-owner', message: 'Missing assigned to email' });
     }
     if (!extracted.startDate || !extracted.dueDate) {
       issues.push({ type: 'missing-dates', message: 'Missing start or due date' });
