@@ -68,6 +68,7 @@ interface PlanOptimizerStepProps {
   onMoveItem: (itemId: string, newParentId: string | null) => void;
   onChangeLevel?: (itemId: string, newLevelDepth: number) => void;
   onReorderSiblings?: (itemId: string, newIndex: number) => void;
+  onMoveAndReorder?: (itemId: string, newParentId: string | null, newIndex: number) => void;
   onExport: () => void;
   onUpdateLevels?: (levels: PlanLevel[]) => void;
   onDeleteItem?: (id: string) => void;
@@ -99,6 +100,7 @@ export function PlanOptimizerStep({
   onMoveItem,
   onChangeLevel,
   onReorderSiblings,
+  onMoveAndReorder,
   onExport,
   onUpdateLevels,
   onDeleteItem,
@@ -383,23 +385,14 @@ export function PlanOptimizerStep({
         title: 'Item moved',
         description: `"${draggedItem.name}" is now under "${targetItem.name}"`,
       });
-    } else if (onReorderSiblings) {
+    } else if (onMoveAndReorder) {
       const targetParentId = targetItem.parentId;
-      const siblings = items.filter((i) => i.parentId === targetParentId);
+      const siblings = items.filter((i) => i.parentId === targetParentId && i.id !== draggedId);
       const targetIndex = siblings.findIndex((s) => s.id === targetId);
       
-      if (draggedItem.parentId !== targetParentId) {
-        onMoveItem(draggedId, targetParentId);
-      }
+      const newIndex = position === 'before' ? targetIndex : targetIndex + 1;
       
-      let newIndex = position === 'before' ? targetIndex : targetIndex + 1;
-      
-      const draggedIndex = siblings.findIndex((s) => s.id === draggedId);
-      if (draggedIndex !== -1 && draggedIndex < targetIndex) {
-        newIndex = Math.max(0, newIndex - 1);
-      }
-      
-      onReorderSiblings(draggedId, newIndex);
+      onMoveAndReorder(draggedId, targetParentId, newIndex);
       
       toast({
         title: 'Item reordered',
