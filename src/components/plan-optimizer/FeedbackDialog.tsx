@@ -129,7 +129,7 @@ export function FeedbackDialog({ open, onOpenChange, sessionId, userId, actualIt
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Rate This Import</DialogTitle>
           <DialogDescription>Help us improve by rating the AI's output quality.</DialogDescription>
@@ -144,17 +144,21 @@ export function FeedbackDialog({ open, onOpenChange, sessionId, userId, actualIt
             {/* Item Count */}
             <div className="space-y-2">
               <Label>The AI extracted {actualItemCount} items. How many were you expecting?</Label>
-              <Input
-                type="number"
-                placeholder="Expected item count"
-                value={expectedCount}
-                onChange={e => setExpectedCount(e.target.value)}
-              />
-              {deltaLabel && (
-                <p className={`text-sm ${delta! > 0 ? 'text-warning' : delta! < 0 ? 'text-destructive' : 'text-success'}`}>
-                  {deltaLabel}
-                </p>
-              )}
+              <div className="flex items-center gap-3">
+                <Input
+                  type="number"
+                  placeholder="Expected item count"
+                  value={expectedCount}
+                  onChange={e => setExpectedCount(e.target.value)}
+                  className="w-40"
+                />
+                <span className={`text-sm whitespace-nowrap ${
+                  !expectedCount ? 'text-muted-foreground' :
+                  delta! > 0 ? 'text-warning' : delta! < 0 ? 'text-destructive' : 'text-success'
+                }`}>
+                  {!expectedCount ? 'Enter your expected count' : deltaLabel}
+                </span>
+              </div>
             </div>
 
             {/* Hierarchy Rating */}

@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -7,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { Loader2, Star } from 'lucide-react';
+import { Loader2, Star, ChevronDown, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 
 interface FeedbackRow {
@@ -22,7 +23,6 @@ interface FeedbackRow {
   time_saved: string | null;
   open_feedback: string | null;
   created_at: string;
-  // joined
   org_name: string | null;
   document_name: string | null;
   user_email: string | null;
@@ -32,12 +32,14 @@ type SortKey = 'created_at' | 'overall_rating' | 'hierarchy_rating' | 'item_coun
 type SortDir = 'asc' | 'desc';
 
 export default function FeedbackPage() {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -122,7 +124,6 @@ export default function FeedbackPage() {
     <div className="p-6 space-y-4">
       <h1 className="text-xl font-semibold">Feedback Overview</h1>
 
-      {/* Summary Stats */}
       {stats && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.count}</div><div className="text-sm text-muted-foreground">Total Feedback</div></CardContent></Card>
@@ -132,7 +133,6 @@ export default function FeedbackPage() {
         </div>
       )}
 
-      {/* Date Filters */}
       <div className="flex gap-3 items-end">
         <div className="space-y-1">
           <Label className="text-xs">From</Label>
@@ -144,11 +144,11 @@ export default function FeedbackPage() {
         </div>
       </div>
 
-      {/* Table */}
       <div className="border rounded-lg">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8" />
               <SortHeader label="Date" k="created_at" />
               <TableHead>User</TableHead>
               <TableHead>Document</TableHead>
@@ -163,28 +163,54 @@ export default function FeedbackPage() {
           </TableHeader>
           <TableBody>
             {sorted.map(r => (
-              <TableRow key={r.id}>
-                <TableCell className="text-sm">{format(new Date(r.created_at), 'MMM d, yyyy')}</TableCell>
-                <TableCell className="text-sm">{r.user_email ?? '—'}</TableCell>
-                <TableCell className="text-sm max-w-[150px] truncate">{r.document_name ?? '—'}</TableCell>
-                <TableCell className="text-sm">{r.org_name ?? '—'}</TableCell>
-                <TableCell className="text-sm">{r.expected_item_count ?? '—'}</TableCell>
-                <TableCell className="text-sm">{r.actual_item_count}</TableCell>
-                <TableCell className="text-sm">
-                  {r.item_count_delta != null ? (
-                    <Badge variant={r.item_count_delta === 0 ? 'default' : 'secondary'}>
-                      {r.item_count_delta > 0 ? '+' : ''}{r.item_count_delta}
-                    </Badge>
-                  ) : '—'}
-                </TableCell>
-                <TableCell className="text-sm">{r.hierarchy_rating ?? '—'}/5</TableCell>
-                <TableCell className="text-sm">{r.overall_rating ?? '—'}/5</TableCell>
-                <TableCell className="text-sm">{r.time_saved ?? '—'}</TableCell>
-              </TableRow>
+              <React.Fragment key={r.id}>
+                <TableRow
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                >
+                  <TableCell className="text-sm px-2">
+                    {expandedId === r.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </TableCell>
+                  <TableCell className="text-sm">{format(new Date(r.created_at), 'MMM d, yyyy')}</TableCell>
+                  <TableCell className="text-sm">{r.user_email ?? '—'}</TableCell>
+                  <TableCell className="text-sm max-w-[150px] truncate">{r.document_name ?? '—'}</TableCell>
+                  <TableCell className="text-sm">{r.org_name ?? '—'}</TableCell>
+                  <TableCell className="text-sm">{r.expected_item_count ?? '—'}</TableCell>
+                  <TableCell className="text-sm">{r.actual_item_count}</TableCell>
+                  <TableCell className="text-sm">
+                    {r.item_count_delta != null ? (
+                      <Badge variant={r.item_count_delta === 0 ? 'default' : 'secondary'}>
+                        {r.item_count_delta > 0 ? '+' : ''}{r.item_count_delta}
+                      </Badge>
+                    ) : '—'}
+                  </TableCell>
+                  <TableCell className="text-sm">{r.hierarchy_rating ?? '—'}/5</TableCell>
+                  <TableCell className="text-sm">{r.overall_rating ?? '—'}/5</TableCell>
+                  <TableCell className="text-sm">{r.time_saved ?? '—'}</TableCell>
+                </TableRow>
+                {expandedId === r.id && (
+                  <TableRow>
+                    <TableCell colSpan={11} className="bg-muted/30 px-6 py-3">
+                      <div className="space-y-2">
+                        <p className="text-sm">
+                          <span className="font-medium">Feedback:</span>{' '}
+                          {r.open_feedback || <span className="text-muted-foreground italic">No comments provided</span>}
+                        </p>
+                        <button
+                          className="text-sm text-primary hover:underline"
+                          onClick={(e) => { e.stopPropagation(); navigate(`/admin/sessions/${r.session_id}`); }}
+                        >
+                          View session details →
+                        </button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )}
+              </React.Fragment>
             ))}
             {sorted.length === 0 && (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">No feedback found</TableCell>
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">No feedback found</TableCell>
               </TableRow>
             )}
           </TableBody>
