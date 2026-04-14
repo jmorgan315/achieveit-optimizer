@@ -106,7 +106,7 @@ const Index = () => {
     resetState,
   } = usePlanState();
 
-  const saveStatus = useAutoSave(state.items, dedupResults, state.sessionId);
+  const saveStatus = useAutoSave(state.items, dedupResults, state.sessionId, state.levels);
 
   const sessionIdRef = useRef<string | null>(null);
   const sessionPromiseRef = useRef<Promise<string> | null>(null);
