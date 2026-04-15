@@ -36,6 +36,7 @@ const App = () => (
               <Route path="logs" element={<ApiLogsPage />} />
               <Route path="users" element={<UsersPage />} />
               <Route path="feedback" element={<FeedbackPage />} />
+              <Route path="activity" element={<ActivityPage />} />
             </Route>
           </Route>
           <Route path="*" element={<NotFound />} />
