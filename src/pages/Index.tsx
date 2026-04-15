@@ -17,6 +17,7 @@ import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRe
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
 import { exportToExcel } from '@/utils/exportToExcel';
+import { logActivity } from '@/utils/logActivity';
 import { toast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, RotateCcw, Download, List, Loader2 } from 'lucide-react';
@@ -483,6 +484,7 @@ const Index = () => {
 
   const handleExport = () => {
     exportToExcel(state.items, state.levels);
+    logActivity('export', { session_id: state.sessionId });
     toast({
       title: 'Export Complete',
       description: 'Your AchieveIt import file has been downloaded.',

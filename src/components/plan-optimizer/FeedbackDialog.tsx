@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
+import { logActivity } from '@/utils/logActivity';
 
 interface FeedbackDialogProps {
   open: boolean;
@@ -120,6 +121,7 @@ export function FeedbackDialog({ open, onOpenChange, sessionId, userId, actualIt
     if (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } else {
+      logActivity('feedback_submitted', { session_id: sessionId });
       toast({ title: 'Feedback submitted', description: 'Thank you for your feedback!' });
       onSubmitted();
       onOpenChange(false);

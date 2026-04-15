@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
+import { logActivity } from '@/utils/logActivity';
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
@@ -56,6 +57,8 @@ export function useAuth() {
     }
   }, []);
 
+  const prevUserIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
@@ -63,8 +66,14 @@ export function useAuth() {
       setLoading(false);
       if (currentUser) {
         checkDomainAndProfile(currentUser);
+        // Log login only on transition from no-user to user
+        if (prevUserIdRef.current !== currentUser.id) {
+          prevUserIdRef.current = currentUser.id;
+          logActivity('login');
+        }
       } else {
         setIsAdmin(false);
+        prevUserIdRef.current = null;
       }
     });
 
