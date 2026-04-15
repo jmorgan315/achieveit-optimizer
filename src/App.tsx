@@ -14,6 +14,7 @@ import SessionDetailPage from "./pages/admin/SessionDetailPage";
 import ApiLogsPage from "./pages/admin/ApiLogsPage";
 import UsersPage from "./pages/admin/UsersPage";
 import FeedbackPage from "./pages/admin/FeedbackPage";
+import ActivityPage from "./pages/admin/ActivityPage";
 
 const queryClient = new QueryClient();
 

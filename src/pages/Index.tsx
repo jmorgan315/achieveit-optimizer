@@ -483,6 +483,7 @@ const Index = () => {
 
   const handleExport = () => {
     exportToExcel(state.items, state.levels);
+    logActivity('export', { session_id: state.sessionId });
     toast({
       title: 'Export Complete',
       description: 'Your AchieveIt import file has been downloaded.',

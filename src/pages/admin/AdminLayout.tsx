@@ -1,5 +1,5 @@
 import { Outlet, Link } from 'react-router-dom';
-import { Settings, List, FileText, Users, MessageSquare, ArrowLeft } from 'lucide-react';
+import { Settings, List, FileText, Users, MessageSquare, Activity, ArrowLeft } from 'lucide-react';
 import { NavLink } from '@/components/NavLink';
 import {
   SidebarProvider,
@@ -20,6 +20,7 @@ const navItems = [
   { title: 'API Logs', url: '/admin/logs', icon: FileText },
   { title: 'Users', url: '/admin/users', icon: Users },
   { title: 'Feedback', url: '/admin/feedback', icon: MessageSquare },
+  { title: 'Activity', url: '/admin/activity', icon: Activity },
 ];
 
 function AdminSidebar() {
