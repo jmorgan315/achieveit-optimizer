@@ -40,7 +40,7 @@ Deno.serve(async (req) => {
     }
 
     const { email } = await req.json();
-    if (!email || typeof email !== "string" || !email.endsWith("@achieveit.com")) {
+    if (!email || typeof email !== "string" || !email.toLowerCase().endsWith("@achieveit.com")) {
       return new Response(JSON.stringify({ error: "Only @achieveit.com emails allowed" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
