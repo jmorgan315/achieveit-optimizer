@@ -8,7 +8,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Plus, FileText, Building2, Clock, Loader2, FolderOpen, Trash2, XCircle } from 'lucide-react';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Plus, FileText, Building2, Clock, Loader2, Trash2, XCircle, User } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface SessionRow {
@@ -19,12 +20,21 @@ interface SessionRow {
   current_step: string;
   total_items_extracted: number | null;
   created_at: string;
+  user_id?: string | null;
+}
+
+interface UserProfile {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
 }
 
 interface RecentSessionsPageProps {
   onNewImport: () => void;
   onSelectSession: (session: SessionRow) => void;
   userId: string;
+  isAdmin?: boolean;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -60,34 +70,65 @@ function StatusBadge({ status }: { status: string }) {
   }
 }
 
-export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: RecentSessionsPageProps) {
+function getUserDisplayName(profile: UserProfile | undefined): string {
+  if (!profile) return 'Unknown user';
+  if (profile.first_name || profile.last_name) {
+    return [profile.first_name, profile.last_name].filter(Boolean).join(' ');
+  }
+  return profile.email || 'Unknown user';
+}
+
+export function RecentSessionsPage({ onNewImport, onSelectSession, userId, isAdmin }: RecentSessionsPageProps) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [userProfiles, setUserProfiles] = useState<Map<string, UserProfile>>(new Map());
 
   const fetchSessions = async () => {
     let query = supabase
       .from('processing_sessions')
-      .select('id, org_name, document_name, status, current_step, total_items_extracted, created_at')
+      .select('id, org_name, document_name, status, current_step, total_items_extracted, created_at, user_id')
       .not('document_name', 'is', null)
       .order('created_at', { ascending: false })
-      .limit(20)
-      .eq('user_id', userId);
+      .limit(20);
+
+    if (!showAll) {
+      query = query.eq('user_id', userId);
+    }
 
     const { data, error } = await query;
 
     if (error) {
       console.error('Failed to fetch sessions:', error);
     } else {
-      setSessions((data as SessionRow[]) || []);
+      const rows = (data as SessionRow[]) || [];
+      setSessions(rows);
+
+      // Fetch user profiles for "All Imports" view
+      if (showAll && rows.length > 0) {
+        const uniqueUserIds = [...new Set(rows.map(r => r.user_id).filter(Boolean))] as string[];
+        if (uniqueUserIds.length > 0) {
+          const { data: profiles } = await supabase
+            .from('user_profiles')
+            .select('id, first_name, last_name, email')
+            .in('id', uniqueUserIds);
+          if (profiles) {
+            const map = new Map<string, UserProfile>();
+            profiles.forEach(p => map.set(p.id, p));
+            setUserProfiles(map);
+          }
+        }
+      }
     }
     setLoading(false);
   };
 
   useEffect(() => {
+    setLoading(true);
     fetchSessions();
-  }, [userId]);
+  }, [userId, showAll]);
 
   // Poll for updates while any session is in_progress
   useEffect(() => {
@@ -99,7 +140,7 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
     }, 10000);
 
     return () => clearInterval(interval);
-  }, [sessions, userId]);
+  }, [sessions, userId, showAll]);
 
   async function handleDelete(sessionId: string) {
     setDeletingId(sessionId);
@@ -172,8 +213,26 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
       {/* Recent Imports Section */}
       {!loading && sessions.length > 0 && (
         <div className="max-w-3xl mx-auto px-4 sm:px-0 pb-8">
-          <div className="border-t border-border pt-6 mb-4">
+          <div className="border-t border-border pt-6 mb-4 flex items-center justify-between">
             <h2 className="text-lg font-semibold text-muted-foreground">Recent Imports</h2>
+            {isAdmin && (
+              <ToggleGroup
+                type="single"
+                value={showAll ? 'all' : 'mine'}
+                onValueChange={(val) => {
+                  if (val) setShowAll(val === 'all');
+                }}
+                size="sm"
+                className="bg-muted rounded-md p-0.5"
+              >
+                <ToggleGroupItem value="mine" className="text-xs px-3 py-1 h-7 rounded data-[state=on]:bg-background data-[state=on]:shadow-sm">
+                  My Imports
+                </ToggleGroupItem>
+                <ToggleGroupItem value="all" className="text-xs px-3 py-1 h-7 rounded data-[state=on]:bg-background data-[state=on]:shadow-sm">
+                  All Imports
+                </ToggleGroupItem>
+              </ToggleGroup>
+            )}
           </div>
           <div className="space-y-2">
             {sessions.map((session) => (
@@ -193,6 +252,12 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId }: Rec
                       <StatusBadge status={session.status} />
                     </div>
                     <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                      {showAll && session.user_id && (
+                        <span className="flex items-center gap-1 truncate">
+                          <User className="h-3.5 w-3.5 shrink-0" />
+                          {getUserDisplayName(userProfiles.get(session.user_id))}
+                        </span>
+                      )}
                       {session.org_name && (
                         <span className="flex items-center gap-1 truncate">
                           <Building2 className="h-3.5 w-3.5 shrink-0" />

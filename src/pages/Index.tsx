@@ -671,7 +671,7 @@ const Index = () => {
     return (
       <div className="min-h-screen bg-background">
         <Header user={user} isAdmin={isAdmin} displayName={displayName} onSignOut={async () => { await signOut(); }} />
-        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user.id} />
+        <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user.id} isAdmin={isAdmin} />
       </div>
     );
   }
