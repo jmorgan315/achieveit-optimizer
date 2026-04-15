@@ -24,7 +24,7 @@ export function LoginPage({ onSignIn, onSignUp, onResetPassword, domainError }: 
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
 
   const validateDomain = (email: string) => {
-    if (!email.endsWith('@achieveit.com')) {
+    if (!email.toLowerCase().endsWith('@achieveit.com')) {
       setError('Please use your @achieveit.com email address.');
       return false;
     }

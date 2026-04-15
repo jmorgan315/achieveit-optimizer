@@ -13,7 +13,7 @@ export function useAuth() {
 
   const checkDomainAndProfile = useCallback(async (currentUser: User) => {
     const email = currentUser.email || '';
-    if (!email.endsWith('@achieveit.com')) {
+    if (!email.toLowerCase().endsWith('@achieveit.com')) {
       await supabase.auth.signOut();
       setUser(null);
       setIsAdmin(false);
@@ -91,7 +91,7 @@ export function useAuth() {
 
   const signIn = async (email: string, password: string) => {
     setDomainError(null);
-    if (!email.endsWith('@achieveit.com')) {
+    if (!email.toLowerCase().endsWith('@achieveit.com')) {
       return { error: { message: 'Please use your @achieveit.com email address.' } };
     }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -101,7 +101,7 @@ export function useAuth() {
 
   const signUp = async (email: string, password: string, firstName?: string, lastName?: string) => {
     setDomainError(null);
-    if (!email.endsWith('@achieveit.com')) {
+    if (!email.toLowerCase().endsWith('@achieveit.com')) {
       return { error: { message: 'Please use your @achieveit.com email address.' } };
     }
     const fullName = [firstName, lastName].filter(Boolean).join(' ') || undefined;
@@ -115,7 +115,7 @@ export function useAuth() {
   };
 
   const resetPassword = async (email: string) => {
-    if (!email.endsWith('@achieveit.com')) {
+    if (!email.toLowerCase().endsWith('@achieveit.com')) {
       return { error: { message: 'Please use your @achieveit.com email address.' } };
     }
     const { error } = await supabase.auth.resetPasswordForEmail(email, {

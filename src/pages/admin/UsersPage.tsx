@@ -76,7 +76,7 @@ export default function UsersPage() {
 
   // --- Invite ---
   const handleInvite = async () => {
-    if (!inviteEmail.endsWith('@achieveit.com')) {
+    if (!inviteEmail.toLowerCase().endsWith('@achieveit.com')) {
       toast.error('Only @achieveit.com emails can be invited.');
       return;
     }
