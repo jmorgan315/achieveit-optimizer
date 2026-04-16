@@ -1198,6 +1198,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         current_step: "error",
         step_results: { error: agent1Error || "Extraction produced no items", pipelineStep: "agent1" },
       });
+      await notifyUser(sessionId, "error");
       return;
     }
 
@@ -1418,6 +1419,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         current_step: "error",
         step_results: { error: "Pipeline processing failed. Please try again." },
       });
+      await notifyUser(sessionId, "error");
     } else {
       console.warn(`[process-plan] Suppressing error write — run ${pipelineRunId} was superseded`);
     }
@@ -1653,6 +1655,7 @@ async function runResume(sessionId: string): Promise<void> {
           current_step: "error",
           step_results: { error: "Resume failed: could not load stored page images" },
         });
+        await notifyUser(sessionId, "error");
         return;
       }
 
@@ -1824,6 +1827,7 @@ async function runResume(sessionId: string): Promise<void> {
         current_step: "error",
         step_results: { error: "Resume pipeline failed. Please try again." },
       });
+      await notifyUser(sessionId, "error");
     } else {
       console.warn(`[process-plan] Suppressing resume error write — run ${pipelineRunId} was superseded`);
     }
@@ -2167,6 +2171,8 @@ async function runAgent3Only(
     },
     total_items_extracted: finalItemCount,
   });
+
+  await notifyUser(sessionId, "completed");
 
   await logApiCall({
     session_id: sessionId,
