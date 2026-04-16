@@ -21,7 +21,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { UserPlus, Loader2, MoreHorizontal, Pencil, KeyRound, Trash2, Mail } from 'lucide-react';
+import { UserPlus, Loader2, MoreHorizontal, Pencil, KeyRound, Trash2, Mail, Link2 } from 'lucide-react';
 
 interface UserProfile {
   id: string;
