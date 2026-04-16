@@ -422,6 +422,56 @@ export default function SessionDetailPage() {
         );
       })()}
 
+      {/* Re-import History */}
+      {(() => {
+        const sr = session.step_results as Record<string, any> | null;
+        const reimport = sr?.reimport as Record<string, any> | undefined;
+        if (!reimport) return null;
+        const summary = reimport.summary as Record<string, number> | undefined;
+        const changes = reimport.changes as Array<Record<string, any>> | undefined;
+        return (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Re-import History</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p className="text-muted-foreground">
+                Re-imported on {format(new Date(reimport.timestamp), 'MMM d, yyyy HH:mm')} by {reimport.userEmail || 'Unknown'}
+              </p>
+              {summary && (
+                <div className="flex flex-wrap gap-3">
+                  <Badge variant="secondary">+{summary.added} added</Badge>
+                  <Badge variant="secondary">{summary.removed} removed</Badge>
+                  <Badge variant="secondary">{summary.modified} modified</Badge>
+                  <Badge variant="outline">{summary.unchanged} unchanged</Badge>
+                </div>
+              )}
+              {changes && changes.length > 0 && (
+                <Collapsible>
+                  <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+                    <ChevronDown className="h-3 w-3" /> View Details ({changes.length} changes)
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <ScrollArea className="max-h-[300px] mt-2">
+                      <div className="space-y-1 text-xs">
+                        {changes.map((c: any, i: number) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <Badge variant={c.type === 'added' ? 'default' : c.type === 'removed' ? 'destructive' : 'secondary'} className="text-xs w-16 justify-center">
+                              {c.type}
+                            </Badge>
+                            <span>{c.order && `(${c.order}) `}{c.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       <h2 className="text-lg font-semibold">API Call Timeline ({logs.length})</h2>
 
       <div className="space-y-2">
