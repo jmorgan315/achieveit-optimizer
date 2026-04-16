@@ -263,6 +263,10 @@ const Index = () => {
           const dedupData = (stepResults?.dedupResults || []) as DedupRemovedDetail[];
           setDedupResults(dedupData);
 
+          // Hydrate reimport history
+          const reimportData = stepResults?.reimport as ReimportHistory | undefined;
+          setReimportHistory(reimportData ?? null);
+
           if (savedFormat === 'planItem') {
             // Direct hydration — items already in PlanItem format
             const flattenTree = (nodes: unknown[]): PlanItem[] => {
