@@ -565,6 +565,12 @@ export function PlanOptimizerStep({
                 {hasFeedback ? 'Edit Feedback' : 'Rate This Import'}
               </Button>
             )}
+            {featureFlags?.showReimport && onApplyReimport && (
+              <Button variant="outline" size="sm" onClick={() => setReimportDialogOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Re-Import
+              </Button>
+            )}
             <Button onClick={() => setShowExportDialog(true)} size="sm">
               <Download className="h-4 w-4 mr-2" />
               Export
