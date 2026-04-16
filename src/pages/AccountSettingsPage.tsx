@@ -6,8 +6,8 @@ import { Header } from '@/components/Header';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { Loader2, Save, KeyRound } from 'lucide-react';
 
@@ -16,6 +16,9 @@ export default function AccountSettingsPage() {
   const navigate = useNavigate();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [featureFlags, setFeatureFlags] = useState<Record<string, unknown>>({});
+  const [savingFlag, setSavingFlag] = useState(false);
   const [saving, setSaving] = useState(false);
   const [sendingReset, setSendingReset] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -24,13 +27,16 @@ export default function AccountSettingsPage() {
     if (!user) return;
     supabase
       .from('user_profiles')
-      .select('first_name, last_name')
+      .select('first_name, last_name, feature_flags')
       .eq('id', user.id)
       .single()
       .then(({ data }) => {
         if (data) {
           setFirstName(data.first_name ?? '');
           setLastName(data.last_name ?? '');
+          const flags = (data.feature_flags ?? {}) as Record<string, unknown>;
+          setFeatureFlags(flags);
+          setEmailNotifications(flags.email_notifications !== false);
         }
         setLoading(false);
       });
@@ -49,6 +55,26 @@ export default function AccountSettingsPage() {
       toast.success('Profile updated');
     }
     setSaving(false);
+  };
+
+  const handleToggleEmailNotifications = async (checked: boolean) => {
+    if (!user) return;
+    const previous = emailNotifications;
+    setEmailNotifications(checked);
+    setSavingFlag(true);
+    const nextFlags = { ...featureFlags, email_notifications: checked };
+    const { error } = await supabase
+      .from('user_profiles')
+      .update({ feature_flags: nextFlags })
+      .eq('id', user.id);
+    if (error) {
+      setEmailNotifications(previous);
+      toast.error('Failed to update preference');
+    } else {
+      setFeatureFlags(nextFlags);
+      toast.success(checked ? 'Email notifications enabled' : 'Email notifications disabled');
+    }
+    setSavingFlag(false);
   };
 
   const handleResetPassword = async () => {
@@ -120,6 +146,31 @@ export default function AccountSettingsPage() {
                 </Button>
               </>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Notifications</CardTitle>
+            <CardDescription>Control how we contact you</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="emailNotifications" className="text-sm font-medium">
+                  Email me when imports complete
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Receive an email when a plan import finishes processing or fails.
+                </p>
+              </div>
+              <Switch
+                id="emailNotifications"
+                checked={emailNotifications}
+                onCheckedChange={handleToggleEmailNotifications}
+                disabled={loading || savingFlag}
+              />
+            </div>
           </CardContent>
         </Card>
 
