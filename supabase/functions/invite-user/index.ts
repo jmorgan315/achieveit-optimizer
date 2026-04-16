@@ -46,8 +46,13 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Determine site URL for redirect
+    const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || Deno.env.get("SITE_URL") || supabaseUrl.replace('.supabase.co', '.lovable.app');
+
     // Invite user via admin API
-    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email);
+    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${origin}/reset-password`,
+    });
     if (error) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },

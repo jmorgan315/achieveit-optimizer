@@ -16,6 +16,10 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
 
+  // Detect invite vs reset from URL hash
+  const isInvite = window.location.hash.includes('type=invite') ||
+    window.location.hash.includes('type=magiclink');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
