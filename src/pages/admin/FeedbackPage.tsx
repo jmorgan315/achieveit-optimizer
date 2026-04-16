@@ -77,9 +77,13 @@ export default function FeedbackPage() {
         .select('*')
         .order('created_at', { ascending: false });
 
+      let feedbackRows: FeedbackRow[] = [];
+      const feedbackSessionIds = new Set<string>();
+
       if (feedback && feedback.length > 0) {
         const sessionIds = [...new Set(feedback.map(f => f.session_id))];
         const userIds = [...new Set(feedback.map(f => f.user_id))];
+        sessionIds.forEach(id => feedbackSessionIds.add(id));
 
         const [{ data: sessions }, { data: profiles }] = await Promise.all([
           supabase.from('processing_sessions').select('id, org_name, document_name, step_results').in('id', sessionIds),
@@ -89,7 +93,7 @@ export default function FeedbackPage() {
         const sessionMap = new Map((sessions || []).map(s => [s.id, s]));
         const profileMap = new Map((profiles || []).map(p => [p.id, p]));
 
-        setRows(feedback.map(f => {
+        feedbackRows = feedback.map(f => {
           const s = sessionMap.get(f.session_id);
           const p = profileMap.get(f.user_id);
           const stepResults = s?.step_results as Record<string, unknown> | null;
@@ -100,9 +104,54 @@ export default function FeedbackPage() {
             document_name: s?.document_name ?? null,
             user_email: p?.email ?? null,
             reimport: reimport ?? null,
+            hasFeedback: true,
           };
-        }));
+        });
       }
+
+      // Fetch sessions with reimports but no feedback row
+      const { data: reimportSessions } = await supabase
+        .from('processing_sessions')
+        .select('id, user_id, org_name, document_name, step_results, created_at')
+        .not('step_results->reimport', 'is', null);
+
+      if (reimportSessions && reimportSessions.length > 0) {
+        const reimportOnly = reimportSessions.filter(s => !feedbackSessionIds.has(s.id));
+        if (reimportOnly.length > 0) {
+          const roUserIds = [...new Set(reimportOnly.map(s => s.user_id).filter(Boolean))] as string[];
+          const { data: roProfiles } = roUserIds.length > 0
+            ? await supabase.from('user_profiles').select('id, email').in('id', roUserIds)
+            : { data: [] as { id: string; email: string | null }[] };
+          const roProfileMap = new Map((roProfiles || []).map(p => [p.id, p]));
+
+          for (const s of reimportOnly) {
+            const stepResults = s.step_results as Record<string, unknown> | null;
+            const reimport = stepResults?.reimport as { summary: ReimportSummary; changes: ReimportChange[]; timestamp?: string } | undefined;
+            if (!reimport) continue;
+            const p = s.user_id ? roProfileMap.get(s.user_id) : null;
+            feedbackRows.push({
+              id: s.id,
+              session_id: s.id,
+              user_id: s.user_id ?? '',
+              expected_item_count: null,
+              actual_item_count: 0,
+              item_count_delta: null,
+              hierarchy_rating: null,
+              overall_rating: null,
+              time_saved: null,
+              open_feedback: null,
+              created_at: reimport.timestamp ?? s.created_at,
+              org_name: s.org_name ?? null,
+              document_name: s.document_name ?? null,
+              user_email: p?.email ?? null,
+              reimport,
+              hasFeedback: false,
+            });
+          }
+        }
+      }
+
+      setRows(feedbackRows);
 
       const { data: general } = await supabase
         .from('general_feedback')
