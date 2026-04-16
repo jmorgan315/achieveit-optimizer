@@ -249,7 +249,7 @@ export default function FeedbackPage() {
 
       <Tabs defaultValue="import">
         <TabsList>
-          <TabsTrigger value="import">Import Feedback ({rows.length})</TabsTrigger>
+          <TabsTrigger value="import">Import Signals ({rows.length})</TabsTrigger>
           <TabsTrigger value="general">General Feedback ({generalRows.length})</TabsTrigger>
         </TabsList>
 
