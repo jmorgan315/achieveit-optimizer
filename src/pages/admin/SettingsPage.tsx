@@ -5,9 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Trash2, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { format } from 'date-fns';
 import { invalidateModelRatesCache } from '@/hooks/useModelRates';
+
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  'claude-opus-4-6': 'Claude Opus 4.6',
+  'claude-sonnet-4-20250514': 'Claude Sonnet 4',
+};
 
 interface RateEntry {
   model: string;
