@@ -1,49 +1,42 @@
 
 
-## Plan: Invite Tracking, Status Badges, Resend + Fix useNavigate Bug
+## Plan: Fix first_login_at Not Being Set for Invited Users
 
-### Bug Fix (Critical)
-**`src/hooks/useAuth.ts`**: `useNavigate()` is called inside `useEffect` (line 81 in previous version). Move it to top-level of the hook.
+### Root Cause
+The invite flow bypasses `useAuth` entirely (`ResetPasswordPage` is standalone). After password set, navigation to `/` may trigger a `PASSWORD_RECOVERY` replay in `onAuthStateChange`, causing an early return that skips `checkDomainAndProfile`. The `first_login_at` update never runs.
 
-### 1. Database Migration
+### Fix (3 changes)
 
-Add two columns to `user_profiles`:
-```sql
-ALTER TABLE public.user_profiles
-  ADD COLUMN IF NOT EXISTS invited_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMPTZ;
+**1. `src/pages/ResetPasswordPage.tsx` — Set `first_login_at` after password is set**
+After successful `updateUser({ password })`, immediately call:
+```ts
+await supabase.from('user_profiles')
+  .update({ first_login_at: new Date().toISOString() })
+  .eq('id', (await supabase.auth.getUser()).data.user?.id);
 ```
+This is the primary fix — catches invite users directly at the moment they complete onboarding.
 
-No new table — audit entries go into the existing `user_activity_log` table using `activity_type = 'user_invited'` / `'invite_resent'` and `metadata = { target_email, target_user_id }`.
+**2. `src/hooks/useAuth.ts` — Don't skip profile check after PASSWORD_RECOVERY redirect**
+Currently line 94-97 returns early. Change to: navigate to `/reset-password` but still fall through to `checkDomainAndProfile` so subsequent events (after user sets password and returns) aren't blocked. Also add `.then()` error logging to the `first_login_at` update call.
 
-### 2. Edge Functions
-
-**`invite-user/index.ts`**: After successful invite, set `invited_at = NOW()` on the user's profile and insert into `user_activity_log` with `activity_type: 'user_invited'`.
-
-**`admin-user-actions/index.ts`**: Add `resend_invite` action that calls `adminClient.auth.admin.generateLink({ type: 'invite', email, options: { redirectTo } })`, updates `invited_at`, and logs `invite_resent` to `user_activity_log`.
-
-### 3. `src/hooks/useAuth.ts`
-
-- Move `useNavigate()` to top of hook (bug fix)
-- In `checkDomainAndProfile`, select `first_login_at` alongside existing fields
-- If `first_login_at` is null, update it to `NOW()`
-
-### 4. `src/pages/admin/UsersPage.tsx`
-
-- Add `invited_at` and `first_login_at` to `UserProfile` interface
-- Add "Status" column with colored badges:
-  - **Active** (green) — `first_login_at` set
-  - **Invited** (yellow) — `invited_at` set, no `first_login_at`
-  - **Pending** (gray) — neither set
-- Add "Resend Invite" dropdown item (Mail icon), visible only for "Invited" status users, calls `admin-user-actions` with `action: 'resend_invite'`
+**3. Database migration — Backfill existing users**
+```sql
+UPDATE public.user_profiles
+SET first_login_at = (
+  SELECT MIN(created_at) FROM public.user_activity_log
+  WHERE user_activity_log.user_id = user_profiles.id
+    AND activity_type = 'login'
+)
+WHERE first_login_at IS NULL
+  AND id IN (SELECT DISTINCT user_id FROM public.user_activity_log WHERE activity_type = 'login');
+```
+This fixes Edelmary and any other users who already logged in before this fix.
 
 ### Files changed
 
 | File | Change |
 |------|--------|
-| Migration SQL | Add `invited_at`, `first_login_at` columns |
-| `supabase/functions/invite-user/index.ts` | Set `invited_at`, log to `user_activity_log` |
-| `supabase/functions/admin-user-actions/index.ts` | Add `resend_invite` action |
-| `src/hooks/useAuth.ts` | Fix `useNavigate` bug, track `first_login_at` |
-| `src/pages/admin/UsersPage.tsx` | Status column + Resend Invite action |
+| `src/pages/ResetPasswordPage.tsx` | Update `first_login_at` after password set |
+| `src/hooks/useAuth.ts` | Don't skip `checkDomainAndProfile` after PASSWORD_RECOVERY; add error handling |
+| Migration SQL | Backfill `first_login_at` from activity log |
 
