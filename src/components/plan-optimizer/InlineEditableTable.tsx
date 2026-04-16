@@ -198,6 +198,7 @@ const InlineEditableRow = memo(function InlineEditableRow({
             type="dropdown"
             value={String(item.levelDepth)}
             options={levelOptions}
+            className="[&>svg:last-child]:!hidden"
             onChange={(v) => {
               const newDepth = parseInt(v, 10);
               if (onChangeLevel && newDepth !== item.levelDepth) {

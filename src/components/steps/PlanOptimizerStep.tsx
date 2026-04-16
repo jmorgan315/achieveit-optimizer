@@ -410,6 +410,12 @@ export function PlanOptimizerStep({
 
     if (position === 'inside') {
       onMoveItem(draggedId, targetId);
+      // Ensure the target parent is expanded so the user sees the nested child
+      setExpandedItems(prev => {
+        const next = new Set(prev);
+        next.add(targetId);
+        return next;
+      });
       toast({
         title: 'Item moved',
         description: `"${draggedItem.name}" is now under "${targetItem.name}"`,
