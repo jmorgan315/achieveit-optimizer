@@ -162,6 +162,34 @@ export default function UsersPage() {
     }
   };
 
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    // Try modern API first (requires focused document + secure context)
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fall through to legacy
+    }
+    // Legacy fallback — works even when document focus is contested
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      ta.style.top = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
   const handleCopyInviteLink = async (u: UserProfile) => {
     if (!u.email) return;
     setActionLoading(u.id);
@@ -176,10 +204,26 @@ export default function UsersPage() {
       if (payload?.error) throw new Error(payload.error);
       if (!payload?.action_link) throw new Error('No invite link returned');
 
-      await navigator.clipboard.writeText(payload.action_link);
-      toast.success(`Invite link copied for ${u.email}`, {
-        description: 'Paste it into Slack, email, or a message.',
-      });
+      const link = payload.action_link;
+      // Wait a tick so dropdown menu releases focus before clipboard write
+      await new Promise(r => setTimeout(r, 50));
+      const copied = await copyToClipboard(link);
+
+      if (copied) {
+        toast.success(`Invite link copied for ${u.email}`, {
+          description: 'Paste it into Slack, email, or a message.',
+        });
+      } else {
+        // Last resort — show link in a prompt the user can copy manually
+        toast.message(`Invite link for ${u.email}`, {
+          description: link,
+          duration: 30000,
+          action: {
+            label: 'Copy',
+            onClick: () => copyToClipboard(link),
+          },
+        });
+      }
       // Reflect invited status if it was a fresh invite
       setUsers(prev => prev.map(x => x.id === u.id && !x.invited_at ? { ...x, invited_at: new Date().toISOString() } : x));
     } catch (err: any) {
