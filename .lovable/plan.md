@@ -1,105 +1,73 @@
 
 
-## Plan: Route Invites & Password Resets Through Resend
+## Plan: Revert Auth Emails to Supabase Built-in (Keep Resend for Notifications)
 
-### Answer to Q1: Supabase SMTP + Resend
-**Not directly configurable from Lovable.** Lovable Cloud doesn't expose Supabase Auth's SMTP settings in the UI — that lives in the Supabase dashboard's Authentication → Email settings, which Cloud projects don't surface. So **option 2 (your proposed approach) is the path**: keep using `generateLink()` to mint the secure tokens, then ship the email ourselves via the Resend gateway.
+### Strategy
+Revert invite + password reset flows to Supabase's built-in email senders (which work for any `@achieveit.com` recipient via Supabase's default SMTP). Keep `send-notification` on Resend (only emails session owner = jmorgan, works in sandbox). Keep `_shared/auth-emails.ts` dormant for future re-activation. Add Path B logging hygiene everywhere.
 
-This is actually cleaner than SMTP — same gateway as `send-notification`, consistent branding, all email logic in one place.
+### Changes
 
-### Architecture
+**1. `supabase/functions/invite-user/index.ts`**
+- Replace `generateLink({type:"invite"})` + `sendAuthEmail` with:
+  ```ts
+  const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+    redirectTo: `${origin}/reset-password`,
+  });
+  ```
+- `data.user.id` still available for `invited_at` update + activity log.
+- Remove the `buildInviteEmail` / `sendAuthEmail` imports.
+- Add `console.error("[invite-user] ...", error)` before each non-2xx return.
 
-Create a shared template helper, refactor both edge functions to use `generateLink()` + Resend.
+**2. `supabase/functions/admin-user-actions/index.ts`**
+- **`reset_password`**: Replace `generateLink({type:"recovery"})` + `sendAuthEmail` with:
+  ```ts
+  const { error } = await adminClient.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo: `${origin}/reset-password` },
+  });
+  ```
+  Wait — `generateLink` alone doesn't send. Need `resetPasswordForEmail` on a non-admin client. Use the anon `callerClient` pattern, or simpler: use `adminClient.auth.resetPasswordForEmail(email, { redirectTo })` (works on the auth namespace, not admin). Will verify the exact API during implementation — fallback is to construct an anon client and call `auth.resetPasswordForEmail`.
+- **`resend_invite`**: Same swap — use `inviteUserByEmail(email, { redirectTo })`. Keep `invited_at` update + activity log.
+- **`delete_user`**: Untouched.
+- Add `console.error` before each non-2xx return.
 
-```
-supabase/functions/
-├── _shared/
-│   └── auth-emails.ts          NEW — shared Resend sender + HTML templates
-├── invite-user/index.ts        EDIT — use generateLink({type:"invite"}) + sendAuthEmail()
-├── admin-user-actions/index.ts EDIT — same for invite/recovery actions
-└── send-notification/index.ts  unchanged (pattern reference)
-```
+**3. `supabase/functions/send-notification/index.ts`**
+- No changes. Stays on Resend.
 
-### 1. New `_shared/auth-emails.ts`
+**4. `supabase/functions/request-password-reset/index.ts`**
+- Self-service forgot-password. Currently uses Resend. Two options:
+  - **(a)** Revert to Supabase built-in: use anon client `auth.resetPasswordForEmail(email, { redirectTo })`. Keeps the rate limit + always-200 enumeration protection.
+  - **(b)** Leave on Resend — but it would only deliver to jmorgan, breaking forgot-password for anyone else.
+- Going with **(a)** — consistent with the revert intent. Add `console.error` for failures (still return 200 to client).
 
-Exports:
-- `sendAuthEmail({ to, subject, html })` — POSTs to `https://connector-gateway.lovable.dev/resend/emails` with `LOVABLE_API_KEY` + `RESEND_API_KEY` headers, `from: "AchieveIt <onboarding@resend.dev>"`. Returns `{ ok, id?, error? }`.
-- `buildInviteEmail(actionLink, recipientEmail)` → `{ subject, html }` — "You've been invited to AchieveIt", CTA "Accept invitation" linking to `actionLink`.
-- `buildRecoveryEmail(actionLink, recipientEmail)` → `{ subject, html }` — "Reset your AchieveIt password", CTA "Reset password".
-- Same brand styling as `send-notification` (white card, green CTA `#10b981`, footer note).
-- `escapeHtml` helper.
+**5. `src/hooks/useAuth.ts`**
+- `resetPassword()` currently invokes `request-password-reset` edge function. Keep that wiring — the edge function itself now uses Supabase built-in, so the client doesn't need to change.
 
-### 2. Refactor `invite-user/index.ts`
+**6. `_shared/auth-emails.ts` + `FROM_ADDRESS`**
+- Keep file as-is. No imports from invite-user / admin-user-actions / request-password-reset after revert. Still imported by `send-notification`.
 
-Replace:
-```ts
-adminClient.auth.admin.inviteUserByEmail(email, { redirectTo })
-```
-with:
-```ts
-const { data, error } = await adminClient.auth.admin.generateLink({
-  type: "invite",
-  email,
-  options: { redirectTo: `${origin}/reset-password` },
-});
-// data.properties.action_link → secure tokenized URL
-const { subject, html } = buildInviteEmail(data.properties.action_link, email);
-const send = await sendAuthEmail({ to: email, subject, html });
-if (!send.ok) return json({ error: `Email send failed: ${send.error}` }, 502);
-```
-- Keep the `invited_at` profile update (uses `data.user.id` — `generateLink` returns this when creating a new user).
-- Keep the activity log entry.
-- Keep super_admin gate and @achieveit.com domain check.
+**7. `src/pages/admin/UsersPage.tsx`** (Path B UI)
+- Surface specific error text from edge function responses in toasts (e.g., "Email send failed: …") instead of generic "Failed to invite user". Read `error` field from response body when non-2xx.
 
-### 3. Refactor `admin-user-actions/index.ts`
-
-**`reset_password` action**: Currently calls `generateLink({type:"recovery"})` *and* `resetPasswordForEmail()` (the second call is what actually sends mail). Replace with:
-```ts
-const { data, error } = await adminClient.auth.admin.generateLink({
-  type: "recovery",
-  email,
-  options: { redirectTo: `${origin}/reset-password` },
-});
-const { subject, html } = buildRecoveryEmail(data.properties.action_link, email);
-await sendAuthEmail({ to: email, subject, html });
-```
-
-**`resend_invite` action**: Currently calls `generateLink({type:"invite"})` but never sends — that's a latent bug (admins clicking "Resend Invite" today probably get nothing). Same fix: capture `action_link`, send via Resend.
-
-`delete_user` action stays untouched.
-
-### 4. Self-service password reset (LoginPage / "Forgot password")
-
-Need to check: does the app have a user-initiated "Forgot password?" flow that calls `supabase.auth.resetPasswordForEmail()` directly from the client? If so, that's the one place where Supabase's default email still ships. Two options:
-- **(a)** Leave as-is (relies on Supabase's built-in recovery email — works but inconsistent branding).
-- **(b)** Create a new `request-password-reset` edge function (no auth required, rate-limited by email) that does the same `generateLink` + Resend dance, and have the login page call that instead.
-
-I'll check `LoginPage.tsx` for an existing forgot-password call site during implementation. If present, I'll wire it to a new `request-password-reset` function for consistency. If not, skip it.
-
-### 5. Config
-
-Add to `supabase/config.toml` if a new function is created:
-```toml
-[functions.request-password-reset]
-verify_jwt = false
-```
-The two existing functions already have `verify_jwt = false`.
-
-### Trade-offs & notes
-
-- **Sandbox sender caveat unchanged**: `onboarding@resend.dev` only delivers to your Resend account email. Same limitation as `send-notification` — verify `achieveit.com` in Resend later to send to all users.
-- **Token validity**: `generateLink` returns links valid for the same TTL as the built-in flow (~24h invite, ~1h recovery — set in Supabase auth config).
-- **Failure mode**: If Resend send fails, the user is created/the recovery token is minted but no email arrives. We return a 502 so the admin sees it and can retry via "Resend Invite".
-- **No DB migration needed.**
+**8. `supabase/config.toml`**
+- No changes needed. `request-password-reset` keeps `verify_jwt = false`.
 
 ### Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/_shared/auth-emails.ts` | New — Resend sender + invite/recovery HTML templates |
-| `supabase/functions/invite-user/index.ts` | Swap `inviteUserByEmail` → `generateLink` + `sendAuthEmail` |
-| `supabase/functions/admin-user-actions/index.ts` | Same swap for `reset_password` and `resend_invite` actions |
-| `supabase/functions/request-password-reset/index.ts` | New, **only if** LoginPage has a forgot-password flow |
-| `supabase/config.toml` | Add `verify_jwt = false` for new function (if created) |
-| `src/components/LoginPage.tsx` | Wire forgot-password to new function (if applicable) |
+| `supabase/functions/invite-user/index.ts` | Revert to `inviteUserByEmail`; add console.error logging |
+| `supabase/functions/admin-user-actions/index.ts` | Revert `reset_password` + `resend_invite` to Supabase built-in; add logging |
+| `supabase/functions/request-password-reset/index.ts` | Revert to anon client `resetPasswordForEmail`; keep rate limit + enumeration protection; add server-side logging |
+| `src/pages/admin/UsersPage.tsx` | Surface edge function error details in admin toasts |
+| `supabase/functions/send-notification/index.ts` | Untouched |
+| `supabase/functions/_shared/auth-emails.ts` | Untouched (dormant for future re-activation) |
+| `.lovable/memory/features/auth-email-routing.md` | Update to reflect: notifications on Resend, auth emails on Supabase default until domain verified |
+| `.lovable/memory/index.md` | Update reference summary line |
+
+### Trade-offs
+- **Branding regression**: Invite + password reset emails revert to Supabase's plain default templates (no green AchieveIt CTA). Acceptable until domain verification.
+- **Sender**: Supabase default emails ship from `noreply@mail.app.supabase.io` — functional but unbranded.
+- **Re-activation path**: Once `achieveit.com` is verified in Resend, swap back to the `generateLink` + `sendAuthEmail` pattern (already in git history) and update `FROM_ADDRESS` to `notify@achieveit.com`.
 
