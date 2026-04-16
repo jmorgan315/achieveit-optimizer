@@ -188,6 +188,8 @@ export default function UsersPage() {
       setActionLoading(null);
     }
   };
+
+  const handleDeleteUser = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
