@@ -5,7 +5,8 @@ export type ActivityType =
   | 'session_start'
   | 'session_complete'
   | 'export'
-  | 'feedback_submitted';
+  | 'feedback_submitted'
+  | 'reimport_applied';
 
 export async function logActivity(
   activityType: ActivityType,
