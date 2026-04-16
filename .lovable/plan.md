@@ -1,41 +1,49 @@
 
 
-## Analysis: Invite Link Flow
+## Plan: Invite Tracking, Status Badges, Resend + Fix useNavigate Bug
 
-**Current state:** There's a gap. Here's what happens today:
+### Bug Fix (Critical)
+**`src/hooks/useAuth.ts`**: `useNavigate()` is called inside `useEffect` (line 81 in previous version). Move it to top-level of the hook.
 
-1. `invite-user` edge function calls `adminClient.auth.admin.inviteUserByEmail(email)` — this sends an invite email with a link
-2. Supabase's default invite link redirects to the **site URL** (project root `/`) with a `type=invite` token in the URL hash
-3. The app's `onAuthStateChange` in `useAuth.ts` fires, but it doesn't check for `PASSWORD_RECOVERY` or `INITIAL_SESSION` events — it just runs the normal profile check
-4. The user gets auto-logged in (Supabase processes the token automatically), but **never gets prompted to set a password**
-5. The `/reset-password` page exists but is only linked from the "Forgot password" flow — invite users are never sent there
+### 1. Database Migration
 
-**The `/reset-password` page already has the right UI** — it calls `supabase.auth.updateUser({ password })`. We just need to route invited users to it.
+Add two columns to `user_profiles`:
+```sql
+ALTER TABLE public.user_profiles
+  ADD COLUMN IF NOT EXISTS invited_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMPTZ;
+```
 
-## Plan: Wire Invite Link to Password Setup
+No new table — audit entries go into the existing `user_activity_log` table using `activity_type = 'user_invited'` / `'invite_resent'` and `metadata = { target_email, target_user_id }`.
 
-### File: `supabase/config.toml`
-- No changes needed. The `inviteUserByEmail` API uses the project's site URL by default. We need to configure a redirect URL in the invite call instead.
+### 2. Edge Functions
 
-### File: `supabase/functions/invite-user/index.ts`
-- Add `redirectTo` option to the `inviteUserByEmail` call pointing to `${siteUrl}/reset-password` so invited users land directly on the password form
-- Get `siteUrl` from the request origin header or a configured value
+**`invite-user/index.ts`**: After successful invite, set `invited_at = NOW()` on the user's profile and insert into `user_activity_log` with `activity_type: 'user_invited'`.
 
-### File: `src/pages/ResetPasswordPage.tsx`
-- Detect whether this is an invite flow vs password reset (check URL hash for `type=invite` or listen for auth event)
-- Adjust title/description: "Welcome! Set your password" for invites vs "Set New Password" for resets
-- No logic changes needed — `updateUser({ password })` works for both flows
+**`admin-user-actions/index.ts`**: Add `resend_invite` action that calls `adminClient.auth.admin.generateLink({ type: 'invite', email, options: { redirectTo } })`, updates `invited_at`, and logs `invite_resent` to `user_activity_log`.
 
-### File: `src/hooks/useAuth.ts`
-- In `onAuthStateChange`, detect `PASSWORD_RECOVERY` event (Supabase fires this for both reset and invite token exchanges)
-- When detected, redirect to `/reset-password` so the user sees the form instead of the home page
-- This handles the case where the token is exchanged at `/` and the user needs to be routed
+### 3. `src/hooks/useAuth.ts`
 
-### Summary of changes
+- Move `useNavigate()` to top of hook (bug fix)
+- In `checkDomainAndProfile`, select `first_login_at` alongside existing fields
+- If `first_login_at` is null, update it to `NOW()`
+
+### 4. `src/pages/admin/UsersPage.tsx`
+
+- Add `invited_at` and `first_login_at` to `UserProfile` interface
+- Add "Status" column with colored badges:
+  - **Active** (green) — `first_login_at` set
+  - **Invited** (yellow) — `invited_at` set, no `first_login_at`
+  - **Pending** (gray) — neither set
+- Add "Resend Invite" dropdown item (Mail icon), visible only for "Invited" status users, calls `admin-user-actions` with `action: 'resend_invite'`
+
+### Files changed
 
 | File | Change |
 |------|--------|
-| `supabase/functions/invite-user/index.ts` | Add `redirectTo` to invite call |
-| `src/hooks/useAuth.ts` | Detect `PASSWORD_RECOVERY` event, redirect to `/reset-password` |
-| `src/pages/ResetPasswordPage.tsx` | Context-aware title for invite vs reset |
+| Migration SQL | Add `invited_at`, `first_login_at` columns |
+| `supabase/functions/invite-user/index.ts` | Set `invited_at`, log to `user_activity_log` |
+| `supabase/functions/admin-user-actions/index.ts` | Add `resend_invite` action |
+| `src/hooks/useAuth.ts` | Fix `useNavigate` bug, track `first_login_at` |
+| `src/pages/admin/UsersPage.tsx` | Status column + Resend Invite action |
 
