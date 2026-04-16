@@ -135,6 +135,7 @@ export function PlanOptimizerStep({
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [hasFeedback, setHasFeedback] = useState(false);
+  const [reimportDialogOpen, setReimportDialogOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [includeConfidence, setIncludeConfidence] = useState(false);
   const [showConfidence, setShowConfidence] = useState(() => {
