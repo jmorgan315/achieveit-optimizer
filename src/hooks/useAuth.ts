@@ -145,5 +145,7 @@ export function useAuth() {
     return await supabase.auth.signOut();
   };
 
-  return { user, role, isAdmin, isSuperAdmin, displayName, featureFlags, loading, domainError, signIn, signUp, resetPassword, signOut };
+  const isFullyLoaded = !loading && profileLoaded;
+
+  return { user, role, isAdmin, isSuperAdmin, displayName, featureFlags, loading: !isFullyLoaded, domainError, signIn, signUp, resetPassword, signOut };
 }
