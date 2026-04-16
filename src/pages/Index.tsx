@@ -14,6 +14,7 @@ import { LoginPage } from '@/components/LoginPage';
 import { useAuth } from '@/hooks/useAuth';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
+import { ReimportHistory } from '@/components/plan-optimizer/ReimportHistoryCard';
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
 import { exportToExcel } from '@/utils/exportToExcel';
@@ -79,6 +80,7 @@ const Index = () => {
   const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
   const [useVisionAI, setUseVisionAI] = useState(false);
   const [dedupResults, setDedupResults] = useState<DedupRemovedDetail[]>([]);
+  const [reimportHistory, setReimportHistory] = useState<ReimportHistory | null>(null);
 
   // === Legacy OrgProfileStep state (kept for future screens) ===
   const [documentHints, setDocumentHints] = useState('');
