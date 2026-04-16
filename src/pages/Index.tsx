@@ -807,6 +807,7 @@ const Index = () => {
               orgProfile={state.orgProfile}
               sessionId={state.sessionId}
               dedupResults={dedupResults}
+              reimportHistory={reimportHistory}
               saveStatus={saveStatus}
               userId={user?.id}
               featureFlags={featureFlags}
@@ -829,6 +830,13 @@ const Index = () => {
               onApplyReimport={(newItems) => {
                 setItems(newItems, state.personMappings);
                 updateLevelsAndRecalculate(state.levels);
+                // Refresh reimport history from DB after apply
+                if (state.sessionId) {
+                  supabase.from('processing_sessions').select('step_results').eq('id', state.sessionId).single().then(({ data }) => {
+                    const sr = data?.step_results as Record<string, unknown> | null;
+                    setReimportHistory((sr?.reimport as ReimportHistory) ?? null);
+                  });
+                }
               }}
             />
           )}
