@@ -138,8 +138,9 @@ export default function ResetPasswordPage() {
               </Button>
             </div>
           ) : checkingSession ? (
-            <div className="flex justify-center py-6">
+            <div className="flex flex-col items-center justify-center py-8 space-y-3">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Setting up your account…</p>
             </div>
           ) : success ? (
             <Alert>
