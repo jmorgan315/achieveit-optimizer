@@ -256,7 +256,7 @@ export default function FeedbackPage() {
         <TabsContent value="import" className="space-y-4">
           {stats && (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.count}</div><div className="text-sm text-muted-foreground">Total Feedback</div></CardContent></Card>
+              <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.count}</div><div className="text-sm text-muted-foreground">Total Sessions</div></CardContent></Card>
               <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-warning" />{stats.avgOverall}</div><div className="text-sm text-muted-foreground">Avg Overall</div></CardContent></Card>
               <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-primary" />{stats.avgHierarchy}</div><div className="text-sm text-muted-foreground">Avg Hierarchy</div></CardContent></Card>
               <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.avgDelta}</div><div className="text-sm text-muted-foreground">Avg Item Delta</div></CardContent></Card>
