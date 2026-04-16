@@ -11,6 +11,7 @@ export function useAuth() {
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [domainError, setDomainError] = useState<string | null>(null);
 
   const isAdmin = role === 'admin' || role === 'super_admin';
@@ -23,6 +24,8 @@ export function useAuth() {
       setUser(null);
       setRole('user');
       setDomainError('Access is restricted to AchieveIt employees. Please sign in with your @achieveit.com account.');
+      setProfileLoaded(true);
+      setLoading(false);
       return;
     }
 
@@ -44,12 +47,16 @@ export function useAuth() {
         is_active: true,
       });
       setRole('user');
+      setProfileLoaded(true);
+      setLoading(false);
     } else {
       if (!profile.is_active) {
         await supabase.auth.signOut();
         setUser(null);
         setRole('user');
         setDomainError('Your account has been deactivated. Please contact your administrator.');
+        setProfileLoaded(true);
+        setLoading(false);
         return;
       }
       const profileRole = (profile as any).role as string | undefined;
@@ -62,6 +69,8 @@ export function useAuth() {
       setDisplayName(name || null);
       const flags = (profile as any).feature_flags;
       setFeatureFlags(typeof flags === 'object' && flags !== null ? flags : {});
+      setProfileLoaded(true);
+      setLoading(false);
     }
   }, []);
 
@@ -71,7 +80,6 @@ export function useAuth() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      setLoading(false);
       if (currentUser) {
         checkDomainAndProfile(currentUser);
         if (prevUserIdRef.current !== currentUser.id) {
@@ -80,6 +88,8 @@ export function useAuth() {
         }
       } else {
         setRole('user');
+        setProfileLoaded(true);
+        setLoading(false);
         prevUserIdRef.current = null;
       }
     });
@@ -87,9 +97,11 @@ export function useAuth() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      setLoading(false);
       if (currentUser) {
         checkDomainAndProfile(currentUser);
+      } else {
+        setProfileLoaded(true);
+        setLoading(false);
       }
     });
 
@@ -137,5 +149,7 @@ export function useAuth() {
     return await supabase.auth.signOut();
   };
 
-  return { user, role, isAdmin, isSuperAdmin, displayName, featureFlags, loading, domainError, signIn, signUp, resetPassword, signOut };
+  const isFullyLoaded = !loading && profileLoaded;
+
+  return { user, role, isAdmin, isSuperAdmin, displayName, featureFlags, loading: !isFullyLoaded, domainError, signIn, signUp, resetPassword, signOut };
 }
