@@ -1,69 +1,53 @@
 
 
-## Diagnosis
-- First invite to `marketing@achieveit.com` at 18:45:13 → **succeeded** (status 200, hook ran). User probably needs to check spam.
-- Resend invite at 18:46:41 → **429 over_email_send_rate_limit**. Supabase's shared default SMTP throttles at ~2-4/hour.
-- Our revert to Supabase built-in solved Resend's sandbox-recipient problem but introduced this new throttling problem.
+## Plan: Two onboarding error fixes
 
-## Recommendation: Move to Lovable's managed email infrastructure
+### Diagnosis
 
-Lovable Cloud has a built-in branded email system that uses a verified subdomain (e.g. `notify.achieveit.com`) under Lovable's nameservers. This eliminates BOTH problems we've been juggling:
-- No Resend sandbox recipient restriction (delivers to any address)
-- No Supabase shared-SMTP rate limit (uses our own dedicated sender)
-- Branded `from:` address out of the box
-- Custom HTML templates with auto-applied AchieveIt styling
+**(1) Email rate limit on sign-up** — Yes, this is Supabase's default auth SMTP rate limit (~2-4/hour on shared sender). Cannot be raised via Lovable Cloud config — only resolved by configuring a verified email domain (which the user can't do yet, no DNS access). So the right fix right now is a friendly error message at the UI layer.
 
-It also removes the dormant Resend complexity entirely for auth emails.
+The error currently surfaces in `LoginPage.tsx` via `setError(result.error.message)` (line ~62), which displays the raw Supabase string `"email rate limit exceeded"`. We intercept it in `useAuth.signUp` before returning and translate it.
 
-## Plan
+**(2) Auth Session Missing** — Found the surface. `ResetPasswordPage.tsx` calls `supabase.auth.updateUser({ password })` (line 37) **without first verifying that a session was established from the URL hash tokens**. If the invite/recovery link is expired, malformed, or already consumed (clicked twice), Supabase returns the cryptic `"Auth session missing!"` error. There's no pre-check, no friendly message, and no path back to login.
 
-### 1. Set up email domain (one-time, requires DNS)
-Open the email domain setup dialog. Steps inside the dialog:
-- Pick subdomain (default `notify` → sender becomes `notify@achieveit.com`)
-- Add the 2 NS records shown at the achieveit.com DNS provider
-- Wait for verification (DNS propagation, usually <1hr)
+A secondary surface: `useAuth` swallows nothing here — but `onAuthStateChange` only fires `PASSWORD_RECOVERY` on a valid token. If the token has expired, no event fires, the page just sits there, then `updateUser` fails.
 
-DNS verification doesn't block scaffolding — we can build the templates and deploy immediately.
+### Changes
 
-### 2. Scaffold AchieveIt-branded auth email templates
-Generates 6 React Email templates (signup, recovery, invite, magic-link, email-change, reauthentication) plus the `auth-email-hook` edge function that intercepts ALL Supabase auth emails. Auto-styled with:
-- AchieveIt green primary button
-- Poppins font
-- AchieveIt logo (from `public/`) at top of each email
-- Copy adapted to AchieveIt voice ("Welcome to AchieveIt Plan Optimizer", etc.)
+**File 1: `src/hooks/useAuth.ts`** — translate auth errors in both `signIn` and `signUp` (and pass through `resetPassword`):
 
-### 3. Deploy the hook
-Once `auth-email-hook` is deployed, ALL Supabase-issued auth emails (invites, password resets, forgot-password) automatically route through it — no changes needed to `invite-user`, `admin-user-actions`, or `request-password-reset`. They keep calling `inviteUserByEmail` / `resetPasswordForEmail`, but Supabase routes the actual delivery through our branded templates instead of the default shared sender.
+Add a small helper `translateAuthError(message)`:
+- `email rate limit exceeded` / `over_email_send_rate_limit` → "Too many sign-up attempts right now. Please wait a few minutes and try again, or ask your administrator to send you an invite link."
+- `auth session missing` / `session_not_found` → "Your link has expired or was already used. Request a new one or sign in with your email and password."
+- `invalid login credentials` → "Incorrect email or password."
+- `user already registered` → "An account with this email already exists. Try signing in instead."
+- `email not confirmed` → "Please check your email and confirm your address before signing in."
+- Default: pass message through.
 
-### 4. Cleanup (after DNS verifies)
-- Remove dormant `_shared/auth-emails.ts` (Resend-based) — no longer needed for auth
-- Decide what to do with `send-notification` (still on Resend gateway)
-   - Option A: Migrate it too → use Lovable's `scaffold_transactional_email` (consistent infrastructure, same verified domain)
-   - Option B: Leave on Resend for now (works fine for the single recipient case)
-- Disconnect Resend connector if no longer used
+Apply in `signIn`, `signUp`, `resetPassword` return paths.
 
-### 5. What stays the same
-- `useAuth.resetPassword()` still calls `request-password-reset` edge function
-- `request-password-reset` still uses anon-client `resetPasswordForEmail` with rate-limit + enumeration protection — but emails now ship via the branded hook
-- All existing UI flows (Users admin page, Forgot password link) unchanged
+**File 2: `src/pages/ResetPasswordPage.tsx`** — add session detection + expired-link handling:
 
-## Immediate workaround (while we set this up)
-Tell user to:
-1. Check spam folder for original 18:45:13 invite — it likely arrived
-2. Wait ~1 hour before retrying resend (rate limit resets)
+1. On mount, check URL hash for `error=` / `error_code=otp_expired` / `error_description=` (Supabase puts these there when a link is bad). If present → render expired-link state immediately.
+2. Wait briefly for `onAuthStateChange` to fire `PASSWORD_RECOVERY` / `SIGNED_IN`. If after ~1.5s no session exists AND no recovery token in hash → render expired-link state.
+3. In `handleSubmit`, if `updateUser` returns an error containing `session` / `Auth session missing` → switch to expired-link state instead of showing raw error.
+4. Expired-link state shows:
+   - Heading: "This link has expired"
+   - Message: "Your invite or password reset link is no longer valid. Links expire after a short time and can only be used once."
+   - Two buttons: **"Request a new link"** → `navigate('/')` (login page has Forgot password) and **"Back to sign in"** → `navigate('/')`.
 
-## Files affected
+**File 3: `src/components/LoginPage.tsx`** — minor: when `error` contains "rate limit" or "too many", also surface a hint pointing to "ask your administrator for an invite link" (already handled by useAuth translation, just verify display works — no code change beyond what propagates from useAuth).
+
+### Files affected
 | File | Change |
 |------|--------|
-| New: `supabase/functions/auth-email-hook/index.ts` | Webhook handler routing all auth emails through queue |
-| New: `supabase/functions/_shared/email-templates/*.tsx` | 6 React Email templates, AchieveIt branded |
-| New: `email_send_log`, `email_send_state`, `suppressed_emails`, `email_unsubscribe_tokens` tables, `auth_emails` + `transactional_emails` pgmq queues, pg_cron job | Created automatically by infra setup |
-| `_shared/auth-emails.ts` | Delete (after migration confirmed working) |
-| `invite-user/index.ts`, `admin-user-actions/index.ts`, `request-password-reset/index.ts` | No changes needed — they keep calling Supabase native methods, hook intercepts |
-| `.lovable/memory/features/auth-email-routing.md` | Update to reflect managed email infra |
+| `src/hooks/useAuth.ts` | Add `translateAuthError` helper, apply in signIn/signUp/resetPassword |
+| `src/pages/ResetPasswordPage.tsx` | Detect missing/expired session, render expired-link UI with recovery actions |
 
-## What I need from you
-Confirm: **proceed with email domain setup?** You'll need DNS access to achieveit.com to add 2 NS records.
+No DB changes. No edge function changes. No memory updates needed — both are pure UI/error-handling refinements consistent with existing patterns (useAuth already wraps Supabase errors in `{error: {message}}`).
 
-If yes, I'll open the email setup dialog as the first step, then scaffold + deploy the templates. After you complete the dialog and DNS verifies, invites and password resets become branded and unthrottled automatically.
+### What this does NOT do
+- Does NOT increase the Supabase rate limit (impossible without domain setup).
+- Does NOT auto-fall-back from sign-up to invite-link generation (separate flow; the user can use admin "Copy Invite Link" already).
+- Does NOT touch the working `Copy Invite Link` admin flow.
 
