@@ -76,7 +76,6 @@ export function useAuth() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      setLoading(false);
       if (currentUser) {
         checkDomainAndProfile(currentUser);
         if (prevUserIdRef.current !== currentUser.id) {
@@ -85,6 +84,8 @@ export function useAuth() {
         }
       } else {
         setRole('user');
+        setProfileLoaded(true);
+        setLoading(false);
         prevUserIdRef.current = null;
       }
     });
@@ -92,9 +93,11 @@ export function useAuth() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      setLoading(false);
       if (currentUser) {
         checkDomainAndProfile(currentUser);
+      } else {
+        setProfileLoaded(true);
+        setLoading(false);
       }
     });
 
