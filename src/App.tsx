@@ -15,6 +15,7 @@ import ApiLogsPage from "./pages/admin/ApiLogsPage";
 import UsersPage from "./pages/admin/UsersPage";
 import FeedbackPage from "./pages/admin/FeedbackPage";
 import ActivityPage from "./pages/admin/ActivityPage";
+import SettingsPage from "./pages/admin/SettingsPage";
 
 const queryClient = new QueryClient();
 
@@ -37,6 +38,7 @@ const App = () => (
               <Route path="users" element={<UsersPage />} />
               <Route path="feedback" element={<FeedbackPage />} />
               <Route path="activity" element={<ActivityPage />} />
+              <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Route>
           <Route path="*" element={<NotFound />} />
