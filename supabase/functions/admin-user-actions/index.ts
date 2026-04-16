@@ -59,6 +59,38 @@ Deno.serve(async (req) => {
       return json({ success: true });
     }
 
+    if (action === "resend_invite") {
+      if (!email || typeof email !== "string") {
+        return json({ error: "Email is required" }, 400);
+      }
+
+      const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || Deno.env.get("SITE_URL") || supabaseUrl.replace('.supabase.co', '.lovable.app');
+
+      const { error } = await adminClient.auth.admin.generateLink({
+        type: "invite",
+        email,
+        options: { redirectTo: `${origin}/reset-password` },
+      });
+      if (error) return json({ error: error.message }, 400);
+
+      // Update invited_at
+      if (userId) {
+        await adminClient
+          .from("user_profiles")
+          .update({ invited_at: new Date().toISOString() })
+          .eq("id", userId);
+      }
+
+      // Log to user_activity_log
+      await adminClient.from("user_activity_log").insert({
+        user_id: caller.id,
+        activity_type: "invite_resent",
+        metadata: { target_email: email, target_user_id: userId },
+      });
+
+      return json({ success: true });
+    }
+
     if (action === "delete_user") {
       if (!userId || typeof userId !== "string") {
         return json({ error: "userId is required" }, 400);
@@ -68,7 +100,7 @@ Deno.serve(async (req) => {
       return json({ success: true });
     }
 
-    return json({ error: "Unknown action. Use 'reset_password' or 'delete_user'." }, 400);
+    return json({ error: "Unknown action. Use 'reset_password', 'resend_invite', or 'delete_user'." }, 400);
   } catch (err) {
     return json({ error: (err as Error).message }, 500);
   }

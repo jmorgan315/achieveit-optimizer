@@ -9,6 +9,12 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+
   try {
     const authHeader = req.headers.get("Authorization") ?? "";
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -21,9 +27,7 @@ Deno.serve(async (req) => {
     });
     const { data: { user: caller } } = await callerClient.auth.getUser();
     if (!caller) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Unauthorized" }, 401);
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
@@ -34,16 +38,12 @@ Deno.serve(async (req) => {
       .single();
 
     if (profile?.role !== 'super_admin') {
-      return new Response(JSON.stringify({ error: "Super admin access required" }), {
-        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Super admin access required" }, 403);
     }
 
     const { email } = await req.json();
     if (!email || typeof email !== "string" || !email.toLowerCase().endsWith("@achieveit.com")) {
-      return new Response(JSON.stringify({ error: "Only @achieveit.com emails allowed" }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: "Only @achieveit.com emails allowed" }, 400);
     }
 
     // Determine site URL for redirect
@@ -54,17 +54,24 @@ Deno.serve(async (req) => {
       redirectTo: `${origin}/reset-password`,
     });
     if (error) {
-      return new Response(JSON.stringify({ error: error.message }), {
-        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return json({ error: error.message }, 400);
     }
 
-    return new Response(JSON.stringify({ success: true, userId: data.user.id }), {
-      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    // Set invited_at on profile
+    await adminClient
+      .from("user_profiles")
+      .update({ invited_at: new Date().toISOString() })
+      .eq("id", data.user.id);
+
+    // Log to user_activity_log
+    await adminClient.from("user_activity_log").insert({
+      user_id: caller.id,
+      activity_type: "user_invited",
+      metadata: { target_email: email, target_user_id: data.user.id },
     });
+
+    return json({ success: true, userId: data.user.id });
   } catch (err) {
-    return new Response(JSON.stringify({ error: err.message }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return json({ error: (err as Error).message }, 500);
   }
 });

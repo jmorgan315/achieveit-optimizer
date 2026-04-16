@@ -21,7 +21,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { UserPlus, Loader2, MoreHorizontal, Pencil, KeyRound, Trash2 } from 'lucide-react';
+import { UserPlus, Loader2, MoreHorizontal, Pencil, KeyRound, Trash2, Mail } from 'lucide-react';
 
 interface UserProfile {
   id: string;
@@ -33,6 +33,27 @@ interface UserProfile {
   role: UserRole;
   created_at: string;
   feature_flags: Record<string, boolean>;
+  invited_at: string | null;
+  first_login_at: string | null;
+}
+
+type InviteStatus = 'active' | 'invited' | 'pending';
+
+function getInviteStatus(u: UserProfile): InviteStatus {
+  if (u.first_login_at) return 'active';
+  if (u.invited_at) return 'invited';
+  return 'pending';
+}
+
+function StatusBadge({ status }: { status: InviteStatus }) {
+  switch (status) {
+    case 'active':
+      return <Badge className="bg-green-600 hover:bg-green-700 text-white">Active</Badge>;
+    case 'invited':
+      return <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white">Invited</Badge>;
+    case 'pending':
+      return <Badge variant="outline" className="text-muted-foreground">Pending</Badge>;
+  }
 }
 
 export default function UsersPage() {
@@ -68,6 +89,8 @@ export default function UsersPage() {
         ...u,
         role: ((u as any).role as UserRole) || (u.is_admin ? 'admin' : 'user'),
         feature_flags: (typeof (u as any).feature_flags === 'object' && (u as any).feature_flags !== null ? (u as any).feature_flags : {}) as Record<string, boolean>,
+        invited_at: (u as any).invited_at ?? null,
+        first_login_at: (u as any).first_login_at ?? null,
       })));
     }
     setLoading(false);
@@ -120,6 +143,20 @@ export default function UsersPage() {
       toast.success(`Password reset email sent to ${u.email}`);
     } catch (err: any) {
       toast.error(err?.message || 'Failed to send reset email');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleResendInvite = async (u: UserProfile) => {
+    if (!u.email) return;
+    setActionLoading(u.id);
+    try {
+      await invokeAdminAction('resend_invite', u.id, u.email);
+      toast.success(`Invite resent to ${u.email}`);
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, invited_at: new Date().toISOString() } : x));
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to resend invite');
     } finally {
       setActionLoading(null);
     }
@@ -181,7 +218,6 @@ export default function UsersPage() {
     setEditSaving(false);
   };
 
-  // Inline toggle helper
   const inlineUpdate = async (userId: string, field: string, value: any) => {
     const { error } = await supabase.from('user_profiles').update({ [field]: value } as any).eq('id', userId);
     if (error) {
@@ -234,6 +270,7 @@ export default function UsersPage() {
                 <TableHead>Email</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead className="text-center">Active</TableHead>
                 <TableHead className="text-center">Feedback</TableHead>
                 <TableHead className="text-center">Re-import</TableHead>
@@ -242,50 +279,59 @@ export default function UsersPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map(u => (
-                <TableRow key={u.id} className={!u.is_active ? 'opacity-50' : ''}>
-                  <TableCell className="font-medium">{u.email ?? '—'}</TableCell>
-                  <TableCell>{[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}</TableCell>
-                  <TableCell>{roleBadge(u.role)}</TableCell>
-                  <TableCell className="text-center">
-                    <Switch checked={u.is_active} onCheckedChange={() => toggleActive(u)} disabled={!isSuperAdmin} />
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <Switch checked={u.feature_flags.showFeedback ?? false} onCheckedChange={() => toggleFlag(u, 'showFeedback')} disabled={!isSuperAdmin} />
-                  </TableCell>
-                  <TableCell className="text-center">
-                    <Switch checked={u.feature_flags.showReimport ?? false} onCheckedChange={() => toggleFlag(u, 'showReimport')} disabled={!isSuperAdmin} />
-                  </TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {new Date(u.created_at).toLocaleDateString()}
-                  </TableCell>
-                  {isSuperAdmin && (
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionLoading === u.id}>
-                            {actionLoading === u.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => openEdit(u)}>
-                            <Pencil className="h-4 w-4 mr-2" /> Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleResetPassword(u)} disabled={!u.email}>
-                            <KeyRound className="h-4 w-4 mr-2" /> Reset Password
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => setDeleteTarget(u)} className="text-destructive focus:text-destructive">
-                            <Trash2 className="h-4 w-4 mr-2" /> Delete User
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+              {users.map(u => {
+                const status = getInviteStatus(u);
+                return (
+                  <TableRow key={u.id} className={!u.is_active ? 'opacity-50' : ''}>
+                    <TableCell className="font-medium">{u.email ?? '—'}</TableCell>
+                    <TableCell>{[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}</TableCell>
+                    <TableCell>{roleBadge(u.role)}</TableCell>
+                    <TableCell><StatusBadge status={status} /></TableCell>
+                    <TableCell className="text-center">
+                      <Switch checked={u.is_active} onCheckedChange={() => toggleActive(u)} disabled={!isSuperAdmin} />
                     </TableCell>
-                  )}
-                </TableRow>
-              ))}
+                    <TableCell className="text-center">
+                      <Switch checked={u.feature_flags.showFeedback ?? false} onCheckedChange={() => toggleFlag(u, 'showFeedback')} disabled={!isSuperAdmin} />
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Switch checked={u.feature_flags.showReimport ?? false} onCheckedChange={() => toggleFlag(u, 'showReimport')} disabled={!isSuperAdmin} />
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {new Date(u.created_at).toLocaleDateString()}
+                    </TableCell>
+                    {isSuperAdmin && (
+                      <TableCell>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionLoading === u.id}>
+                              {actionLoading === u.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEdit(u)}>
+                              <Pencil className="h-4 w-4 mr-2" /> Edit
+                            </DropdownMenuItem>
+                            {status === 'invited' && (
+                              <DropdownMenuItem onClick={() => handleResendInvite(u)}>
+                                <Mail className="h-4 w-4 mr-2" /> Resend Invite
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onClick={() => handleResetPassword(u)} disabled={!u.email}>
+                              <KeyRound className="h-4 w-4 mr-2" /> Reset Password
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => setDeleteTarget(u)} className="text-destructive focus:text-destructive">
+                              <Trash2 className="h-4 w-4 mr-2" /> Delete User
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                );
+              })}
               {users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={isSuperAdmin ? 8 : 7} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={isSuperAdmin ? 9 : 8} className="text-center text-muted-foreground py-8">
                     No users found
                   </TableCell>
                 </TableRow>
