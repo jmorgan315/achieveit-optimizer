@@ -1,53 +1,41 @@
 
 
-## Plan: Show Sessions with Re-imports Even Without Feedback
+## Analysis: Invite Link Flow
 
-### Problem
-The Import Feedback tab fetches from `session_feedback` first, then enriches with session data. Sessions that were re-imported but never graded don't have a `session_feedback` row, so they never appear.
+**Current state:** There's a gap. Here's what happens today:
 
-### Solution
-After fetching feedback rows, also fetch `processing_sessions` that have `step_results->reimport` set but are NOT already represented in the feedback results. Merge these as "reimport-only" rows with empty feedback fields.
+1. `invite-user` edge function calls `adminClient.auth.admin.inviteUserByEmail(email)` — this sends an invite email with a link
+2. Supabase's default invite link redirects to the **site URL** (project root `/`) with a `type=invite` token in the URL hash
+3. The app's `onAuthStateChange` in `useAuth.ts` fires, but it doesn't check for `PASSWORD_RECOVERY` or `INITIAL_SESSION` events — it just runs the normal profile check
+4. The user gets auto-logged in (Supabase processes the token automatically), but **never gets prompted to set a password**
+5. The `/reset-password` page exists but is only linked from the "Forgot password" flow — invite users are never sent there
 
-### File to Modify
+**The `/reset-password` page already has the right UI** — it calls `supabase.auth.updateUser({ password })`. We just need to route invited users to it.
 
-**`src/pages/admin/FeedbackPage.tsx`**
+## Plan: Wire Invite Link to Password Setup
 
-**Data fetching changes (inside the `useEffect`):**
+### File: `supabase/config.toml`
+- No changes needed. The `inviteUserByEmail` API uses the project's site URL by default. We need to configure a redirect URL in the invite call instead.
 
-1. Keep the existing `session_feedback` fetch as-is
-2. After building the feedback rows, fetch reimport-only sessions:
-   ```sql
-   SELECT id, user_id, org_name, document_name, step_results, created_at
-   FROM processing_sessions
-   WHERE step_results->>'reimport' IS NOT NULL
-     AND id NOT IN (...feedbackSessionIds)
-   ```
-   - Use `.not('step_results->reimport', 'is', null)` filter via Supabase JS
-   - Exclude session IDs already covered by feedback rows
-3. For each reimport-only session, create a `FeedbackRow` with:
-   - `id`: session id (used as key)
-   - `session_id`: session id
-   - `user_id`: from session
-   - All feedback fields null/0: `expected_item_count: null`, `actual_item_count: 0`, `item_count_delta: null`, `hierarchy_rating: null`, `overall_rating: null`, `time_saved: null`, `open_feedback: null`
-   - `created_at`: from session's `step_results.reimport.timestamp` (or session `created_at`)
-   - `reimport`: extracted from `step_results.reimport`
-   - Enrich with org_name, document_name, user_email from the session/profile data
+### File: `supabase/functions/invite-user/index.ts`
+- Add `redirectTo` option to the `inviteUserByEmail` call pointing to `${siteUrl}/reset-password` so invited users land directly on the password form
+- Get `siteUrl` from the request origin header or a configured value
 
-4. Merge reimport-only rows into the main `rows` array
+### File: `src/pages/ResetPasswordPage.tsx`
+- Detect whether this is an invite flow vs password reset (check URL hash for `type=invite` or listen for auth event)
+- Adjust title/description: "Welcome! Set your password" for invites vs "Set New Password" for resets
+- No logic changes needed — `updateUser({ password })` works for both flows
 
-**FeedbackRow type update:**
-- Add `hasFeedback: boolean` field to distinguish rows with actual ratings from reimport-only rows
+### File: `src/hooks/useAuth.ts`
+- In `onAuthStateChange`, detect `PASSWORD_RECOVERY` event (Supabase fires this for both reset and invite token exchanges)
+- When detected, redirect to `/reset-password` so the user sees the form instead of the home page
+- This handles the case where the token is exchanged at `/` and the user needs to be routed
 
-**Table display:**
-- For reimport-only rows (no feedback), render `—` for all feedback columns (ratings, delta, time saved, etc.)
-- Re-import columns show data as normal
-- The row is still expandable — shows reimport details even without open_feedback text
+### Summary of changes
 
-**Stats updates:**
-- "Total Feedback" stat card label could become "Total Sessions" or stay but clarify: feedback + reimport-only count
-- Reimport stats already work since they check `r.reimport` presence
-- Average ratings should only count rows where `hasFeedback` is true (already filtered by `!= null`)
-
-**Tab count:**
-- Update the tab label count to reflect the merged total
+| File | Change |
+|------|--------|
+| `supabase/functions/invite-user/index.ts` | Add `redirectTo` to invite call |
+| `src/hooks/useAuth.ts` | Detect `PASSWORD_RECOVERY` event, redirect to `/reset-password` |
+| `src/pages/ResetPasswordPage.tsx` | Context-aware title for invite vs reset |
 
