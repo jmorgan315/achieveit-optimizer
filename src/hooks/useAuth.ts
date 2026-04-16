@@ -11,6 +11,7 @@ export function useAuth() {
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
+  const [profileLoaded, setProfileLoaded] = useState(false);
   const [domainError, setDomainError] = useState<string | null>(null);
 
   const isAdmin = role === 'admin' || role === 'super_admin';
