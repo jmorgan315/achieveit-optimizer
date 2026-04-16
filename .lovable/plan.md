@@ -1,30 +1,56 @@
 
 
-## Plan: Export as XLSX + Accept CSV in Re-import
+## Plan: Drag-and-Drop, Reimport History, and Feedback Page Enhancements
 
-### Summary
-Two changes: (1) Convert the export function to produce `.xlsx` files using SheetJS instead of CSV. (2) Update the re-import file picker to accept both `.xlsx` and `.csv`.
+### 1. Drag-and-drop in ReimportDialog
 
-### Files to Modify
+**File: `src/components/plan-optimizer/ReimportDialog.tsx`**
 
-**1. `src/utils/exportToExcel.ts`**
-- Add `import * as XLSX from 'xlsx'`
-- Replace CSV string construction with SheetJS workbook creation:
-  - Create workbook + worksheet from the headers + row data using `XLSX.utils.aoa_to_sheet`
-  - Set column widths for readability (Name/Description wider)
-  - Write workbook to array buffer with `XLSX.write(wb, { bookType: 'xlsx', type: 'array' })`
-  - Download as blob with `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` MIME type
-- Remove `escapeCSV` helper (no longer needed)
-- Keep `formatDate` for M/D/YY formatting (same format the reimport parser expects)
-- Filenames become `achieveit-plan-import.xlsx` and `achieveit-plan-extended-export.xlsx`
+- Add `isDragging` state and `onDragOver`, `onDragLeave`, `onDrop` handlers to the drop zone `<label>`
+- On drop, extract the first file and run the same `processFile(buffer)` logic as `handleFileChange`
+- Visual feedback: when dragging over, change border to `border-primary` and background to `bg-primary/5`
+- Update text to "Drag & drop a file here, or click to browse"
+- Extract the shared parsing logic into a `processFile(buffer: ArrayBuffer)` helper used by both handlers
 
-**2. `src/components/plan-optimizer/ReimportDialog.tsx`**
-- Change file input `accept` from `.xlsx` to `.xlsx,.csv`
-- Update helper text from "Choose an .xlsx file" to "Choose an .xlsx or .csv file"
-- No parser changes needed — SheetJS `XLSX.read()` already handles both formats
+### 2. Reimport history on Review & Export screen
 
-### What stays unchanged
-- `reimport-parser.ts` — SheetJS `read()` handles CSV natively, no code changes needed
-- `reimport-diff.ts` — unchanged
-- All other export/import logic
+**File: `src/components/steps/PlanOptimizerStep.tsx`**
+- Add a `reimportHistory` prop of type `{ timestamp: string; summary: { added: number; removed: number; modified: number; unchanged: number }; changes: Array<{ type: string; name: string; order: string; fields?: Array<{ field: string; oldValue: string; newValue: string }> }> } | null`
+- Render a card between the DedupSummaryCard and the table when `reimportHistory` is present
+- Shows: "Last Re-imported [relative date]" header, summary line "+X / -Y / ~Z", expandable details with field-level diffs
+
+**File: `src/pages/Index.tsx`**
+- After hydrating `step_results`, extract `step_results.reimport` and pass it as `reimportHistory` prop to `PlanOptimizerStep`
+- Also update reimportHistory state after a successful re-import apply (from the ReimportDialog callback)
+
+**New file: `src/components/plan-optimizer/ReimportHistoryCard.tsx`**
+- Self-contained card component for displaying reimport history with collapsible change details
+- Reuses the same diff display pattern as ReimportDialog (added/removed/modified sections)
+
+### 3. Reimport data on admin Feedback page
+
+**File: `src/pages/admin/FeedbackPage.tsx`**
+
+**Data fetching:**
+- After fetching `session_feedback`, also fetch `step_results` for all feedback sessions via the existing `processing_sessions` query (already fetching `id, org_name, document_name` — add `step_results`)
+- Extract `step_results.reimport` from each session and attach to the `FeedbackRow` type as `reimport?: { summary: {...}; changes: [...] }`
+
+**Table changes:**
+- Add two columns after "Time Saved": "Re-imported" (Yes/No badge) and "Changes" (formatted as `+X / -Y / ~Z` or `—`)
+- In the expanded row, if reimport data exists, show field-level change details below the open feedback text
+
+**Summary stats:**
+- Add two new stat cards to the grid:
+  - "Re-imported" — count and percentage of sessions that were re-imported (e.g., "12 (34%)")
+  - "Avg Re-import Changes" — average added/removed/modified per re-imported session (e.g., "+3.2 / -1.1 / ~4.5")
+
+### Technical details
+
+| File | Action |
+|------|--------|
+| `src/components/plan-optimizer/ReimportDialog.tsx` | Add drag-and-drop handlers, extract shared `processFile` |
+| `src/components/plan-optimizer/ReimportHistoryCard.tsx` | New — reimport history display card |
+| `src/components/steps/PlanOptimizerStep.tsx` | Add `reimportHistory` prop, render `ReimportHistoryCard` |
+| `src/pages/Index.tsx` | Extract and pass `reimportHistory` from step_results |
+| `src/pages/admin/FeedbackPage.tsx` | Add reimport columns, expanded details, aggregate stats |
 
