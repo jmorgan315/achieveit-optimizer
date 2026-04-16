@@ -3,35 +3,38 @@ import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import { logActivity } from '@/utils/logActivity';
 
+export type UserRole = 'user' | 'admin' | 'super_admin';
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [role, setRole] = useState<UserRole>('user');
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [domainError, setDomainError] = useState<string | null>(null);
+
+  const isAdmin = role === 'admin' || role === 'super_admin';
+  const isSuperAdmin = role === 'super_admin';
 
   const checkDomainAndProfile = useCallback(async (currentUser: User) => {
     const email = currentUser.email || '';
     if (!email.toLowerCase().endsWith('@achieveit.com')) {
       await supabase.auth.signOut();
       setUser(null);
-      setIsAdmin(false);
+      setRole('user');
       setDomainError('Access is restricted to AchieveIt employees. Please sign in with your @achieveit.com account.');
       return;
     }
 
     setDomainError(null);
 
-    // Check profile (auto-created by DB trigger on signup)
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('is_admin, is_active, first_name, last_name, feature_flags')
+      .select('is_admin, is_active, first_name, last_name, feature_flags, role')
       .eq('id', currentUser.id)
       .single();
 
     if (!profile) {
-      // Fallback: create profile if trigger didn't fire
       await supabase.from('user_profiles').insert({
         id: currentUser.id,
         email: currentUser.email,
@@ -40,16 +43,21 @@ export function useAuth() {
         is_admin: false,
         is_active: true,
       });
-      setIsAdmin(false);
+      setRole('user');
     } else {
       if (!profile.is_active) {
         await supabase.auth.signOut();
         setUser(null);
-        setIsAdmin(false);
+        setRole('user');
         setDomainError('Your account has been deactivated. Please contact your administrator.');
         return;
       }
-      setIsAdmin(profile.is_admin ?? false);
+      const profileRole = (profile as any).role as string | undefined;
+      if (profileRole === 'super_admin') setRole('super_admin');
+      else if (profileRole === 'admin') setRole('admin');
+      else if (profile.is_admin) setRole('admin'); // backward compat
+      else setRole('user');
+
       const name = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
       setDisplayName(name || null);
       const flags = (profile as any).feature_flags;
@@ -66,13 +74,12 @@ export function useAuth() {
       setLoading(false);
       if (currentUser) {
         checkDomainAndProfile(currentUser);
-        // Log login only on transition from no-user to user
         if (prevUserIdRef.current !== currentUser.id) {
           prevUserIdRef.current = currentUser.id;
           logActivity('login');
         }
       } else {
-        setIsAdmin(false);
+        setRole('user');
         prevUserIdRef.current = null;
       }
     });
@@ -130,5 +137,5 @@ export function useAuth() {
     return await supabase.auth.signOut();
   };
 
-  return { user, isAdmin, displayName, featureFlags, loading, domainError, signIn, signUp, resetPassword, signOut };
+  return { user, role, isAdmin, isSuperAdmin, displayName, featureFlags, loading, domainError, signIn, signUp, resetPassword, signOut };
 }

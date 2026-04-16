@@ -1,7 +1,9 @@
-import { ExternalLink, Settings, LogOut, UserCircle } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, Settings, LogOut, UserCircle, MessageSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import achieveitLogo from '@/assets/achieveit-logo.png';
 import type { User } from '@supabase/supabase-js';
+import { GeneralFeedbackDialog } from '@/components/GeneralFeedbackDialog';
 
 interface HeaderProps {
   onHomeClick?: () => void;
@@ -9,9 +11,12 @@ interface HeaderProps {
   isAdmin?: boolean;
   displayName?: string | null;
   onSignOut?: () => void;
+  featureFlags?: Record<string, boolean>;
 }
 
-export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut }: HeaderProps) {
+export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut, featureFlags }: HeaderProps) {
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+
   return (
     <header className="border-b border-border/50 bg-card/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -46,6 +51,15 @@ export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut }: H
         </div>
 
         <div className="flex items-center gap-4">
+          {featureFlags?.showFeedback && (
+            <button
+              onClick={() => setFeedbackOpen(true)}
+              className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5"
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              Feedback
+            </button>
+          )}
           <a
             href="https://support.achieveit.com"
             target="_blank"
@@ -85,6 +99,8 @@ export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut }: H
           )}
         </div>
       </div>
+
+      <GeneralFeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </header>
   );
 }

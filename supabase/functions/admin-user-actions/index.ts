@@ -22,27 +22,24 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // Verify caller is admin
+    // Verify caller is super_admin
     const callerClient = createClient(supabaseUrl, anonKey, {
       global: { headers: { Authorization: authHeader } },
     });
-    const { data: claimsData, error: claimsError } = await callerClient.auth.getClaims(
-      authHeader.replace("Bearer ", "")
-    );
-    if (claimsError || !claimsData?.claims) {
+    const { data: { user: caller } } = await callerClient.auth.getUser();
+    if (!caller) {
       return json({ error: "Unauthorized" }, 401);
     }
-    const callerId = claimsData.claims.sub as string;
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey);
     const { data: profile } = await adminClient
       .from("user_profiles")
-      .select("is_admin")
-      .eq("id", callerId)
+      .select("role")
+      .eq("id", caller.id)
       .single();
 
-    if (!profile?.is_admin) {
-      return json({ error: "Admin access required" }, 403);
+    if (profile?.role !== 'super_admin') {
+      return json({ error: "Super admin access required" }, 403);
     }
 
     const { action, userId, email } = await req.json();
@@ -56,7 +53,6 @@ Deno.serve(async (req) => {
         email,
       });
       if (error) return json({ error: error.message }, 400);
-      // Also send the reset email
       await adminClient.auth.resetPasswordForEmail(email, {
         redirectTo: `${req.headers.get("origin") || ""}/reset-password`,
       });

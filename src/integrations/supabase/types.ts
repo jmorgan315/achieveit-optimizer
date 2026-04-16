@@ -91,6 +91,33 @@ export type Database = {
           },
         ]
       }
+      general_feedback: {
+        Row: {
+          category: string
+          created_at: string
+          id: string
+          message: string
+          subject: string | null
+          user_id: string
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          id?: string
+          message: string
+          subject?: string | null
+          user_id: string
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          id?: string
+          message?: string
+          subject?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       processing_sessions: {
         Row: {
           classification_result: Json | null
@@ -244,6 +271,7 @@ export type Database = {
           is_active: boolean
           is_admin: boolean
           last_name: string | null
+          role: string
           updated_at: string
         }
         Insert: {
@@ -255,6 +283,7 @@ export type Database = {
           is_active?: boolean
           is_admin?: boolean
           last_name?: string | null
+          role?: string
           updated_at?: string
         }
         Update: {
@@ -266,6 +295,7 @@ export type Database = {
           is_active?: boolean
           is_admin?: boolean
           last_name?: string | null
+          role?: string
           updated_at?: string
         }
         Relationships: []
@@ -276,6 +306,7 @@ export type Database = {
     }
     Functions: {
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      is_super_admin: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
       [_ in never]: never

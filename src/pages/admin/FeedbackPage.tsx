@@ -5,12 +5,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Loader2, Star, ChevronDown, ChevronRight } from 'lucide-react';
 import { format } from 'date-fns';
 
+// ---- Import Feedback types ----
 interface FeedbackRow {
   id: string;
   session_id: string;
@@ -28,12 +30,25 @@ interface FeedbackRow {
   user_email: string | null;
 }
 
+// ---- General Feedback types ----
+interface GeneralFeedbackRow {
+  id: string;
+  user_id: string;
+  category: string;
+  subject: string | null;
+  message: string;
+  created_at: string;
+  user_name: string | null;
+  user_email: string | null;
+}
+
 type SortKey = 'created_at' | 'overall_rating' | 'hierarchy_rating' | 'item_count_delta' | 'actual_item_count';
 type SortDir = 'asc' | 'desc';
 
 export default function FeedbackPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<FeedbackRow[]>([]);
+  const [generalRows, setGeneralRows] = useState<GeneralFeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -43,36 +58,52 @@ export default function FeedbackPage() {
 
   useEffect(() => {
     (async () => {
+      // Fetch import feedback
       const { data: feedback } = await supabase
         .from('session_feedback')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!feedback || feedback.length === 0) { setRows([]); setLoading(false); return; }
+      if (feedback && feedback.length > 0) {
+        const sessionIds = [...new Set(feedback.map(f => f.session_id))];
+        const userIds = [...new Set(feedback.map(f => f.user_id))];
 
-      const sessionIds = [...new Set(feedback.map(f => f.session_id))];
-      const userIds = [...new Set(feedback.map(f => f.user_id))];
+        const [{ data: sessions }, { data: profiles }] = await Promise.all([
+          supabase.from('processing_sessions').select('id, org_name, document_name').in('id', sessionIds),
+          supabase.from('user_profiles').select('id, email').in('id', userIds),
+        ]);
 
-      const [{ data: sessions }, { data: profiles }] = await Promise.all([
-        supabase.from('processing_sessions').select('id, org_name, document_name').in('id', sessionIds),
-        supabase.from('user_profiles').select('id, email').in('id', userIds),
-      ]);
+        const sessionMap = new Map((sessions || []).map(s => [s.id, s]));
+        const profileMap = new Map((profiles || []).map(p => [p.id, p]));
 
-      const sessionMap = new Map((sessions || []).map(s => [s.id, s]));
-      const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+        setRows(feedback.map(f => {
+          const s = sessionMap.get(f.session_id);
+          const p = profileMap.get(f.user_id);
+          return { ...f, org_name: s?.org_name ?? null, document_name: s?.document_name ?? null, user_email: p?.email ?? null };
+        }));
+      }
 
-      const merged: FeedbackRow[] = feedback.map(f => {
-        const s = sessionMap.get(f.session_id);
-        const p = profileMap.get(f.user_id);
-        return {
-          ...f,
-          org_name: s?.org_name ?? null,
-          document_name: s?.document_name ?? null,
-          user_email: p?.email ?? null,
-        };
-      });
+      // Fetch general feedback
+      const { data: general } = await supabase
+        .from('general_feedback')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      setRows(merged);
+      if (general && general.length > 0) {
+        const gUserIds = [...new Set(general.map(g => g.user_id))];
+        const { data: gProfiles } = await supabase.from('user_profiles').select('id, email, first_name, last_name').in('id', gUserIds);
+        const gMap = new Map((gProfiles || []).map(p => [p.id, p]));
+
+        setGeneralRows(general.map(g => {
+          const p = gMap.get(g.user_id);
+          return {
+            ...g,
+            user_name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') || null : null,
+            user_email: p?.email ?? null,
+          };
+        }));
+      }
+
       setLoading(false);
     })();
   }, []);
@@ -124,98 +155,139 @@ export default function FeedbackPage() {
     <div className="p-6 space-y-4">
       <h1 className="text-xl font-semibold">Feedback Overview</h1>
 
-      {stats && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.count}</div><div className="text-sm text-muted-foreground">Total Feedback</div></CardContent></Card>
-          <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-warning" />{stats.avgOverall}</div><div className="text-sm text-muted-foreground">Avg Overall</div></CardContent></Card>
-          <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-primary" />{stats.avgHierarchy}</div><div className="text-sm text-muted-foreground">Avg Hierarchy</div></CardContent></Card>
-          <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.avgDelta}</div><div className="text-sm text-muted-foreground">Avg Item Delta</div></CardContent></Card>
-        </div>
-      )}
+      <Tabs defaultValue="import">
+        <TabsList>
+          <TabsTrigger value="import">Import Feedback ({rows.length})</TabsTrigger>
+          <TabsTrigger value="general">General Feedback ({generalRows.length})</TabsTrigger>
+        </TabsList>
 
-      <div className="flex gap-3 items-end">
-        <div className="space-y-1">
-          <Label className="text-xs">From</Label>
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-40" />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">To</Label>
-          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40" />
-        </div>
-      </div>
+        <TabsContent value="import" className="space-y-4">
+          {stats && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.count}</div><div className="text-sm text-muted-foreground">Total Feedback</div></CardContent></Card>
+              <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-warning" />{stats.avgOverall}</div><div className="text-sm text-muted-foreground">Avg Overall</div></CardContent></Card>
+              <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-primary" />{stats.avgHierarchy}</div><div className="text-sm text-muted-foreground">Avg Hierarchy</div></CardContent></Card>
+              <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.avgDelta}</div><div className="text-sm text-muted-foreground">Avg Item Delta</div></CardContent></Card>
+            </div>
+          )}
 
-      <div className="border rounded-lg">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-8" />
-              <SortHeader label="Date" k="created_at" />
-              <TableHead>User</TableHead>
-              <TableHead>Document</TableHead>
-              <TableHead>Org</TableHead>
-              <TableHead>Expected</TableHead>
-              <SortHeader label="Actual" k="actual_item_count" />
-              <SortHeader label="Delta" k="item_count_delta" />
-              <SortHeader label="Hierarchy" k="hierarchy_rating" />
-              <SortHeader label="Overall" k="overall_rating" />
-              <TableHead>Time Saved</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sorted.map(r => (
-              <React.Fragment key={r.id}>
-                <TableRow
-                  className="cursor-pointer hover:bg-muted/50"
-                  onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
-                >
-                  <TableCell className="text-sm px-2">
-                    {expandedId === r.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                  </TableCell>
-                  <TableCell className="text-sm">{format(new Date(r.created_at), 'MMM d, yyyy')}</TableCell>
-                  <TableCell className="text-sm">{r.user_email ?? '—'}</TableCell>
-                  <TableCell className="text-sm max-w-[150px] truncate">{r.document_name ?? '—'}</TableCell>
-                  <TableCell className="text-sm">{r.org_name ?? '—'}</TableCell>
-                  <TableCell className="text-sm">{r.expected_item_count ?? '—'}</TableCell>
-                  <TableCell className="text-sm">{r.actual_item_count}</TableCell>
-                  <TableCell className="text-sm">
-                    {r.item_count_delta != null ? (
-                      <Badge variant={r.item_count_delta === 0 ? 'default' : 'secondary'}>
-                        {r.item_count_delta > 0 ? '+' : ''}{r.item_count_delta}
-                      </Badge>
-                    ) : '—'}
-                  </TableCell>
-                  <TableCell className="text-sm">{r.hierarchy_rating ?? '—'}/5</TableCell>
-                  <TableCell className="text-sm">{r.overall_rating ?? '—'}/5</TableCell>
-                  <TableCell className="text-sm">{r.time_saved ?? '—'}</TableCell>
+          <div className="flex gap-3 items-end">
+            <div className="space-y-1">
+              <Label className="text-xs">From</Label>
+              <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="w-40" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">To</Label>
+              <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="w-40" />
+            </div>
+          </div>
+
+          <div className="border rounded-lg">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-8" />
+                  <SortHeader label="Date" k="created_at" />
+                  <TableHead>User</TableHead>
+                  <TableHead>Document</TableHead>
+                  <TableHead>Org</TableHead>
+                  <TableHead>Expected</TableHead>
+                  <SortHeader label="Actual" k="actual_item_count" />
+                  <SortHeader label="Delta" k="item_count_delta" />
+                  <SortHeader label="Hierarchy" k="hierarchy_rating" />
+                  <SortHeader label="Overall" k="overall_rating" />
+                  <TableHead>Time Saved</TableHead>
                 </TableRow>
-                {expandedId === r.id && (
+              </TableHeader>
+              <TableBody>
+                {sorted.map(r => (
+                  <React.Fragment key={r.id}>
+                    <TableRow
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => setExpandedId(expandedId === r.id ? null : r.id)}
+                    >
+                      <TableCell className="text-sm px-2">
+                        {expandedId === r.id ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </TableCell>
+                      <TableCell className="text-sm">{format(new Date(r.created_at), 'MMM d, yyyy')}</TableCell>
+                      <TableCell className="text-sm">{r.user_email ?? '—'}</TableCell>
+                      <TableCell className="text-sm max-w-[150px] truncate">{r.document_name ?? '—'}</TableCell>
+                      <TableCell className="text-sm">{r.org_name ?? '—'}</TableCell>
+                      <TableCell className="text-sm">{r.expected_item_count ?? '—'}</TableCell>
+                      <TableCell className="text-sm">{r.actual_item_count}</TableCell>
+                      <TableCell className="text-sm">
+                        {r.item_count_delta != null ? (
+                          <Badge variant={r.item_count_delta === 0 ? 'default' : 'secondary'}>
+                            {r.item_count_delta > 0 ? '+' : ''}{r.item_count_delta}
+                          </Badge>
+                        ) : '—'}
+                      </TableCell>
+                      <TableCell className="text-sm">{r.hierarchy_rating ?? '—'}/5</TableCell>
+                      <TableCell className="text-sm">{r.overall_rating ?? '—'}/5</TableCell>
+                      <TableCell className="text-sm">{r.time_saved ?? '—'}</TableCell>
+                    </TableRow>
+                    {expandedId === r.id && (
+                      <TableRow>
+                        <TableCell colSpan={11} className="bg-muted/30 px-6 py-3">
+                          <div className="space-y-2">
+                            <p className="text-sm">
+                              <span className="font-medium">Feedback:</span>{' '}
+                              {r.open_feedback || <span className="text-muted-foreground italic">No comments provided</span>}
+                            </p>
+                            <button
+                              className="text-sm text-primary hover:underline"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/admin/sessions/${r.session_id}`); }}
+                            >
+                              View session details →
+                            </button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </React.Fragment>
+                ))}
+                {sorted.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={11} className="bg-muted/30 px-6 py-3">
-                      <div className="space-y-2">
-                        <p className="text-sm">
-                          <span className="font-medium">Feedback:</span>{' '}
-                          {r.open_feedback || <span className="text-muted-foreground italic">No comments provided</span>}
-                        </p>
-                        <button
-                          className="text-sm text-primary hover:underline"
-                          onClick={(e) => { e.stopPropagation(); navigate(`/admin/sessions/${r.session_id}`); }}
-                        >
-                          View session details →
-                        </button>
-                      </div>
-                    </TableCell>
+                    <TableCell colSpan={11} className="text-center text-muted-foreground py-8">No import feedback found</TableCell>
                   </TableRow>
                 )}
-              </React.Fragment>
-            ))}
-            {sorted.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">No feedback found</TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="general" className="space-y-4">
+          <div className="border rounded-lg">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Subject</TableHead>
+                  <TableHead>Message</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {generalRows.map(g => (
+                  <TableRow key={g.id}>
+                    <TableCell className="text-sm whitespace-nowrap">{format(new Date(g.created_at), 'MMM d, yyyy')}</TableCell>
+                    <TableCell className="text-sm">{g.user_name || g.user_email || '—'}</TableCell>
+                    <TableCell><Badge variant="outline">{g.category}</Badge></TableCell>
+                    <TableCell className="text-sm max-w-[200px] truncate">{g.subject || '—'}</TableCell>
+                    <TableCell className="text-sm max-w-[300px]">{g.message}</TableCell>
+                  </TableRow>
+                ))}
+                {generalRows.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center text-muted-foreground py-8">No general feedback yet</TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

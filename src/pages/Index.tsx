@@ -656,7 +656,7 @@ const Index = () => {
   if (!user) {
     return (
       <div className="min-h-screen bg-background">
-        <Header user={null} />
+        <Header user={null} featureFlags={featureFlags} />
         <LoginPage
           onSignIn={signIn}
           onSignUp={signUp}
@@ -670,7 +670,7 @@ const Index = () => {
   if (activeView === 'sessions') {
     return (
       <div className="min-h-screen bg-background">
-        <Header user={user} isAdmin={isAdmin} displayName={displayName} onSignOut={async () => { await signOut(); }} />
+        <Header user={user} isAdmin={isAdmin} displayName={displayName} onSignOut={async () => { await signOut(); }} featureFlags={featureFlags} />
         <RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user.id} isAdmin={isAdmin} />
       </div>
     );
@@ -678,7 +678,7 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} user={user} isAdmin={isAdmin} displayName={displayName} onSignOut={async () => { await signOut(); }} />
+      <Header onHomeClick={() => { setActiveView('sessions'); setCurrentStep(0); }} user={user} isAdmin={isAdmin} displayName={displayName} onSignOut={async () => { await signOut(); }} featureFlags={featureFlags} />
 
       <main className="container mx-auto px-4 py-8 overflow-x-hidden">
         <div className="space-y-2">
