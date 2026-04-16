@@ -129,13 +129,33 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, [checkDomainAndProfile, navigate]);
 
+  const translateAuthError = (message: string): string => {
+    const m = (message || '').toLowerCase();
+    if (/rate limit|over_email_send|too many requests/.test(m)) {
+      return 'Too many sign-up attempts right now. Please wait a few minutes and try again, or ask your administrator to send you an invite link.';
+    }
+    if (/auth session missing|session_not_found|session missing/.test(m)) {
+      return 'Your link has expired or was already used. Request a new one, or sign in with your email and password.';
+    }
+    if (/invalid login credentials|invalid_credentials/.test(m)) {
+      return 'Incorrect email or password.';
+    }
+    if (/user already registered|already registered|already exists/.test(m)) {
+      return 'An account with this email already exists. Try signing in instead.';
+    }
+    if (/email not confirmed|email_not_confirmed/.test(m)) {
+      return 'Please check your email and confirm your address before signing in.';
+    }
+    return message;
+  };
+
   const signIn = async (email: string, password: string) => {
     setDomainError(null);
     if (!email.toLowerCase().endsWith('@achieveit.com')) {
       return { error: { message: 'Please use your @achieveit.com email address.' } };
     }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: { message: error.message } };
+    if (error) return { error: { message: translateAuthError(error.message) } };
     return { error: null };
   };
 
@@ -150,7 +170,7 @@ export function useAuth() {
       password,
       options: fullName ? { data: { full_name: fullName } } : undefined,
     });
-    if (error) return { error: { message: error.message } };
+    if (error) return { error: { message: translateAuthError(error.message) } };
     return { error: null };
   };
 
@@ -164,8 +184,8 @@ export function useAuth() {
     const { data, error } = await supabase.functions.invoke('request-password-reset', {
       body: { email },
     });
-    if (error) return { error: { message: error.message } };
-    if (data?.error) return { error: { message: data.error } };
+    if (error) return { error: { message: translateAuthError(error.message) } };
+    if (data?.error) return { error: { message: translateAuthError(data.error) } };
     return { error: null };
   };
 
