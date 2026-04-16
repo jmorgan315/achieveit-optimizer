@@ -9,10 +9,23 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { Loader2, Star, ChevronDown, ChevronRight } from 'lucide-react';
+import { Loader2, Star, ChevronDown, ChevronRight, Upload } from 'lucide-react';
 import { format } from 'date-fns';
 
-// ---- Import Feedback types ----
+interface ReimportSummary {
+  added: number;
+  removed: number;
+  modified: number;
+  unchanged: number;
+}
+
+interface ReimportChange {
+  type: string;
+  name: string;
+  order: string;
+  fields?: Array<{ field: string; oldValue: string; newValue: string }>;
+}
+
 interface FeedbackRow {
   id: string;
   session_id: string;
@@ -28,9 +41,9 @@ interface FeedbackRow {
   org_name: string | null;
   document_name: string | null;
   user_email: string | null;
+  reimport?: { summary: ReimportSummary; changes: ReimportChange[] } | null;
 }
 
-// ---- General Feedback types ----
 interface GeneralFeedbackRow {
   id: string;
   user_id: string;
@@ -58,7 +71,6 @@ export default function FeedbackPage() {
 
   useEffect(() => {
     (async () => {
-      // Fetch import feedback
       const { data: feedback } = await supabase
         .from('session_feedback')
         .select('*')
@@ -69,7 +81,7 @@ export default function FeedbackPage() {
         const userIds = [...new Set(feedback.map(f => f.user_id))];
 
         const [{ data: sessions }, { data: profiles }] = await Promise.all([
-          supabase.from('processing_sessions').select('id, org_name, document_name').in('id', sessionIds),
+          supabase.from('processing_sessions').select('id, org_name, document_name, step_results').in('id', sessionIds),
           supabase.from('user_profiles').select('id, email').in('id', userIds),
         ]);
 
@@ -79,11 +91,18 @@ export default function FeedbackPage() {
         setRows(feedback.map(f => {
           const s = sessionMap.get(f.session_id);
           const p = profileMap.get(f.user_id);
-          return { ...f, org_name: s?.org_name ?? null, document_name: s?.document_name ?? null, user_email: p?.email ?? null };
+          const stepResults = s?.step_results as Record<string, unknown> | null;
+          const reimport = stepResults?.reimport as { summary: ReimportSummary; changes: ReimportChange[] } | undefined;
+          return {
+            ...f,
+            org_name: s?.org_name ?? null,
+            document_name: s?.document_name ?? null,
+            user_email: p?.email ?? null,
+            reimport: reimport ?? null,
+          };
         }));
       }
 
-      // Fetch general feedback
       const { data: general } = await supabase
         .from('general_feedback')
         .select('*')
@@ -130,11 +149,34 @@ export default function FeedbackPage() {
     const withOverall = filtered.filter(r => r.overall_rating != null);
     const withHierarchy = filtered.filter(r => r.hierarchy_rating != null);
     const withDelta = filtered.filter(r => r.item_count_delta != null);
+    const reimported = filtered.filter(r => !!r.reimport);
+    const reimportPct = filtered.length > 0 ? ((reimported.length / filtered.length) * 100).toFixed(0) : '0';
+
+    let avgReimport: { added: string; removed: string; modified: string } | null = null;
+    if (reimported.length > 0) {
+      const totals = reimported.reduce(
+        (acc, r) => ({
+          added: acc.added + (r.reimport?.summary.added ?? 0),
+          removed: acc.removed + (r.reimport?.summary.removed ?? 0),
+          modified: acc.modified + (r.reimport?.summary.modified ?? 0),
+        }),
+        { added: 0, removed: 0, modified: 0 }
+      );
+      avgReimport = {
+        added: (totals.added / reimported.length).toFixed(1),
+        removed: (totals.removed / reimported.length).toFixed(1),
+        modified: (totals.modified / reimported.length).toFixed(1),
+      };
+    }
+
     return {
       count: filtered.length,
       avgOverall: withOverall.length ? (withOverall.reduce((s, r) => s + r.overall_rating!, 0) / withOverall.length).toFixed(1) : '—',
       avgHierarchy: withHierarchy.length ? (withHierarchy.reduce((s, r) => s + r.hierarchy_rating!, 0) / withHierarchy.length).toFixed(1) : '—',
       avgDelta: withDelta.length ? (withDelta.reduce((s, r) => s + r.item_count_delta!, 0) / withDelta.length).toFixed(1) : '—',
+      reimportedCount: reimported.length,
+      reimportPct,
+      avgReimport,
     };
   }, [filtered]);
 
@@ -163,11 +205,15 @@ export default function FeedbackPage() {
 
         <TabsContent value="import" className="space-y-4">
           {stats && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.count}</div><div className="text-sm text-muted-foreground">Total Feedback</div></CardContent></Card>
               <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-warning" />{stats.avgOverall}</div><div className="text-sm text-muted-foreground">Avg Overall</div></CardContent></Card>
               <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Star className="h-4 w-4 text-primary" />{stats.avgHierarchy}</div><div className="text-sm text-muted-foreground">Avg Hierarchy</div></CardContent></Card>
               <Card><CardContent className="p-4"><div className="text-2xl font-bold">{stats.avgDelta}</div><div className="text-sm text-muted-foreground">Avg Item Delta</div></CardContent></Card>
+              <Card><CardContent className="p-4"><div className="text-2xl font-bold flex items-center gap-1"><Upload className="h-4 w-4 text-primary" />{stats.reimportedCount} ({stats.reimportPct}%)</div><div className="text-sm text-muted-foreground">Re-imported</div></CardContent></Card>
+              {stats.avgReimport && (
+                <Card><CardContent className="p-4"><div className="text-lg font-bold">+{stats.avgReimport.added} / −{stats.avgReimport.removed} / ~{stats.avgReimport.modified}</div><div className="text-sm text-muted-foreground">Avg Re-import Changes</div></CardContent></Card>
+              )}
             </div>
           )}
 
@@ -182,7 +228,7 @@ export default function FeedbackPage() {
             </div>
           </div>
 
-          <div className="border rounded-lg">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -197,6 +243,8 @@ export default function FeedbackPage() {
                   <SortHeader label="Hierarchy" k="hierarchy_rating" />
                   <SortHeader label="Overall" k="overall_rating" />
                   <TableHead>Time Saved</TableHead>
+                  <TableHead>Re-imported</TableHead>
+                  <TableHead>Changes</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -225,15 +273,71 @@ export default function FeedbackPage() {
                       <TableCell className="text-sm">{r.hierarchy_rating ?? '—'}/5</TableCell>
                       <TableCell className="text-sm">{r.overall_rating ?? '—'}/5</TableCell>
                       <TableCell className="text-sm">{r.time_saved ?? '—'}</TableCell>
+                      <TableCell className="text-sm">
+                        {r.reimport ? (
+                          <Badge variant="outline" className="text-primary border-primary/30">Yes</Badge>
+                        ) : (
+                          <span className="text-muted-foreground">No</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {r.reimport ? (
+                          <span className="font-mono text-xs">
+                            +{r.reimport.summary.added} / −{r.reimport.summary.removed} / ~{r.reimport.summary.modified}
+                          </span>
+                        ) : '—'}
+                      </TableCell>
                     </TableRow>
                     {expandedId === r.id && (
                       <TableRow>
-                        <TableCell colSpan={11} className="bg-muted/30 px-6 py-3">
-                          <div className="space-y-2">
+                        <TableCell colSpan={13} className="bg-muted/30 px-6 py-3">
+                          <div className="space-y-3">
                             <p className="text-sm">
                               <span className="font-medium">Feedback:</span>{' '}
                               {r.open_feedback || <span className="text-muted-foreground italic">No comments provided</span>}
                             </p>
+
+                            {r.reimport && r.reimport.changes.length > 0 && (
+                              <div className="space-y-2">
+                                <p className="text-sm font-medium flex items-center gap-1">
+                                  <Upload className="h-3.5 w-3.5 text-primary" /> Re-import Details
+                                </p>
+                                <div className="grid gap-1 ml-5">
+                                  {r.reimport.changes.filter(c => c.type === 'added').length > 0 && (
+                                    <div>
+                                      <p className="text-xs font-medium text-green-600">Added ({r.reimport.changes.filter(c => c.type === 'added').length})</p>
+                                      {r.reimport.changes.filter(c => c.type === 'added').map((c, i) => (
+                                        <p key={i} className="text-xs text-muted-foreground ml-2">{c.order} — {c.name}</p>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {r.reimport.changes.filter(c => c.type === 'removed').length > 0 && (
+                                    <div>
+                                      <p className="text-xs font-medium text-red-600">Removed ({r.reimport.changes.filter(c => c.type === 'removed').length})</p>
+                                      {r.reimport.changes.filter(c => c.type === 'removed').map((c, i) => (
+                                        <p key={i} className="text-xs text-muted-foreground ml-2 line-through">{c.order} — {c.name}</p>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {r.reimport.changes.filter(c => c.type === 'modified').length > 0 && (
+                                    <div>
+                                      <p className="text-xs font-medium text-amber-600">Modified ({r.reimport.changes.filter(c => c.type === 'modified').length})</p>
+                                      {r.reimport.changes.filter(c => c.type === 'modified').map((c, i) => (
+                                        <div key={i} className="ml-2">
+                                          <p className="text-xs font-medium">{c.order} — {c.name}</p>
+                                          {c.fields?.map((f, j) => (
+                                            <p key={j} className="text-[11px] text-muted-foreground ml-3">
+                                              {f.field}: <span className="text-red-500">{f.oldValue}</span> → <span className="text-green-600">{f.newValue}</span>
+                                            </p>
+                                          ))}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
                             <button
                               className="text-sm text-primary hover:underline"
                               onClick={(e) => { e.stopPropagation(); navigate(`/admin/sessions/${r.session_id}`); }}
@@ -248,7 +352,7 @@ export default function FeedbackPage() {
                 ))}
                 {sorted.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={11} className="text-center text-muted-foreground py-8">No import feedback found</TableCell>
+                    <TableCell colSpan={13} className="text-center text-muted-foreground py-8">No import feedback found</TableCell>
                   </TableRow>
                 )}
               </TableBody>
