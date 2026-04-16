@@ -1,53 +1,36 @@
 
 
-## Plan: Remove Level Dropdown Caret + Guard Expand State During Drag
+To connect Resend, you'll need to do one quick step on your end. Here's what happens and what I need from you:
 
-### Issue 1: Level column dropdown caret
+## What I'll trigger
+When I start implementing, I'll invoke the Resend connector. This pops up a dialog in your Lovable workspace asking you to either:
+- **Pick an existing Resend connection** (if you've already linked one in another project), or
+- **Create a new connection** by signing into Resend through OAuth
 
-The `EditableCell` dropdown uses Radix `SelectTrigger` which renders a built-in chevron icon (`svg:last-child`). Current CSS hides it by default and shows on group-hover, but the row has `group` class so it appears on hover — visually conflicting with the expand/collapse chevron in the Name column.
+## What you'll need
+1. **A Resend account** — free tier is fine for development (3,000 emails/month, 100/day). Sign up at https://resend.com if you don't have one.
+2. **Click "Authorize"** in the OAuth popup when the connector dialog appears. That's it — no API key copy/paste, no `.env` edits. Resend's OAuth flow grants Lovable a scoped token, which the gateway uses on every send.
 
-**Fix in `src/components/plan-optimizer/InlineEditableTable.tsx`** (lines 194-215, the level cell rendering):
+Once you authorize, the secrets `RESEND_API_KEY` and `LOVABLE_API_KEY` are automatically injected into the edge function environment. I never see the key, and you don't need to manage it.
 
-Change the `EditableCell` for the level column to permanently hide the SelectTrigger caret by adding `[&>svg:last-child]:hidden` to the className. The level text itself already acts as the click target to open the dropdown — no caret needed.
+## About the sender address
+By default, emails will send from `AchieveIt <onboarding@resend.dev>` — Resend's shared sandbox sender that works immediately with no DNS setup. **Caveat:** Resend's sandbox sender can only deliver to the email address that owns the Resend account. So during testing, only your inbox will receive notifications.
 
-Alternatively (cleaner): pass a className override to EditableCell that forces `[&>svg:last-child]:!hidden` so the caret never renders regardless of hover state.
+To send to all `@achieveit.com` users (Edelmary, etc.), you'd need to **verify the achieveit.com domain in your Resend dashboard** — a one-time setup where Resend gives you DNS records (SPF, DKIM, MX) to add at your domain registrar. After verification, I can switch the sender to something like `notify@achieveit.com`.
 
-### Issue 2: Expand/collapse state during drag-and-drop
+## Decision points
 
-After investigating, `expandedItems` is only modified in 3 places:
-1. Initial `useState` (runs once)
-2. `toggleExpand` (user clicks chevron)
-3. `handleFilterClick` (when applying a filter)
+| Question | Default if you don't specify |
+|---|---|
+| Sandbox sender (`onboarding@resend.dev`) or verify `achieveit.com` first? | Start with sandbox; switch later once domain is verified |
+| Sender display name | `AchieveIt <onboarding@resend.dev>` |
+| Reply-to address | None (no-reply behavior) |
 
-The drag handler (`handleDragEnd`) does NOT touch `expandedItems`. However, the issue is:
+## Recommended path
 
-- For imports ≤80 items, **all items start expanded** (line 127: `new Set(items.map(i => i.id))`)
-- When an item is dragged to nest under a new parent, the parent was already in `expandedItems`, so the nested child immediately appears — this can look like "unrelated sections expanding"
-- More critically: after `moveAndReorder` / `onMoveItem`, the items array changes. If this triggers a parent component remount of `PlanOptimizerStep` (unlikely but worth guarding), the `useState` initializer would re-run and expand everything
+1. **You**: Create/log into Resend, then approve the connector dialog when I pop it up.
+2. **Me**: Build the `send-notification` function, wire it into `process-plan`, add the Account Settings toggle, and run the RLS migration.
+3. **You** (later, when ready for production): Verify `achieveit.com` in Resend's dashboard, then ask me to swap the sender address.
 
-**Fix in `src/components/steps/PlanOptimizerStep.tsx`**:
-
-After a drag-and-drop "inside" (nesting) operation, ensure the target parent is added to `expandedItems` so the user sees the result of their action, but do NOT expand any other items. Add the newly dragged item's parent to the set explicitly in `handleDragEnd`:
-
-```typescript
-// In handleDragEnd, after onMoveItem or onMoveAndReorder:
-setExpandedItems(prev => {
-  const next = new Set(prev);
-  if (position === 'inside') {
-    next.add(targetId); // ensure parent is expanded to show the nested child
-  }
-  return next;
-});
-```
-
-This is a minor enhancement. The real guard is ensuring no `useEffect` or external mechanism resets `expandedItems` when items change. Currently there is none, so the state should be stable.
-
-If users are seeing truly unrelated sections expand, it could be a React key issue causing remounts. The `SortableContext` uses `flatList.map(f => f.item.id)` as IDs — these are stable UUIDs, so this shouldn't cause remounts. Will verify during implementation.
-
-### Files changed
-
-| File | Change |
-|------|--------|
-| `src/components/plan-optimizer/InlineEditableTable.tsx` | Hide SelectTrigger caret on Level column permanently |
-| `src/components/steps/PlanOptimizerStep.tsx` | Add parent to expandedItems after nesting drag; verify no expand-state leaks |
+If you're ready, just say "go" and I'll start by triggering the Resend connector dialog.
 
