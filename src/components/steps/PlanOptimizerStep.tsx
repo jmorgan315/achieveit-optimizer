@@ -1045,6 +1045,15 @@ export function PlanOptimizerStep({
           onSubmitted={() => setHasFeedback(true)}
         />
       )}
+      {featureFlags?.showReimport && onApplyReimport && (
+        <ReimportDialog
+          open={reimportDialogOpen}
+          onOpenChange={setReimportDialogOpen}
+          currentItems={items}
+          sessionId={sessionId}
+          onApply={onApplyReimport}
+        />
+      )}
     </div>
   );
 }
