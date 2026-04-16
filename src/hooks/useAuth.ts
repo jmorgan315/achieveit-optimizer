@@ -93,7 +93,7 @@ export function useAuth() {
       // Redirect to password setup for invite/recovery tokens
       if (_event === 'PASSWORD_RECOVERY') {
         navigate('/reset-password');
-        return;
+        // Don't return — fall through so profile check still runs for subsequent events
       }
 
       const currentUser = session?.user ?? null;
