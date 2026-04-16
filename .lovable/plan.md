@@ -1,53 +1,62 @@
 
 
-## Plan: Two onboarding error fixes
+## Plan: Fix "Auth session missing" on invite link landing
 
-### Diagnosis
+### Diagnosis (answers to your three questions)
 
-**(1) Email rate limit on sign-up** — Yes, this is Supabase's default auth SMTP rate limit (~2-4/hour on shared sender). Cannot be raised via Lovable Cloud config — only resolved by configuring a verified email domain (which the user can't do yet, no DNS access). So the right fix right now is a friendly error message at the UI layer.
+**(1) Does the page wait for `PASSWORD_RECOVERY` before showing the form?**
+No. Current `ResetPasswordPage` (lines 26-58) renders the form as soon as `checkingSession` flips to `false`. That happens via either:
+- `onAuthStateChange` firing `PASSWORD_RECOVERY`/`SIGNED_IN` (good path), OR
+- A 1.5s `setTimeout` fallback that flips `checkingSession=false` regardless of session state, as long as a token *string* is present in the hash.
 
-The error currently surfaces in `LoginPage.tsx` via `setError(result.error.message)` (line ~62), which displays the raw Supabase string `"email rate limit exceeded"`. We intercept it in `useAuth.signUp` before returning and translate it.
+The 1.5s fallback is too short and doesn't actually verify a session exists — it just checks the hash contains `access_token`. So on slow networks the form renders, the user types, submits, and `updateUser` fails with `Auth session missing` because the token-exchange hasn't completed.
 
-**(2) Auth Session Missing** — Found the surface. `ResetPasswordPage.tsx` calls `supabase.auth.updateUser({ password })` (line 37) **without first verifying that a session was established from the URL hash tokens**. If the invite/recovery link is expired, malformed, or already consumed (clicked twice), Supabase returns the cryptic `"Auth session missing!"` error. There's no pre-check, no friendly message, and no path back to login.
+**(2) Does Supabase auto-exchange the hash token?**
+Yes — `detectSessionInUrl` defaults to `true` and our client (`src/integrations/supabase/client.ts`) doesn't override it. The SDK parses the hash on init and exchanges it asynchronously, firing `SIGNED_IN` (and `PASSWORD_RECOVERY` for recovery links) when done. **No explicit call needed.** But the page must *wait* for that event, not race it.
 
-A secondary surface: `useAuth` swallows nothing here — but `onAuthStateChange` only fires `PASSWORD_RECOVERY` on a valid token. If the token has expired, no event fires, the page just sits there, then `updateUser` fails.
+**(3) Secondary bug found in `useAuth.ts` (lines 96-100):**
+```ts
+if (_event === 'PASSWORD_RECOVERY') {
+  navigate('/reset-password');
+}
+```
+When the user is already on `/reset-password`, this triggers a re-navigation that can remount `ResetPasswordPage`, blowing away its local `checkingSession` state mid-token-exchange. Needs a guard: only navigate if not already there.
 
-### Changes
+### The fix
 
-**File 1: `src/hooks/useAuth.ts`** — translate auth errors in both `signIn` and `signUp` (and pass through `resetPassword`):
+**File 1: `src/pages/ResetPasswordPage.tsx`** — proper auth-readiness gate:
+- On mount, render loading state ("Setting up your account…") with spinner.
+- Set up `onAuthStateChange` listener FIRST (before any async work, per Supabase best practice).
+- Then call `supabase.auth.getSession()` to confirm if a session already exists (handles the case where exchange completed before the listener attached).
+- Transition to **form state** when:
+  - `PASSWORD_RECOVERY` or `SIGNED_IN` event fires with a session, OR
+  - `getSession()` returns a non-null session.
+- Transition to **expired state** when:
+  - Hash contains `error=` / `error_code=otp_expired` (immediate), OR
+  - 5-second timeout elapses with no session established, OR
+  - `updateUser` fails with `Auth session missing` (defensive).
+- Keep the existing expired-link UI (heading + two buttons).
+- Keep `first_login_at` write after successful `updateUser`.
 
-Add a small helper `translateAuthError(message)`:
-- `email rate limit exceeded` / `over_email_send_rate_limit` → "Too many sign-up attempts right now. Please wait a few minutes and try again, or ask your administrator to send you an invite link."
-- `auth session missing` / `session_not_found` → "Your link has expired or was already used. Request a new one or sign in with your email and password."
-- `invalid login credentials` → "Incorrect email or password."
-- `user already registered` → "An account with this email already exists. Try signing in instead."
-- `email not confirmed` → "Please check your email and confirm your address before signing in."
-- Default: pass message through.
-
-Apply in `signIn`, `signUp`, `resetPassword` return paths.
-
-**File 2: `src/pages/ResetPasswordPage.tsx`** — add session detection + expired-link handling:
-
-1. On mount, check URL hash for `error=` / `error_code=otp_expired` / `error_description=` (Supabase puts these there when a link is bad). If present → render expired-link state immediately.
-2. Wait briefly for `onAuthStateChange` to fire `PASSWORD_RECOVERY` / `SIGNED_IN`. If after ~1.5s no session exists AND no recovery token in hash → render expired-link state.
-3. In `handleSubmit`, if `updateUser` returns an error containing `session` / `Auth session missing` → switch to expired-link state instead of showing raw error.
-4. Expired-link state shows:
-   - Heading: "This link has expired"
-   - Message: "Your invite or password reset link is no longer valid. Links expire after a short time and can only be used once."
-   - Two buttons: **"Request a new link"** → `navigate('/')` (login page has Forgot password) and **"Back to sign in"** → `navigate('/')`.
-
-**File 3: `src/components/LoginPage.tsx`** — minor: when `error` contains "rate limit" or "too many", also surface a hint pointing to "ask your administrator for an invite link" (already handled by useAuth translation, just verify display works — no code change beyond what propagates from useAuth).
+**File 2: `src/hooks/useAuth.ts`** — guard the auto-navigate to prevent remount race:
+- Change the `PASSWORD_RECOVERY` handler to only `navigate('/reset-password')` if `window.location.pathname !== '/reset-password'`. Prevents the re-mount that interrupts token exchange.
 
 ### Files affected
 | File | Change |
 |------|--------|
-| `src/hooks/useAuth.ts` | Add `translateAuthError` helper, apply in signIn/signUp/resetPassword |
-| `src/pages/ResetPasswordPage.tsx` | Detect missing/expired session, render expired-link UI with recovery actions |
+| `src/pages/ResetPasswordPage.tsx` | Replace 1.5s timer with proper readiness gate: listener-first, `getSession()` check, 5s expired fallback |
+| `src/hooks/useAuth.ts` | Guard `navigate('/reset-password')` to skip if already on that route |
 
-No DB changes. No edge function changes. No memory updates needed — both are pure UI/error-handling refinements consistent with existing patterns (useAuth already wraps Supabase errors in `{error: {message}}`).
+### What this does NOT change
+- Supabase client config (`detectSessionInUrl` stays at default `true` — works correctly).
+- The expired-link UI, button labels, or routes (already correct).
+- `useAuth.translateAuthError` mappings (still active for other surfaces).
+- Any edge function or DB code.
 
-### What this does NOT do
-- Does NOT increase the Supabase rate limit (impossible without domain setup).
-- Does NOT auto-fall-back from sign-up to invite-link generation (separate flow; the user can use admin "Copy Invite Link" already).
-- Does NOT touch the working `Copy Invite Link` admin flow.
+### Test scenarios after fix
+1. Fresh invite link → loading state → form appears within ~1s → set password → success.
+2. Expired/reused invite link (hash has `error_code=otp_expired`) → expired-link UI immediately.
+3. Slow network simulation → loading state holds up to 5s → form appears once exchange completes (no premature render).
+4. Truly invalid link (no hash, no session) → expired-link UI after 5s.
+5. Already-logged-in user clicks recovery link → form appears (SIGNED_IN already true via `getSession()`).
 
