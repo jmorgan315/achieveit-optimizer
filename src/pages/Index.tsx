@@ -170,6 +170,7 @@ const Index = () => {
     setDetectedLevels(null);
     setUseVisionAI(false);
     setDedupResults([]);
+    setReimportHistory(null);
     setDocumentHints('');
     setKnowsLevels(false);
     setLevelCount(3);
@@ -203,6 +204,7 @@ const Index = () => {
     setDetectedLevels(null);
     setUseVisionAI(false);
     setDedupResults([]);
+    setReimportHistory(null);
     setDocumentHints('');
     setKnowsLevels(false);
     setLevelCount(3);
