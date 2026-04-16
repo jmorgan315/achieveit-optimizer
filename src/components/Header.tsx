@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ExternalLink, Settings, LogOut, UserCircle, MessageSquare } from 'lucide-react';
+import { Settings, LogOut, UserCircle, MessageSquare } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import achieveitLogo from '@/assets/achieveit-logo.png';
 import type { User } from '@supabase/supabase-js';
@@ -60,15 +60,6 @@ export function Header({ onHomeClick, user, isAdmin, displayName, onSignOut, fea
               Feedback
             </button>
           )}
-          <a
-            href="https://support.achieveit.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm text-muted-foreground hover:text-primary transition-colors flex items-center gap-1.5"
-          >
-            Support
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
           {isAdmin && (
             <Link
               to="/admin"
