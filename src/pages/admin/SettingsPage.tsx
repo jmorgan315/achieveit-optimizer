@@ -89,10 +89,8 @@ export default function SettingsPage() {
     setSaving(false);
   };
 
-  const addModel = () => setEntries([...entries, { model: '', input: 0, output: 0 }]);
-  const removeModel = (idx: number) => setEntries(entries.filter((_, i) => i !== idx));
-  const updateEntry = (idx: number, field: keyof RateEntry, value: string) => {
-    setEntries(entries.map((e, i) => i === idx ? { ...e, [field]: field === 'model' ? value : Number(value) || 0 } : e));
+  const updateEntry = (idx: number, field: 'input' | 'output', value: string) => {
+    setEntries(entries.map((e, i) => i === idx ? { ...e, [field]: Number(value) || 0 } : e));
   };
 
   if (loading) return <div className="p-6 text-muted-foreground">Loading…</div>;
