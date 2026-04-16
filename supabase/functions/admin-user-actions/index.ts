@@ -100,6 +100,65 @@ Deno.serve(async (req) => {
       return json({ success: true });
     }
 
+    if (action === "generate_invite_link") {
+      if (!email || typeof email !== "string") {
+        console.error("[admin-user-actions:generate_invite_link] Missing email");
+        return json({ error: "Email is required" }, 400);
+      }
+
+      // Try to generate an invite link for a user that doesn't exist yet.
+      // If they already exist, fall back to a magic/recovery link so admin can still share access.
+      let actionLink: string | null = null;
+
+      const inviteRes = await adminClient.auth.admin.generateLink({
+        type: "invite",
+        email,
+        options: { redirectTo: `${origin}/reset-password` },
+      });
+
+      if (inviteRes.error) {
+        // Common: "User already registered" → fall back to recovery link
+        const msg = inviteRes.error.message || "";
+        const alreadyExists = /already|registered|exists/i.test(msg);
+        if (!alreadyExists) {
+          console.error("[admin-user-actions:generate_invite_link] generateLink(invite) failed:", msg);
+          return json({ error: msg }, 400);
+        }
+        const recoveryRes = await adminClient.auth.admin.generateLink({
+          type: "recovery",
+          email,
+          options: { redirectTo: `${origin}/reset-password` },
+        });
+        if (recoveryRes.error) {
+          console.error("[admin-user-actions:generate_invite_link] generateLink(recovery) failed:", recoveryRes.error.message);
+          return json({ error: recoveryRes.error.message }, 400);
+        }
+        actionLink = recoveryRes.data?.properties?.action_link ?? null;
+      } else {
+        actionLink = inviteRes.data?.properties?.action_link ?? null;
+        // Mark invited_at since this counts as an invite
+        if (userId) {
+          await adminClient
+            .from("user_profiles")
+            .update({ invited_at: new Date().toISOString() })
+            .eq("id", userId);
+        }
+      }
+
+      if (!actionLink) {
+        console.error("[admin-user-actions:generate_invite_link] No action_link returned");
+        return json({ error: "Failed to generate invite link" }, 500);
+      }
+
+      await adminClient.from("user_activity_log").insert({
+        user_id: caller.id,
+        activity_type: "invite_link_generated",
+        metadata: { target_email: email, target_user_id: userId ?? null },
+      });
+
+      return json({ success: true, action_link: actionLink });
+    }
+
     if (action === "delete_user") {
       if (!userId || typeof userId !== "string") {
         console.error("[admin-user-actions:delete_user] Missing userId");

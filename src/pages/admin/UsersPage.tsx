@@ -21,7 +21,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
-import { UserPlus, Loader2, MoreHorizontal, Pencil, KeyRound, Trash2, Mail } from 'lucide-react';
+import { UserPlus, Loader2, MoreHorizontal, Pencil, KeyRound, Trash2, Mail, Link2 } from 'lucide-react';
 
 interface UserProfile {
   id: string;
@@ -157,6 +157,33 @@ export default function UsersPage() {
       setUsers(prev => prev.map(x => x.id === u.id ? { ...x, invited_at: new Date().toISOString() } : x));
     } catch (err: any) {
       toast.error(err?.message || 'Failed to resend invite');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCopyInviteLink = async (u: UserProfile) => {
+    if (!u.email) return;
+    setActionLoading(u.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await supabase.functions.invoke('admin-user-actions', {
+        body: { action: 'generate_invite_link', userId: u.id, email: u.email },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      if (res.error) throw res.error;
+      const payload = res.data as { error?: string; action_link?: string };
+      if (payload?.error) throw new Error(payload.error);
+      if (!payload?.action_link) throw new Error('No invite link returned');
+
+      await navigator.clipboard.writeText(payload.action_link);
+      toast.success(`Invite link copied for ${u.email}`, {
+        description: 'Paste it into Slack, email, or a message.',
+      });
+      // Reflect invited status if it was a fresh invite
+      setUsers(prev => prev.map(x => x.id === u.id && !x.invited_at ? { ...x, invited_at: new Date().toISOString() } : x));
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate invite link');
     } finally {
       setActionLoading(null);
     }
@@ -316,6 +343,9 @@ export default function UsersPage() {
                                 <Mail className="h-4 w-4 mr-2" /> Resend Invite
                               </DropdownMenuItem>
                             )}
+                            <DropdownMenuItem onClick={() => handleCopyInviteLink(u)} disabled={!u.email}>
+                              <Link2 className="h-4 w-4 mr-2" /> Copy Invite Link
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleResetPassword(u)} disabled={!u.email}>
                               <KeyRound className="h-4 w-4 mr-2" /> Reset Password
                             </DropdownMenuItem>
