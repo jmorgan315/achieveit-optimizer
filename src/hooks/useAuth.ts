@@ -49,6 +49,7 @@ export function useAuth() {
       setRole('user');
       setProfileLoaded(true);
       setLoading(false);
+    } else {
       if (!profile.is_active) {
         await supabase.auth.signOut();
         setUser(null);
