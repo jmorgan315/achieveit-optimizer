@@ -42,6 +42,7 @@ interface FeedbackRow {
   document_name: string | null;
   user_email: string | null;
   reimport?: { summary: ReimportSummary; changes: ReimportChange[] } | null;
+  hasFeedback: boolean;
 }
 
 interface GeneralFeedbackRow {
