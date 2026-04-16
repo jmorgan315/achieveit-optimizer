@@ -145,14 +145,15 @@ export function UploadIdentifyStep({
       const sid = await ensureSessionId();
 
       // Await session upsert inside try block
-      const { error: upsertError } = await supabase.from('processing_sessions').upsert({
-        id: sid,
-        org_name: orgName.trim(),
-        org_industry: industry,
-        document_name: uploadedFile.name,
-        document_size_bytes: uploadedFile.size,
-      }, { onConflict: 'id' });
-      if (upsertError) console.error('[UploadIdentify] Session update error:', upsertError);
+      const { error: updateError } = await supabase.from('processing_sessions')
+        .update({
+          org_name: orgName.trim(),
+          org_industry: industry,
+          document_name: uploadedFile.name,
+          document_size_bytes: uploadedFile.size,
+        })
+        .eq('id', sid);
+      if (updateError) console.error('[UploadIdentify] Session update error:', updateError);
 
       // For spreadsheets: only org lookup, then advance
       if (isSpreadsheet(uploadedFile)) {
