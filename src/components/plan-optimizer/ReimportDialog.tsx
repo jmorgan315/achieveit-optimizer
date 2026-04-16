@@ -28,6 +28,7 @@ export function ReimportDialog({ open, onOpenChange, currentItems, sessionId, on
   const [warnings, setWarnings] = useState<string[]>([]);
   const [diff, setDiff] = useState<DiffSummary | null>(null);
   const [importedItems, setImportedItems] = useState<PlanItem[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
 
   const reset = useCallback(() => {
     setState('file-select');
@@ -35,6 +36,7 @@ export function ReimportDialog({ open, onOpenChange, currentItems, sessionId, on
     setWarnings([]);
     setDiff(null);
     setImportedItems([]);
+    setIsDragging(false);
   }, []);
 
   const handleOpenChange = (open: boolean) => {
@@ -42,13 +44,9 @@ export function ReimportDialog({ open, onOpenChange, currentItems, sessionId, on
     onOpenChange(open);
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processFile = useCallback(async (buffer: ArrayBuffer) => {
     setError(null);
-
     try {
-      const buffer = await file.arrayBuffer();
       const result: ReimportResult = parseReimportFile(buffer);
       setWarnings(result.warnings);
       setImportedItems(result.items);
@@ -58,8 +56,33 @@ export function ReimportDialog({ open, onOpenChange, currentItems, sessionId, on
     } catch (err: any) {
       setError(err.message || 'Failed to parse file');
     }
-    // Reset input so same file can be re-selected
+  }, [currentItems]);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const buffer = await file.arrayBuffer();
+    await processFile(buffer);
     e.target.value = '';
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const buffer = await file.arrayBuffer();
+    await processFile(buffer);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
   };
 
   const handleApply = async () => {
@@ -67,7 +90,6 @@ export function ReimportDialog({ open, onOpenChange, currentItems, sessionId, on
     setState('applying');
 
     try {
-      // Save reimport metadata to step_results
       if (sessionId) {
         const { data: { user } } = await supabase.auth.getUser();
         const { data: currentSession } = await supabase
@@ -142,9 +164,21 @@ export function ReimportDialog({ open, onOpenChange, currentItems, sessionId, on
 
         {state === 'file-select' && (
           <div className="space-y-4 py-4">
-            <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-8 cursor-pointer hover:border-primary/50 transition-colors">
+            <label
+              className={`flex flex-col items-center justify-center border-2 border-dashed rounded-lg p-8 cursor-pointer transition-colors ${
+                isDragging
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border hover:border-primary/50'
+              }`}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+            >
               <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-              <span className="text-sm text-muted-foreground">Click to choose an .xlsx or .csv file</span>
+              <span className="text-sm text-muted-foreground">
+                {isDragging ? 'Drop file here' : 'Drag & drop a file here, or click to browse'}
+              </span>
+              <span className="text-xs text-muted-foreground mt-1">.xlsx or .csv</span>
               <input type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileChange} />
             </label>
             {error && (

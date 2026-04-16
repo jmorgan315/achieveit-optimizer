@@ -14,6 +14,7 @@ import { LoginPage } from '@/components/LoginPage';
 import { useAuth } from '@/hooks/useAuth';
 import { usePlanState } from '@/hooks/usePlanState';
 import { PlanItem, PersonMapping, PlanLevel, OrgProfile, DEFAULT_LEVELS, DedupRemovedDetail } from '@/types/plan';
+import { ReimportHistory } from '@/components/plan-optimizer/ReimportHistoryCard';
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { convertAIResponseToPlanItems, AIExtractionResponse } from '@/utils/textParser';
 import { exportToExcel } from '@/utils/exportToExcel';
@@ -79,6 +80,7 @@ const Index = () => {
   const [detectedLevels, setDetectedLevels] = useState<PlanLevel[] | null>(null);
   const [useVisionAI, setUseVisionAI] = useState(false);
   const [dedupResults, setDedupResults] = useState<DedupRemovedDetail[]>([]);
+  const [reimportHistory, setReimportHistory] = useState<ReimportHistory | null>(null);
 
   // === Legacy OrgProfileStep state (kept for future screens) ===
   const [documentHints, setDocumentHints] = useState('');
@@ -168,6 +170,7 @@ const Index = () => {
     setDetectedLevels(null);
     setUseVisionAI(false);
     setDedupResults([]);
+    setReimportHistory(null);
     setDocumentHints('');
     setKnowsLevels(false);
     setLevelCount(3);
@@ -201,6 +204,7 @@ const Index = () => {
     setDetectedLevels(null);
     setUseVisionAI(false);
     setDedupResults([]);
+    setReimportHistory(null);
     setDocumentHints('');
     setKnowsLevels(false);
     setLevelCount(3);
@@ -260,6 +264,10 @@ const Index = () => {
           // Hydrate dedup results for DedupSummaryCard
           const dedupData = (stepResults?.dedupResults || []) as DedupRemovedDetail[];
           setDedupResults(dedupData);
+
+          // Hydrate reimport history
+          const reimportData = stepResults?.reimport as ReimportHistory | undefined;
+          setReimportHistory(reimportData ?? null);
 
           if (savedFormat === 'planItem') {
             // Direct hydration — items already in PlanItem format
@@ -801,6 +809,7 @@ const Index = () => {
               orgProfile={state.orgProfile}
               sessionId={state.sessionId}
               dedupResults={dedupResults}
+              reimportHistory={reimportHistory}
               saveStatus={saveStatus}
               userId={user?.id}
               featureFlags={featureFlags}
@@ -823,6 +832,13 @@ const Index = () => {
               onApplyReimport={(newItems) => {
                 setItems(newItems, state.personMappings);
                 updateLevelsAndRecalculate(state.levels);
+                // Refresh reimport history from DB after apply
+                if (state.sessionId) {
+                  supabase.from('processing_sessions').select('step_results').eq('id', state.sessionId).single().then(({ data }) => {
+                    const sr = data?.step_results as Record<string, unknown> | null;
+                    setReimportHistory((sr?.reimport as ReimportHistory) ?? null);
+                  });
+                }
               }}
             />
           )}
