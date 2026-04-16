@@ -23,32 +23,40 @@ export default function ResetPasswordPage() {
   const isInvite = hash.includes('type=invite') || hash.includes('type=magiclink');
 
   useEffect(() => {
-    // 1. Check URL hash for explicit error params from Supabase
+    // 1. Check URL hash for explicit error params from Supabase (expired/used link)
     if (hash.includes('error=') || hash.includes('error_code=') || hash.includes('otp_expired')) {
       setLinkExpired(true);
       setCheckingSession(false);
       return;
     }
 
-    // 2. Listen for PASSWORD_RECOVERY / SIGNED_IN events
     let resolved = false;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
-        resolved = true;
-        setCheckingSession(false);
+    const markReady = () => {
+      if (resolved) return;
+      resolved = true;
+      setCheckingSession(false);
+    };
+
+    // 2. Set up listener FIRST (Supabase best practice) so we don't miss the event
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') && session) {
+        markReady();
       }
     });
 
-    // 3. Fallback: check session after a short delay
-    const timer = setTimeout(async () => {
+    // 3. Then check if a session already exists (exchange may have completed
+    //    before the listener attached, in which case no event will fire).
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) markReady();
+    });
+
+    // 4. Fallback: if no session is established within 5s, treat as expired.
+    const timer = setTimeout(() => {
       if (resolved) return;
-      const { data: { session } } = await supabase.auth.getSession();
-      const hasRecoveryToken = hash.includes('access_token') || hash.includes('refresh_token');
-      if (!session && !hasRecoveryToken) {
-        setLinkExpired(true);
-      }
+      resolved = true;
+      setLinkExpired(true);
       setCheckingSession(false);
-    }, 1500);
+    }, 5000);
 
     return () => {
       subscription.unsubscribe();
