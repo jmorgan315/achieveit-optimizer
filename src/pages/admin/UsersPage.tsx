@@ -162,7 +162,32 @@ export default function UsersPage() {
     }
   };
 
-  const handleDeleteUser = async () => {
+  const handleCopyInviteLink = async (u: UserProfile) => {
+    if (!u.email) return;
+    setActionLoading(u.id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await supabase.functions.invoke('admin-user-actions', {
+        body: { action: 'generate_invite_link', userId: u.id, email: u.email },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      });
+      if (res.error) throw res.error;
+      const payload = res.data as { error?: string; action_link?: string };
+      if (payload?.error) throw new Error(payload.error);
+      if (!payload?.action_link) throw new Error('No invite link returned');
+
+      await navigator.clipboard.writeText(payload.action_link);
+      toast.success(`Invite link copied for ${u.email}`, {
+        description: 'Paste it into Slack, email, or a message.',
+      });
+      // Reflect invited status if it was a fresh invite
+      setUsers(prev => prev.map(x => x.id === u.id && !x.invited_at ? { ...x, invited_at: new Date().toISOString() } : x));
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to generate invite link');
+    } finally {
+      setActionLoading(null);
+    }
+  };
     if (!deleteTarget) return;
     setDeleting(true);
     try {
