@@ -343,6 +343,9 @@ export default function UsersPage() {
                                 <Mail className="h-4 w-4 mr-2" /> Resend Invite
                               </DropdownMenuItem>
                             )}
+                            <DropdownMenuItem onClick={() => handleCopyInviteLink(u)} disabled={!u.email}>
+                              <Link2 className="h-4 w-4 mr-2" /> Copy Invite Link
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleResetPassword(u)} disabled={!u.email}>
                               <KeyRound className="h-4 w-4 mr-2" /> Reset Password
                             </DropdownMenuItem>
