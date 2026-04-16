@@ -110,7 +110,7 @@ ${trimmedDescription ? `Description: "${trimmedDescription}"` : ''}
 Generate a SMART metric suggestion for this strategic plan item.`;
 
     const requestBody = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 4096,
       system: systemPrompt,
       messages: [
@@ -165,7 +165,7 @@ Generate a SMART metric suggestion for this strategic plan item.`;
           session_id: sessionId,
           edge_function: "suggest-metrics",
           step_label: "Metric Suggestion",
-          model: "claude-sonnet-4-20250514",
+          model: "claude-sonnet-4-6",
           request_payload: requestBody as unknown as Record<string, unknown>,
           duration_ms: durationMs,
           status: "error",
@@ -186,7 +186,7 @@ Generate a SMART metric suggestion for this strategic plan item.`;
         session_id: sessionId,
         edge_function: "suggest-metrics",
         step_label: "Metric Suggestion",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         request_payload: requestBody as unknown as Record<string, unknown>,
         response_payload: data,
         input_tokens: tokens.input_tokens,

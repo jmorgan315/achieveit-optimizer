@@ -321,7 +321,7 @@ serve(async (req) => {
 
       const visionSystemPrompt = dedupExclusionNote ? VISION_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : VISION_AUDIT_SYSTEM_PROMPT;
       requestBody = {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 16384,
         system: visionSystemPrompt,
         messages: [{ role: "user", content: anthropicContent }],
@@ -354,7 +354,7 @@ Please audit the extraction above against the source document. Identify any miss
 
       const textSystemPrompt = dedupExclusionNote ? TEXT_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : TEXT_AUDIT_SYSTEM_PROMPT;
       requestBody = {
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: 16384,
         system: textSystemPrompt,
         messages: [{ role: "user", content: userMessage }],
@@ -387,7 +387,7 @@ Please audit the extraction above against the source document. Identify any miss
         session_id: sessionId,
         edge_function: "audit-completeness",
         step_label: "Step 2: Completeness Audit",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         duration_ms: durationMs,
         status: "error",
         error_message: `Anthropic ${response.status}: ${errText.slice(0, 500)}`,
@@ -410,7 +410,7 @@ Please audit the extraction above against the source document. Identify any miss
       session_id: sessionId,
       edge_function: "audit-completeness",
       step_label: "Step 2: Completeness Audit",
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       request_payload: logPayload,
       response_payload: aiResponse,
       input_tokens: tokens.input_tokens,
