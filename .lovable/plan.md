@@ -1,73 +1,69 @@
 
 
-## Plan: Revert Auth Emails to Supabase Built-in (Keep Resend for Notifications)
+## Diagnosis
+- First invite to `marketing@achieveit.com` at 18:45:13 → **succeeded** (status 200, hook ran). User probably needs to check spam.
+- Resend invite at 18:46:41 → **429 over_email_send_rate_limit**. Supabase's shared default SMTP throttles at ~2-4/hour.
+- Our revert to Supabase built-in solved Resend's sandbox-recipient problem but introduced this new throttling problem.
 
-### Strategy
-Revert invite + password reset flows to Supabase's built-in email senders (which work for any `@achieveit.com` recipient via Supabase's default SMTP). Keep `send-notification` on Resend (only emails session owner = jmorgan, works in sandbox). Keep `_shared/auth-emails.ts` dormant for future re-activation. Add Path B logging hygiene everywhere.
+## Recommendation: Move to Lovable's managed email infrastructure
 
-### Changes
+Lovable Cloud has a built-in branded email system that uses a verified subdomain (e.g. `notify.achieveit.com`) under Lovable's nameservers. This eliminates BOTH problems we've been juggling:
+- No Resend sandbox recipient restriction (delivers to any address)
+- No Supabase shared-SMTP rate limit (uses our own dedicated sender)
+- Branded `from:` address out of the box
+- Custom HTML templates with auto-applied AchieveIt styling
 
-**1. `supabase/functions/invite-user/index.ts`**
-- Replace `generateLink({type:"invite"})` + `sendAuthEmail` with:
-  ```ts
-  const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${origin}/reset-password`,
-  });
-  ```
-- `data.user.id` still available for `invited_at` update + activity log.
-- Remove the `buildInviteEmail` / `sendAuthEmail` imports.
-- Add `console.error("[invite-user] ...", error)` before each non-2xx return.
+It also removes the dormant Resend complexity entirely for auth emails.
 
-**2. `supabase/functions/admin-user-actions/index.ts`**
-- **`reset_password`**: Replace `generateLink({type:"recovery"})` + `sendAuthEmail` with:
-  ```ts
-  const { error } = await adminClient.auth.admin.generateLink({
-    type: "recovery",
-    email,
-    options: { redirectTo: `${origin}/reset-password` },
-  });
-  ```
-  Wait — `generateLink` alone doesn't send. Need `resetPasswordForEmail` on a non-admin client. Use the anon `callerClient` pattern, or simpler: use `adminClient.auth.resetPasswordForEmail(email, { redirectTo })` (works on the auth namespace, not admin). Will verify the exact API during implementation — fallback is to construct an anon client and call `auth.resetPasswordForEmail`.
-- **`resend_invite`**: Same swap — use `inviteUserByEmail(email, { redirectTo })`. Keep `invited_at` update + activity log.
-- **`delete_user`**: Untouched.
-- Add `console.error` before each non-2xx return.
+## Plan
 
-**3. `supabase/functions/send-notification/index.ts`**
-- No changes. Stays on Resend.
+### 1. Set up email domain (one-time, requires DNS)
+Open the email domain setup dialog. Steps inside the dialog:
+- Pick subdomain (default `notify` → sender becomes `notify@achieveit.com`)
+- Add the 2 NS records shown at the achieveit.com DNS provider
+- Wait for verification (DNS propagation, usually <1hr)
 
-**4. `supabase/functions/request-password-reset/index.ts`**
-- Self-service forgot-password. Currently uses Resend. Two options:
-  - **(a)** Revert to Supabase built-in: use anon client `auth.resetPasswordForEmail(email, { redirectTo })`. Keeps the rate limit + always-200 enumeration protection.
-  - **(b)** Leave on Resend — but it would only deliver to jmorgan, breaking forgot-password for anyone else.
-- Going with **(a)** — consistent with the revert intent. Add `console.error` for failures (still return 200 to client).
+DNS verification doesn't block scaffolding — we can build the templates and deploy immediately.
 
-**5. `src/hooks/useAuth.ts`**
-- `resetPassword()` currently invokes `request-password-reset` edge function. Keep that wiring — the edge function itself now uses Supabase built-in, so the client doesn't need to change.
+### 2. Scaffold AchieveIt-branded auth email templates
+Generates 6 React Email templates (signup, recovery, invite, magic-link, email-change, reauthentication) plus the `auth-email-hook` edge function that intercepts ALL Supabase auth emails. Auto-styled with:
+- AchieveIt green primary button
+- Poppins font
+- AchieveIt logo (from `public/`) at top of each email
+- Copy adapted to AchieveIt voice ("Welcome to AchieveIt Plan Optimizer", etc.)
 
-**6. `_shared/auth-emails.ts` + `FROM_ADDRESS`**
-- Keep file as-is. No imports from invite-user / admin-user-actions / request-password-reset after revert. Still imported by `send-notification`.
+### 3. Deploy the hook
+Once `auth-email-hook` is deployed, ALL Supabase-issued auth emails (invites, password resets, forgot-password) automatically route through it — no changes needed to `invite-user`, `admin-user-actions`, or `request-password-reset`. They keep calling `inviteUserByEmail` / `resetPasswordForEmail`, but Supabase routes the actual delivery through our branded templates instead of the default shared sender.
 
-**7. `src/pages/admin/UsersPage.tsx`** (Path B UI)
-- Surface specific error text from edge function responses in toasts (e.g., "Email send failed: …") instead of generic "Failed to invite user". Read `error` field from response body when non-2xx.
+### 4. Cleanup (after DNS verifies)
+- Remove dormant `_shared/auth-emails.ts` (Resend-based) — no longer needed for auth
+- Decide what to do with `send-notification` (still on Resend gateway)
+   - Option A: Migrate it too → use Lovable's `scaffold_transactional_email` (consistent infrastructure, same verified domain)
+   - Option B: Leave on Resend for now (works fine for the single recipient case)
+- Disconnect Resend connector if no longer used
 
-**8. `supabase/config.toml`**
-- No changes needed. `request-password-reset` keeps `verify_jwt = false`.
+### 5. What stays the same
+- `useAuth.resetPassword()` still calls `request-password-reset` edge function
+- `request-password-reset` still uses anon-client `resetPasswordForEmail` with rate-limit + enumeration protection — but emails now ship via the branded hook
+- All existing UI flows (Users admin page, Forgot password link) unchanged
 
-### Files changed
+## Immediate workaround (while we set this up)
+Tell user to:
+1. Check spam folder for original 18:45:13 invite — it likely arrived
+2. Wait ~1 hour before retrying resend (rate limit resets)
 
+## Files affected
 | File | Change |
 |------|--------|
-| `supabase/functions/invite-user/index.ts` | Revert to `inviteUserByEmail`; add console.error logging |
-| `supabase/functions/admin-user-actions/index.ts` | Revert `reset_password` + `resend_invite` to Supabase built-in; add logging |
-| `supabase/functions/request-password-reset/index.ts` | Revert to anon client `resetPasswordForEmail`; keep rate limit + enumeration protection; add server-side logging |
-| `src/pages/admin/UsersPage.tsx` | Surface edge function error details in admin toasts |
-| `supabase/functions/send-notification/index.ts` | Untouched |
-| `supabase/functions/_shared/auth-emails.ts` | Untouched (dormant for future re-activation) |
-| `.lovable/memory/features/auth-email-routing.md` | Update to reflect: notifications on Resend, auth emails on Supabase default until domain verified |
-| `.lovable/memory/index.md` | Update reference summary line |
+| New: `supabase/functions/auth-email-hook/index.ts` | Webhook handler routing all auth emails through queue |
+| New: `supabase/functions/_shared/email-templates/*.tsx` | 6 React Email templates, AchieveIt branded |
+| New: `email_send_log`, `email_send_state`, `suppressed_emails`, `email_unsubscribe_tokens` tables, `auth_emails` + `transactional_emails` pgmq queues, pg_cron job | Created automatically by infra setup |
+| `_shared/auth-emails.ts` | Delete (after migration confirmed working) |
+| `invite-user/index.ts`, `admin-user-actions/index.ts`, `request-password-reset/index.ts` | No changes needed — they keep calling Supabase native methods, hook intercepts |
+| `.lovable/memory/features/auth-email-routing.md` | Update to reflect managed email infra |
 
-### Trade-offs
-- **Branding regression**: Invite + password reset emails revert to Supabase's plain default templates (no green AchieveIt CTA). Acceptable until domain verification.
-- **Sender**: Supabase default emails ship from `noreply@mail.app.supabase.io` — functional but unbranded.
-- **Re-activation path**: Once `achieveit.com` is verified in Resend, swap back to the `generateLink` + `sendAuthEmail` pattern (already in git history) and update `FROM_ADDRESS` to `notify@achieveit.com`.
+## What I need from you
+Confirm: **proceed with email domain setup?** You'll need DNS access to achieveit.com to add 2 NS records.
+
+If yes, I'll open the email setup dialog as the first step, then scaffold + deploy the templates. After you complete the dialog and DNS verifies, invites and password resets become branded and unthrottled automatically.
 
