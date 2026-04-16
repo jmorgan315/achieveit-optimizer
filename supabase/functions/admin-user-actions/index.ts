@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { buildInviteEmail, buildRecoveryEmail, sendAuthEmail } from "../_shared/auth-emails.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,19 +44,28 @@ Deno.serve(async (req) => {
     }
 
     const { action, userId, email } = await req.json();
+    const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || Deno.env.get("SITE_URL") || supabaseUrl.replace('.supabase.co', '.lovable.app');
 
     if (action === "reset_password") {
       if (!email || typeof email !== "string") {
         return json({ error: "Email is required" }, 400);
       }
-      const { error } = await adminClient.auth.admin.generateLink({
+
+      const { data, error } = await adminClient.auth.admin.generateLink({
         type: "recovery",
         email,
+        options: { redirectTo: `${origin}/reset-password` },
       });
-      if (error) return json({ error: error.message }, 400);
-      await adminClient.auth.resetPasswordForEmail(email, {
-        redirectTo: `${req.headers.get("origin") || ""}/reset-password`,
-      });
+      if (error || !data?.properties?.action_link) {
+        return json({ error: error?.message ?? "Failed to generate recovery link" }, 400);
+      }
+
+      const { subject, html } = buildRecoveryEmail(data.properties.action_link, email);
+      const send = await sendAuthEmail({ to: email, subject, html });
+      if (!send.ok) {
+        return json({ error: `Email send failed: ${send.error}` }, 502);
+      }
+
       return json({ success: true });
     }
 
@@ -64,14 +74,20 @@ Deno.serve(async (req) => {
         return json({ error: "Email is required" }, 400);
       }
 
-      const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || Deno.env.get("SITE_URL") || supabaseUrl.replace('.supabase.co', '.lovable.app');
-
-      const { error } = await adminClient.auth.admin.generateLink({
+      const { data, error } = await adminClient.auth.admin.generateLink({
         type: "invite",
         email,
         options: { redirectTo: `${origin}/reset-password` },
       });
-      if (error) return json({ error: error.message }, 400);
+      if (error || !data?.properties?.action_link) {
+        return json({ error: error?.message ?? "Failed to generate invite link" }, 400);
+      }
+
+      const { subject, html } = buildInviteEmail(data.properties.action_link, email);
+      const send = await sendAuthEmail({ to: email, subject, html });
+      if (!send.ok) {
+        return json({ error: `Email send failed: ${send.error}` }, 502);
+      }
 
       // Update invited_at
       if (userId) {
