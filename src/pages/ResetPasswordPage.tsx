@@ -22,6 +22,21 @@ export default function ResetPasswordPage() {
   const hash = typeof window !== 'undefined' ? window.location.hash : '';
   const isInvite = hash.includes('type=invite') || hash.includes('type=magiclink');
 
+  // Navigate home cleanly: clear hash, try router, fall back to hard nav.
+  const goHome = () => {
+    try {
+      window.history.replaceState(null, '', '/');
+    } catch {
+      // ignore
+    }
+    navigate('/', { replace: true });
+    setTimeout(() => {
+      if (window.location.pathname !== '/') {
+        window.location.href = '/';
+      }
+    }, 300);
+  };
+
   useEffect(() => {
     // 1. Check URL hash for explicit error params from Supabase (expired/used link)
     if (hash.includes('error=') || hash.includes('error_code=') || hash.includes('otp_expired')) {
@@ -31,36 +46,67 @@ export default function ResetPasswordPage() {
     }
 
     let resolved = false;
+    let cancelled = false;
     const markReady = () => {
       if (resolved) return;
       resolved = true;
       setCheckingSession(false);
     };
 
-    // 2. Set up listener FIRST (Supabase best practice) so we don't miss the event
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') && session) {
-        markReady();
+    // Detect a recovery/invite token in the hash. If present, clear any stale
+    // local session BEFORE letting the SDK exchange the token — otherwise an
+    // existing session can interfere with PASSWORD_RECOVERY firing reliably.
+    const hasRecoveryToken =
+      hash.includes('access_token=') ||
+      hash.includes('type=invite') ||
+      hash.includes('type=recovery') ||
+      hash.includes('type=magiclink');
+
+    let subscription: { unsubscribe: () => void } | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const setup = async () => {
+      if (hasRecoveryToken) {
+        try {
+          // Local-only signOut: clears localStorage session without hitting
+          // the rate-limited signout endpoint and without invalidating the
+          // recovery token in the URL.
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch (e) {
+          console.warn('Local signOut before token exchange failed:', e);
+        }
       }
-    });
+      if (cancelled) return;
 
-    // 3. Then check if a session already exists (exchange may have completed
-    //    before the listener attached, in which case no event will fire).
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) markReady();
-    });
+      // Set up listener FIRST so we don't miss the event from the exchange.
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        if ((event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') && session) {
+          markReady();
+        }
+      });
+      subscription = data.subscription;
 
-    // 4. Fallback: if no session is established within 5s, treat as expired.
-    const timer = setTimeout(() => {
-      if (resolved) return;
-      resolved = true;
-      setLinkExpired(true);
-      setCheckingSession(false);
-    }, 5000);
+      // Then check if a session already exists (exchange may have completed
+      // before the listener attached, in which case no event will fire).
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session) markReady();
+      });
+
+      // Fallback: if no session is established within 5s, treat as expired.
+      timer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        setLinkExpired(true);
+        setCheckingSession(false);
+      }, 5000);
+    };
+
+    setup();
 
     return () => {
-      subscription.unsubscribe();
-      clearTimeout(timer);
+      cancelled = true;
+      subscription?.unsubscribe();
+      if (timer) clearTimeout(timer);
     };
   }, [hash]);
 
