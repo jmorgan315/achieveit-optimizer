@@ -1,21 +1,34 @@
 
 
-## Settings Page Token Pricing Cleanup
+## Upgrade Claude Sonnet 4 → Sonnet 4.6
 
-Three cosmetic changes to `src/pages/admin/SettingsPage.tsx`:
+The docs confirm: **`claude-sonnet-4-6`** is the correct API ID. Pricing: $3/$15 per MTok (unchanged from Sonnet 4.5).
 
-1. **Read-only model names**: Replace the editable `Input` for model name with a plain text display showing a friendly name. Remove the "Add Model" button.
+### Changes
 
-2. **Friendly display names**: Add a `MODEL_DISPLAY_NAMES` map:
-   - `claude-opus-4-6` → "Claude Opus 4.6"
-   - `claude-sonnet-4-20250514` → "Claude Sonnet 4"
-   - Fallback: raw model string for any unmapped models
+**Edge functions** — replace `claude-sonnet-4-20250514` → `claude-sonnet-4-6` in all occurrences:
 
-3. **Remove trash icons**: Drop the `Trash2` delete button column entirely. Adjust the grid from `grid-cols-[1fr_120px_120px_40px]` to `grid-cols-[1fr_120px_120px]`.
+| File | Occurrences |
+|------|-------------|
+| `supabase/functions/audit-completeness/index.ts` | model string in request body + logging |
+| `supabase/functions/validate-hierarchy/index.ts` | model string in request body + logging |
+| `supabase/functions/suggest-metrics/index.ts` | model string in request body + logging |
 
-### Files
+**Settings display** — `src/pages/admin/SettingsPage.tsx`:
+- Update `MODEL_DISPLAY_NAMES` key from `claude-sonnet-4-20250514` to `claude-sonnet-4-6`
+- Display name: "Claude Sonnet 4.6"
 
-| File | Change |
-|------|--------|
-| `src/pages/admin/SettingsPage.tsx` | Add display name map, make model column read-only text, remove Add Model button, remove delete column |
+**Database migration** — update `admin_settings` pricing row:
+```sql
+UPDATE public.admin_settings
+SET value = jsonb_set(
+  value - 'claude-sonnet-4-20250514',
+  '{claude-sonnet-4-6}',
+  COALESCE(value->'claude-sonnet-4-20250514', '{"input":3,"output":15}')
+)
+WHERE key = 'model_rates'
+  AND value ? 'claude-sonnet-4-20250514';
+```
+
+No changes to Opus (already `claude-opus-4-6`). All edge functions auto-deploy.
 
