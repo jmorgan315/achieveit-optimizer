@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
 import { logActivity } from '@/utils/logActivity';
@@ -77,7 +78,15 @@ export function useAuth() {
   const prevUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const navigate = useNavigate();
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      // Redirect to password setup for invite/recovery tokens
+      if (_event === 'PASSWORD_RECOVERY') {
+        navigate('/reset-password');
+        return;
+      }
+
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       if (currentUser) {

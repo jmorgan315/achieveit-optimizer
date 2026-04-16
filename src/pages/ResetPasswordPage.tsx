@@ -16,6 +16,10 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false);
   const navigate = useNavigate();
 
+  // Detect invite vs reset from URL hash
+  const isInvite = window.location.hash.includes('type=invite') ||
+    window.location.hash.includes('type=magiclink');
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -45,8 +49,8 @@ export default function ResetPasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle>Set New Password</CardTitle>
-          <CardDescription>Enter your new password below</CardDescription>
+          <CardTitle>{isInvite ? 'Welcome! Set Your Password' : 'Set New Password'}</CardTitle>
+          <CardDescription>{isInvite ? 'Create a password for your new account' : 'Enter your new password below'}</CardDescription>
         </CardHeader>
         <CardContent>
           {success ? (
