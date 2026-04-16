@@ -158,8 +158,9 @@ export function useAuth() {
     if (!email.toLowerCase().endsWith('@achieveit.com')) {
       return { error: { message: 'Please use your @achieveit.com email address.' } };
     }
-    // Route through our edge function so the email is sent via Resend with AchieveIt branding
-    // (instead of Supabase's default recovery email).
+    // Route through our edge function (rate-limited, enumeration-safe).
+    // The function uses Supabase's built-in recovery email until the achieveit.com
+    // domain is verified in Resend.
     const { data, error } = await supabase.functions.invoke('request-password-reset', {
       body: { email },
     });

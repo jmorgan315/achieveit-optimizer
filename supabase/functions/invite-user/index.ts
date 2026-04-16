@@ -1,5 +1,4 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { buildInviteEmail, sendAuthEmail } from "../_shared/auth-emails.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,6 +28,7 @@ Deno.serve(async (req) => {
     });
     const { data: { user: caller } } = await callerClient.auth.getUser();
     if (!caller) {
+      console.error("[invite-user] Unauthorized: no caller");
       return json({ error: "Unauthorized" }, 401);
     }
 
@@ -40,35 +40,29 @@ Deno.serve(async (req) => {
       .single();
 
     if (profile?.role !== 'super_admin') {
+      console.error("[invite-user] Forbidden: caller is not super_admin", caller.id);
       return json({ error: "Super admin access required" }, 403);
     }
 
     const { email } = await req.json();
     if (!email || typeof email !== "string" || !email.toLowerCase().endsWith("@achieveit.com")) {
+      console.error("[invite-user] Invalid email:", email);
       return json({ error: "Only @achieveit.com emails allowed" }, 400);
     }
 
     const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || Deno.env.get("SITE_URL") || supabaseUrl.replace('.supabase.co', '.lovable.app');
 
-    // Mint an invite link (creates the user if needed) without sending Supabase's default email.
-    const { data, error } = await adminClient.auth.admin.generateLink({
-      type: "invite",
-      email,
-      options: { redirectTo: `${origin}/reset-password` },
+    // Use Supabase's built-in invite (sends default invitation email).
+    // Resend is intentionally not used here until the achieveit.com domain is verified.
+    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+      redirectTo: `${origin}/reset-password`,
     });
-    if (error || !data?.properties?.action_link) {
-      return json({ error: error?.message ?? "Failed to generate invite link" }, 400);
+    if (error) {
+      console.error("[invite-user] inviteUserByEmail failed:", error.message);
+      return json({ error: error.message }, 400);
     }
 
-    const actionLink = data.properties.action_link;
-    const newUserId = data.user?.id;
-
-    // Send branded email via Resend
-    const { subject, html } = buildInviteEmail(actionLink, email);
-    const send = await sendAuthEmail({ to: email, subject, html });
-    if (!send.ok) {
-      return json({ error: `Email send failed: ${send.error}` }, 502);
-    }
+    const newUserId = data?.user?.id;
 
     // Mark invited_at on profile
     if (newUserId) {
@@ -87,6 +81,7 @@ Deno.serve(async (req) => {
 
     return json({ success: true, userId: newUserId });
   } catch (err) {
+    console.error("[invite-user] Exception:", err);
     return json({ error: (err as Error).message }, 500);
   }
 });
