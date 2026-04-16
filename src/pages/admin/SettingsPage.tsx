@@ -5,9 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Trash2, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { format } from 'date-fns';
 import { invalidateModelRatesCache } from '@/hooks/useModelRates';
+
+const MODEL_DISPLAY_NAMES: Record<string, string> = {
+  'claude-opus-4-6': 'Claude Opus 4.6',
+  'claude-sonnet-4-20250514': 'Claude Sonnet 4',
+};
 
 interface RateEntry {
   model: string;
@@ -84,10 +89,8 @@ export default function SettingsPage() {
     setSaving(false);
   };
 
-  const addModel = () => setEntries([...entries, { model: '', input: 0, output: 0 }]);
-  const removeModel = (idx: number) => setEntries(entries.filter((_, i) => i !== idx));
-  const updateEntry = (idx: number, field: keyof RateEntry, value: string) => {
-    setEntries(entries.map((e, i) => i === idx ? { ...e, [field]: field === 'model' ? value : Number(value) || 0 } : e));
+  const updateEntry = (idx: number, field: 'input' | 'output', value: string) => {
+    setEntries(entries.map((e, i) => i === idx ? { ...e, [field]: Number(value) || 0 } : e));
   };
 
   if (loading) return <div className="p-6 text-muted-foreground">Loading…</div>;
@@ -101,22 +104,17 @@ export default function SettingsPage() {
           <CardTitle className="text-base">Token Pricing (per million tokens)</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-[1fr_120px_120px_40px] gap-2 text-xs font-medium text-muted-foreground">
+          <div className="grid grid-cols-[1fr_120px_120px] gap-2 text-xs font-medium text-muted-foreground">
             <span>Model</span>
             <span>Input ($)</span>
             <span>Output ($)</span>
-            <span />
           </div>
 
           {entries.map((entry, idx) => (
-            <div key={idx} className="grid grid-cols-[1fr_120px_120px_40px] gap-2 items-center">
-              <Input
-                value={entry.model}
-                onChange={e => updateEntry(idx, 'model', e.target.value)}
-                placeholder="model-name"
-                className="h-9 text-sm"
-                disabled={!isSuperAdmin}
-              />
+            <div key={idx} className="grid grid-cols-[1fr_120px_120px] gap-2 items-center">
+              <span className="text-sm font-medium px-3 h-9 flex items-center">
+                {MODEL_DISPLAY_NAMES[entry.model] || entry.model}
+              </span>
               <Input
                 type="number"
                 value={entry.input}
@@ -135,19 +133,11 @@ export default function SettingsPage() {
                 step={0.01}
                 disabled={!isSuperAdmin}
               />
-              {isSuperAdmin ? (
-                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => removeModel(idx)}>
-                  <Trash2 className="h-4 w-4 text-muted-foreground" />
-                </Button>
-              ) : <div className="h-9 w-9" />}
             </div>
           ))}
 
           {isSuperAdmin && (
             <div className="flex items-center gap-3 pt-2">
-              <Button variant="outline" size="sm" onClick={addModel}>
-                <Plus className="h-4 w-4 mr-1" /> Add Model
-              </Button>
               <Button size="sm" onClick={handleSave} disabled={saving}>
                 <Save className="h-4 w-4 mr-1" /> {saving ? 'Saving…' : 'Save'}
               </Button>
