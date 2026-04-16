@@ -1,5 +1,4 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { buildInviteEmail, buildRecoveryEmail, sendAuthEmail } from "../_shared/auth-emails.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -29,6 +28,7 @@ Deno.serve(async (req) => {
     });
     const { data: { user: caller } } = await callerClient.auth.getUser();
     if (!caller) {
+      console.error("[admin-user-actions] Unauthorized: no caller");
       return json({ error: "Unauthorized" }, 401);
     }
 
@@ -40,6 +40,7 @@ Deno.serve(async (req) => {
       .single();
 
     if (profile?.role !== 'super_admin') {
+      console.error("[admin-user-actions] Forbidden: caller is not super_admin", caller.id);
       return json({ error: "Super admin access required" }, 403);
     }
 
@@ -48,22 +49,19 @@ Deno.serve(async (req) => {
 
     if (action === "reset_password") {
       if (!email || typeof email !== "string") {
+        console.error("[admin-user-actions:reset_password] Missing email");
         return json({ error: "Email is required" }, 400);
       }
 
-      const { data, error } = await adminClient.auth.admin.generateLink({
-        type: "recovery",
-        email,
-        options: { redirectTo: `${origin}/reset-password` },
+      // Use Supabase's built-in recovery email (anon client triggers default email send).
+      // Resend is intentionally not used here until the achieveit.com domain is verified.
+      const anonAuthClient = createClient(supabaseUrl, anonKey);
+      const { error } = await anonAuthClient.auth.resetPasswordForEmail(email, {
+        redirectTo: `${origin}/reset-password`,
       });
-      if (error || !data?.properties?.action_link) {
-        return json({ error: error?.message ?? "Failed to generate recovery link" }, 400);
-      }
-
-      const { subject, html } = buildRecoveryEmail(data.properties.action_link, email);
-      const send = await sendAuthEmail({ to: email, subject, html });
-      if (!send.ok) {
-        return json({ error: `Email send failed: ${send.error}` }, 502);
+      if (error) {
+        console.error("[admin-user-actions:reset_password] resetPasswordForEmail failed:", error.message);
+        return json({ error: error.message }, 400);
       }
 
       return json({ success: true });
@@ -71,22 +69,17 @@ Deno.serve(async (req) => {
 
     if (action === "resend_invite") {
       if (!email || typeof email !== "string") {
+        console.error("[admin-user-actions:resend_invite] Missing email");
         return json({ error: "Email is required" }, 400);
       }
 
-      const { data, error } = await adminClient.auth.admin.generateLink({
-        type: "invite",
-        email,
-        options: { redirectTo: `${origin}/reset-password` },
+      // Use Supabase's built-in invite (sends default invitation email).
+      const { error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+        redirectTo: `${origin}/reset-password`,
       });
-      if (error || !data?.properties?.action_link) {
-        return json({ error: error?.message ?? "Failed to generate invite link" }, 400);
-      }
-
-      const { subject, html } = buildInviteEmail(data.properties.action_link, email);
-      const send = await sendAuthEmail({ to: email, subject, html });
-      if (!send.ok) {
-        return json({ error: `Email send failed: ${send.error}` }, 502);
+      if (error) {
+        console.error("[admin-user-actions:resend_invite] inviteUserByEmail failed:", error.message);
+        return json({ error: error.message }, 400);
       }
 
       // Update invited_at
@@ -109,15 +102,21 @@ Deno.serve(async (req) => {
 
     if (action === "delete_user") {
       if (!userId || typeof userId !== "string") {
+        console.error("[admin-user-actions:delete_user] Missing userId");
         return json({ error: "userId is required" }, 400);
       }
       const { error } = await adminClient.auth.admin.deleteUser(userId);
-      if (error) return json({ error: error.message }, 400);
+      if (error) {
+        console.error("[admin-user-actions:delete_user] deleteUser failed:", error.message);
+        return json({ error: error.message }, 400);
+      }
       return json({ success: true });
     }
 
+    console.error("[admin-user-actions] Unknown action:", action);
     return json({ error: "Unknown action. Use 'reset_password', 'resend_invite', or 'delete_user'." }, 400);
   } catch (err) {
+    console.error("[admin-user-actions] Exception:", err);
     return json({ error: (err as Error).message }, 500);
   }
 });
