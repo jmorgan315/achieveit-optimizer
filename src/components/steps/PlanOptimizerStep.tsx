@@ -82,6 +82,7 @@ interface PlanOptimizerStepProps {
   onStartOver?: () => void;
   onRestoreDedupItem?: (detail: DedupRemovedDetail) => void;
   onDismissDedupItem?: (detail: DedupRemovedDetail) => void;
+  onApplyReimport?: (items: PlanItem[]) => void;
 }
 
 interface MetricSuggestion {
@@ -117,6 +118,7 @@ export function PlanOptimizerStep({
   onStartOver,
   onRestoreDedupItem,
   onDismissDedupItem,
+  onApplyReimport,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
     if (items.length <= 80) return new Set(items.map((i) => i.id));
