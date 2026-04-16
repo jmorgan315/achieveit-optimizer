@@ -50,6 +50,7 @@ import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
 import { ColumnVisibilityPopover } from '@/components/plan-optimizer/ColumnVisibilityPopover';
 import { BulkActionBar } from '@/components/plan-optimizer/BulkActionBar';
 import { ReimportDialog } from '@/components/plan-optimizer/ReimportDialog';
+import { ReimportHistoryCard, ReimportHistory } from '@/components/plan-optimizer/ReimportHistoryCard';
 import { DEFAULT_VISIBLE_COLUMNS, ALL_COLUMNS } from '@/components/plan-optimizer/columnDefs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -66,6 +67,7 @@ interface PlanOptimizerStepProps {
   orgProfile?: OrgProfile;
   sessionId?: string;
   dedupResults?: DedupRemovedDetail[];
+  reimportHistory?: ReimportHistory | null;
   saveStatus?: SaveStatus;
   userId?: string;
   featureFlags?: Record<string, boolean>;
@@ -102,6 +104,7 @@ export function PlanOptimizerStep({
   orgProfile,
   sessionId,
   dedupResults,
+  reimportHistory,
   saveStatus,
   userId,
   featureFlags,
