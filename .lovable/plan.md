@@ -1,42 +1,41 @@
 
 
-## Plan: Fix first_login_at Not Being Set for Invited Users
+## Plan: Fix RLS Policy Blocking Admin Profile Updates
 
 ### Root Cause
-The invite flow bypasses `useAuth` entirely (`ResetPasswordPage` is standalone). After password set, navigation to `/` may trigger a `PASSWORD_RECOVERY` replay in `onAuthStateChange`, causing an early return that skips `checkDomainAndProfile`. The `first_login_at` update never runs.
+The "Users can update own profile" RLS policy has `is_admin = false` hardcoded in its `WITH CHECK`. This means **any user with `is_admin = true` is blocked from updating their own profile** — even just first/last name. The save call is already correct (only sends `first_name`, `last_name`), but Postgres evaluates the WITH CHECK against the entire resulting row.
 
-### Fix (3 changes)
+All 6 current users have `is_admin = true`, so none of them can update their own profile through this policy. Super admins happen to work because they match the separate "Super admins can update all profiles" policy.
 
-**1. `src/pages/ResetPasswordPage.tsx` — Set `first_login_at` after password is set**
-After successful `updateUser({ password })`, immediately call:
-```ts
-await supabase.from('user_profiles')
-  .update({ first_login_at: new Date().toISOString() })
-  .eq('id', (await supabase.auth.getUser()).data.user?.id);
-```
-This is the primary fix — catches invite users directly at the moment they complete onboarding.
+### Fix: Database Migration
 
-**2. `src/hooks/useAuth.ts` — Don't skip profile check after PASSWORD_RECOVERY redirect**
-Currently line 94-97 returns early. Change to: navigate to `/reset-password` but still fall through to `checkDomainAndProfile` so subsequent events (after user sets password and returns) aren't blocked. Also add `.then()` error logging to the `first_login_at` update call.
+Replace the "Users can update own profile" policy with one that:
+- Allows users to update their own row (`id = auth.uid()`)
+- Prevents them from changing protected fields (`is_admin`, `role`, `is_active`, `feature_flags`) — compare new values to current values
+- Does NOT hardcode `is_admin = false`
 
-**3. Database migration — Backfill existing users**
 ```sql
-UPDATE public.user_profiles
-SET first_login_at = (
-  SELECT MIN(created_at) FROM public.user_activity_log
-  WHERE user_activity_log.user_id = user_profiles.id
-    AND activity_type = 'login'
-)
-WHERE first_login_at IS NULL
-  AND id IN (SELECT DISTINCT user_id FROM public.user_activity_log WHERE activity_type = 'login');
+DROP POLICY "Users can update own profile" ON public.user_profiles;
+
+CREATE POLICY "Users can update own profile" ON public.user_profiles
+FOR UPDATE TO authenticated
+USING (id = auth.uid())
+WITH CHECK (
+  id = auth.uid()
+  AND is_admin = (SELECT up.is_admin FROM public.user_profiles up WHERE up.id = auth.uid())
+  AND is_active = (SELECT up.is_active FROM public.user_profiles up WHERE up.id = auth.uid())
+  AND feature_flags = (SELECT up.feature_flags FROM public.user_profiles up WHERE up.id = auth.uid())
+  AND role = (SELECT up.role FROM public.user_profiles up WHERE up.id = auth.uid())
+);
 ```
-This fixes Edelmary and any other users who already logged in before this fix.
+
+This ensures protected fields can't change, but `first_name`, `last_name`, and `updated_at` can be freely edited.
 
 ### Files changed
 
 | File | Change |
 |------|--------|
-| `src/pages/ResetPasswordPage.tsx` | Update `first_login_at` after password set |
-| `src/hooks/useAuth.ts` | Don't skip `checkDomainAndProfile` after PASSWORD_RECOVERY; add error handling |
-| Migration SQL | Backfill `first_login_at` from activity log |
+| Migration SQL | Replace UPDATE policy on `user_profiles` |
+
+No frontend changes needed — the save call already sends only editable fields.
 
