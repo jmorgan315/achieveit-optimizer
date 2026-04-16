@@ -65,10 +65,13 @@ export function useAuth() {
 
       // Track first login
       if (!(profile as any).first_login_at) {
-        await supabase
+        supabase
           .from('user_profiles')
           .update({ first_login_at: new Date().toISOString() } as any)
-          .eq('id', currentUser.id);
+          .eq('id', currentUser.id)
+          .then(({ error: updateErr }) => {
+            if (updateErr) console.error('Failed to set first_login_at:', updateErr);
+          });
       }
 
       const profileRole = (profile as any).role as string | undefined;
@@ -93,7 +96,7 @@ export function useAuth() {
       // Redirect to password setup for invite/recovery tokens
       if (_event === 'PASSWORD_RECOVERY') {
         navigate('/reset-password');
-        return;
+        // Don't return — fall through so profile check still runs for subsequent events
       }
 
       const currentUser = session?.user ?? null;

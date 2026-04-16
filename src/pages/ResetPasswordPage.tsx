@@ -35,11 +35,25 @@ export default function ResetPasswordPage() {
 
     setLoading(true);
     const { error } = await supabase.auth.updateUser({ password });
-    setLoading(false);
 
     if (error) {
+      setLoading(false);
       setError(error.message);
     } else {
+      // Mark first_login_at for invited users completing onboarding
+      try {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        if (currentUser) {
+          await supabase
+            .from('user_profiles')
+            .update({ first_login_at: new Date().toISOString() } as any)
+            .eq('id', currentUser.id)
+            .is('first_login_at', null);
+        }
+      } catch (e) {
+        console.error('Failed to set first_login_at:', e);
+      }
+      setLoading(false);
       setSuccess(true);
       setTimeout(() => navigate('/'), 2000);
     }
