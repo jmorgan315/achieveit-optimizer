@@ -1,45 +1,45 @@
 
-## Plan: Fix invite link issues on ResetPasswordPage
 
-### Diagnosis
+## Plan: Rotate carets on admin Collapsible sections
 
-**(1) "Expired" in normal browsers, works in incognito** — Confirmed root cause. When a user already has a Supabase session in localStorage (e.g. they're logged in as themselves in another tab, or have a stale session), the SDK's `detectSessionInUrl` exchange races with the existing session. The `PASSWORD_RECOVERY` event may not fire reliably because the client thinks it's already authenticated, so our 5s readiness gate times out and shows the expired UI. Incognito has no stored session, so the exchange runs cleanly.
+### Findings
 
-**(2) "Request a new link" button does nothing** — Looking at current `ResetPasswordPage.tsx` lines 119-123, both buttons call `navigate('/')`. The likely failure is that after `linkExpired` fires from a Supabase error redirect, the browser URL still has `#error=...&error_code=otp_expired` in the hash. `navigate('/')` updates the path but leaves the hash, and on `/` the `LoginPage` may not re-render or the hash interferes. Also possible: a stale session from the failed exchange leaves the app in an odd state where Index redirects elsewhere.
+- **Admin sidebar** (`AdminLayout.tsx`) is a flat nav with no expandable groups — no carets to fix there.
+- **Real targets** are 4 `Collapsible` triggers on `SessionDetailPage.tsx` whose `ChevronDown` icons stay static when expanded:
+  1. Line 154 — Document Classification card header
+  2. Line 452 — Re-import "View Details" trigger
+  3. Line 483 — API Call Timeline rows (explicitly mentioned by user)
+  4. Line 557 — Results Preview header
+- One trigger (line 178, "Full Classification JSON") already rotates correctly using a tracked `expanded` state — leave it as-is.
+- `FeedbackPage.tsx` (line 308) swaps between `ChevronDown` and `ChevronRight` icons, which is a different (also valid) pattern — leave it as-is.
 
-### The fix
+### Approach
 
-**File: `src/pages/ResetPasswordPage.tsx`**
+Radix `CollapsibleTrigger` automatically gets `data-state="open" | "closed"`. The same Tailwind pattern already used in `src/components/ui/accordion.tsx` works perfectly:
 
-1. **Pre-mount session clear**: On mount, detect if the hash contains `access_token=`, `type=invite`, `type=recovery`, or `type=magiclink`. If yes AND no error params, call `supabase.auth.signOut({ scope: 'local' })` BEFORE setting up the listener and `getSession()` check. This clears any stale local session without invalidating the recovery token. Use `scope: 'local'` so we don't hit Supabase's signout endpoint (which would also be rate-limited and unnecessary).
+```
+[&[data-state=open]>svg]:rotate-180
+```
 
-2. **Sequencing**: 
-   - Detect error hash → expired UI immediately (unchanged).
-   - Detect recovery/invite token in hash → `signOut({scope:'local'})` → then attach `onAuthStateChange` listener → then `getSession()` poll → 5s timeout fallback.
-   - No token in hash → existing path.
+Combined with `transition-transform duration-200` on the chevron itself, this gives a smooth 180° rotation when the section opens — without needing `useState` or controlled open props.
 
-3. **Fix "Request a new link" button**:
-   - Create a `goHome()` helper that:
-     - Clears the URL hash first: `window.history.replaceState(null, '', '/')`
-     - Calls `navigate('/', { replace: true })`
-     - 300ms fallback: if `window.location.pathname !== '/'`, do `window.location.href = '/'`
-   - Wire both buttons to `goHome()`.
+### Changes (single file: `src/pages/admin/SessionDetailPage.tsx`)
+
+For each of the 4 triggers above:
+- Add `[&[data-state=open]_svg.chevron-caret]:rotate-180` to the `CollapsibleTrigger`'s className (using a marker class to target only the caret, not other inner SVGs like Tabs/Badge icons).
+- Add `chevron-caret transition-transform duration-200` to the corresponding `ChevronDown` className.
+
+Result: clicking any of these headers smoothly flips the caret 180°, then back when collapsed. No state tracking, no re-render overhead.
 
 ### Files affected
+
 | File | Change |
 |------|--------|
-| `src/pages/ResetPasswordPage.tsx` | Add local signOut before token exchange; add hash-clearing navigation helper for both buttons |
+| `src/pages/admin/SessionDetailPage.tsx` | Add rotation + transition classes to 4 Collapsible triggers and their chevron icons |
 
-No changes to `useAuth.ts`, edge functions, DB, or client config.
+### Out of scope (no change)
+- `AdminLayout.tsx` sidebar (no expandable groups)
+- `FeedbackPage.tsx` row toggle (uses icon-swap pattern, working as designed)
+- `ClassificationCard` inner JSON trigger (already rotates correctly)
+- Any non-admin Collapsible usage
 
-### What this does NOT change
-- The 5s readiness gate, loading UI, or expired-state UI.
-- The translation helper in `useAuth`.
-- Supabase client config (`detectSessionInUrl` stays default).
-- The `Copy Invite Link` admin flow.
-
-### Test scenarios
-1. Logged-in user (different account) clicks fresh invite link → local session cleared → new token exchanges → form appears.
-2. Same scenario in incognito → still works (no regression).
-3. Expired link → expired UI → click "Request a new link" → lands on `/` cleanly with no hash.
-4. Expired link → click "Back to sign in" → same clean landing.
