@@ -806,7 +806,6 @@ const Index = () => {
               featureFlags={featureFlags}
               initialItemCount={(() => {
                 const sr = state.sessionId ? undefined : undefined;
-                // Try to get initial count from step_results
                 return undefined;
               })()}
               onUpdateItem={updateItem}
@@ -821,6 +820,10 @@ const Index = () => {
               onStartOver={handleStartOver}
               onRestoreDedupItem={handleRestoreDedupItem}
               onDismissDedupItem={handleDismissDedupItem}
+              onApplyReimport={(newItems) => {
+                setItems(newItems, state.personMappings);
+                updateLevelsAndRecalculate(state.levels);
+              }}
             />
           )}
         </div>

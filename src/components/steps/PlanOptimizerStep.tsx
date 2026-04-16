@@ -43,12 +43,13 @@ import { EditItemDialog } from '@/components/plan-optimizer/EditItemDialog';
 import { SessionSummaryCard } from '@/components/plan-optimizer/SessionSummaryCard';
 import { ConfidenceBanner } from '@/components/plan-optimizer/ConfidenceBanner';
 import { LevelVerificationModal } from '@/components/steps/LevelVerificationModal';
-import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye, MessageSquare } from 'lucide-react';
+import { Sparkles, Loader2, RefreshCw, Settings, Target, Download, Eye, MessageSquare, Upload } from 'lucide-react';
 import { FeedbackDialog } from '@/components/plan-optimizer/FeedbackDialog';
 import { InlineEditableTable } from '@/components/plan-optimizer/InlineEditableTable';
 import { DedupSummaryCard } from '@/components/plan-optimizer/DedupSummaryCard';
 import { ColumnVisibilityPopover } from '@/components/plan-optimizer/ColumnVisibilityPopover';
 import { BulkActionBar } from '@/components/plan-optimizer/BulkActionBar';
+import { ReimportDialog } from '@/components/plan-optimizer/ReimportDialog';
 import { DEFAULT_VISIBLE_COLUMNS, ALL_COLUMNS } from '@/components/plan-optimizer/columnDefs';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -81,6 +82,7 @@ interface PlanOptimizerStepProps {
   onStartOver?: () => void;
   onRestoreDedupItem?: (detail: DedupRemovedDetail) => void;
   onDismissDedupItem?: (detail: DedupRemovedDetail) => void;
+  onApplyReimport?: (items: PlanItem[]) => void;
 }
 
 interface MetricSuggestion {
@@ -116,6 +118,7 @@ export function PlanOptimizerStep({
   onStartOver,
   onRestoreDedupItem,
   onDismissDedupItem,
+  onApplyReimport,
 }: PlanOptimizerStepProps) {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(() => {
     if (items.length <= 80) return new Set(items.map((i) => i.id));
@@ -132,6 +135,7 @@ export function PlanOptimizerStep({
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [hasFeedback, setHasFeedback] = useState(false);
+  const [reimportDialogOpen, setReimportDialogOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 1024);
   const [includeConfidence, setIncludeConfidence] = useState(false);
   const [showConfidence, setShowConfidence] = useState(() => {
@@ -559,6 +563,12 @@ export function PlanOptimizerStep({
               <Button variant={hasFeedback ? 'outline' : 'secondary'} size="sm" onClick={() => setShowFeedbackDialog(true)}>
                 <MessageSquare className="h-4 w-4 mr-2" />
                 {hasFeedback ? 'Edit Feedback' : 'Rate This Import'}
+              </Button>
+            )}
+            {featureFlags?.showReimport && onApplyReimport && (
+              <Button variant="outline" size="sm" onClick={() => setReimportDialogOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Re-Import
               </Button>
             )}
             <Button onClick={() => setShowExportDialog(true)} size="sm">
@@ -1033,6 +1043,15 @@ export function PlanOptimizerStep({
           userId={userId}
           actualItemCount={initialItemCount ?? items.length}
           onSubmitted={() => setHasFeedback(true)}
+        />
+      )}
+      {featureFlags?.showReimport && onApplyReimport && (
+        <ReimportDialog
+          open={reimportDialogOpen}
+          onOpenChange={setReimportDialogOpen}
+          currentItems={items}
+          sessionId={sessionId}
+          onApply={onApplyReimport}
         />
       )}
     </div>
