@@ -149,9 +149,9 @@ function ClassificationCard({ classification }: { classification: Record<string,
   return (
     <Collapsible>
       <Card>
-        <CollapsibleTrigger className="w-full">
+        <CollapsibleTrigger className="w-full [&[data-state=open]_svg.chevron-caret]:rotate-180">
           <div className="flex items-center gap-3 p-4 text-sm hover:bg-muted/30 transition-colors">
-            <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+            <ChevronDown className="chevron-caret h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200" />
             <span className="font-semibold">Document Classification</span>
             <Badge variant="outline">{docType}</Badge>
             {confidence != null && <span className="text-xs text-muted-foreground">{Math.round(confidence * 100)}% confidence</span>}
