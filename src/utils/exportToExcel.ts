@@ -1,7 +1,8 @@
+import * as XLSX from 'xlsx';
 import { PlanItem, PlanLevel } from '@/types/plan';
 
 /**
- * Exports plan items to a CSV file formatted for AchieveIt import.
+ * Exports plan items to an xlsx file formatted for AchieveIt import.
  * Optionally includes confidence score and corrections columns (extended format).
  */
 export function exportToExcel(items: PlanItem[], levels: PlanLevel[], includeConfidence: boolean = false): void {
@@ -44,17 +45,8 @@ export function exportToExcel(items: PlanItem[], levels: PlanLevel[], includeCon
     }
   };
 
-  const escapeCSV = (value: string): string => {
-    if (value === null || value === undefined) return '';
-    const stringValue = String(value);
-    if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
-      return `"${stringValue.replace(/"/g, '""')}"`;
-    }
-    return stringValue;
-  };
-
   const rows = items.map((item) => {
-    const row = [
+    const row: (string | number)[] = [
       item.order || '',
       item.levelName || '',
       item.name || '',
@@ -77,27 +69,52 @@ export function exportToExcel(items: PlanItem[], levels: PlanLevel[], includeCon
 
     if (includeConfidence) {
       row.push(
-        String(item.confidence ?? 100),
+        item.confidence ?? 100,
         (item.corrections ?? []).join('; '),
       );
     }
 
-    return row.map(escapeCSV);
+    return row;
   });
 
-  const csvContent = [
-    headers.map(escapeCSV).join(','),
-    ...rows.map((row) => row.join(',')),
-  ].join('\n');
+  const aoa = [headers, ...rows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Set column widths
+  ws['!cols'] = [
+    { wch: 8 },   // Order
+    { wch: 16 },  // Level
+    { wch: 40 },  // Name
+    { wch: 50 },  // Description
+    { wch: 14 },  // Status
+    { wch: 12 },  // Start Date
+    { wch: 12 },  // Due Date
+    { wch: 28 },  // Assigned To
+    { wch: 28 },  // Members
+    { wch: 28 },  // Administrators
+    { wch: 18 },  // Update Frequency
+    { wch: 24 },  // Metric Description
+    { wch: 14 },  // Metric Unit
+    { wch: 14 },  // Metric Rollup
+    { wch: 14 },  // Metric Baseline
+    { wch: 14 },  // Metric Target
+    { wch: 14 },  // Current Value
+    { wch: 20 },  // Tags
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Plan');
+
+  const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
 
   const filename = includeConfidence
-    ? 'achieveit-plan-extended-export.csv'
-    : 'achieveit-plan-import.csv';
+    ? 'achieveit-plan-extended-export.xlsx'
+    : 'achieveit-plan-import.xlsx';
 
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
-  
+
   link.setAttribute('href', url);
   link.setAttribute('download', filename);
   link.style.visibility = 'hidden';

@@ -144,8 +144,8 @@ export function ReimportDialog({ open, onOpenChange, currentItems, sessionId, on
           <div className="space-y-4 py-4">
             <label className="flex flex-col items-center justify-center border-2 border-dashed border-border rounded-lg p-8 cursor-pointer hover:border-primary/50 transition-colors">
               <Upload className="h-8 w-8 text-muted-foreground mb-2" />
-              <span className="text-sm text-muted-foreground">Click to choose an .xlsx file</span>
-              <input type="file" accept=".xlsx" className="hidden" onChange={handleFileChange} />
+              <span className="text-sm text-muted-foreground">Click to choose an .xlsx or .csv file</span>
+              <input type="file" accept=".xlsx,.csv" className="hidden" onChange={handleFileChange} />
             </label>
             {error && (
               <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive flex items-start gap-2">
