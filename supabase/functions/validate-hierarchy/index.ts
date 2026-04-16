@@ -240,7 +240,7 @@ ${auditSection}${levelsSection}${levelEnforcementSection}
 Please validate and correct the hierarchy. Output the COMPLETE corrected items tree incorporating all audit findings. Document every correction.`;
 
     const requestBody = {
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 32768,
       system: VALIDATION_SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
@@ -283,7 +283,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
         session_id: sessionId,
         edge_function: "validate-hierarchy",
         step_label: "Step 3: Structure Validation",
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         request_payload: logPayload,
         duration_ms: durationMs,
         status: "error",
@@ -306,7 +306,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
       session_id: sessionId,
       edge_function: "validate-hierarchy",
       step_label: `Step 3: Structure Validation (${itemCount} items, ${corrCount} corrections)`,
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       request_payload: logPayload,
       response_payload: aiResponse,
       input_tokens: tokens.input_tokens,
