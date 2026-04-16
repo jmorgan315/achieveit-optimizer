@@ -25,6 +25,7 @@ export function useAuth() {
       setRole('user');
       setDomainError('Access is restricted to AchieveIt employees. Please sign in with your @achieveit.com account.');
       setProfileLoaded(true);
+      setLoading(false);
       return;
     }
 
@@ -47,13 +48,14 @@ export function useAuth() {
       });
       setRole('user');
       setProfileLoaded(true);
-    } else {
+      setLoading(false);
       if (!profile.is_active) {
         await supabase.auth.signOut();
         setUser(null);
         setRole('user');
         setDomainError('Your account has been deactivated. Please contact your administrator.');
         setProfileLoaded(true);
+        setLoading(false);
         return;
       }
       const profileRole = (profile as any).role as string | undefined;
@@ -67,6 +69,7 @@ export function useAuth() {
       const flags = (profile as any).feature_flags;
       setFeatureFlags(typeof flags === 'object' && flags !== null ? flags : {});
       setProfileLoaded(true);
+      setLoading(false);
     }
   }, []);
 
