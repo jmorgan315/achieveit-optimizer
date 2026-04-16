@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +17,7 @@ interface RateEntry {
 
 export default function SettingsPage() {
   const { toast } = useToast();
+  const { isSuperAdmin } = useAuth();
   const [entries, setEntries] = useState<RateEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -83,9 +85,7 @@ export default function SettingsPage() {
   };
 
   const addModel = () => setEntries([...entries, { model: '', input: 0, output: 0 }]);
-
   const removeModel = (idx: number) => setEntries(entries.filter((_, i) => i !== idx));
-
   const updateEntry = (idx: number, field: keyof RateEntry, value: string) => {
     setEntries(entries.map((e, i) => i === idx ? { ...e, [field]: field === 'model' ? value : Number(value) || 0 } : e));
   };
@@ -115,6 +115,7 @@ export default function SettingsPage() {
                 onChange={e => updateEntry(idx, 'model', e.target.value)}
                 placeholder="model-name"
                 className="h-9 text-sm"
+                disabled={!isSuperAdmin}
               />
               <Input
                 type="number"
@@ -123,6 +124,7 @@ export default function SettingsPage() {
                 className="h-9 text-sm"
                 min={0}
                 step={0.01}
+                disabled={!isSuperAdmin}
               />
               <Input
                 type="number"
@@ -131,21 +133,26 @@ export default function SettingsPage() {
                 className="h-9 text-sm"
                 min={0}
                 step={0.01}
+                disabled={!isSuperAdmin}
               />
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => removeModel(idx)}>
-                <Trash2 className="h-4 w-4 text-muted-foreground" />
-              </Button>
+              {isSuperAdmin ? (
+                <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => removeModel(idx)}>
+                  <Trash2 className="h-4 w-4 text-muted-foreground" />
+                </Button>
+              ) : <div className="h-9 w-9" />}
             </div>
           ))}
 
-          <div className="flex items-center gap-3 pt-2">
-            <Button variant="outline" size="sm" onClick={addModel}>
-              <Plus className="h-4 w-4 mr-1" /> Add Model
-            </Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
-              <Save className="h-4 w-4 mr-1" /> {saving ? 'Saving…' : 'Save'}
-            </Button>
-          </div>
+          {isSuperAdmin && (
+            <div className="flex items-center gap-3 pt-2">
+              <Button variant="outline" size="sm" onClick={addModel}>
+                <Plus className="h-4 w-4 mr-1" /> Add Model
+              </Button>
+              <Button size="sm" onClick={handleSave} disabled={saving}>
+                <Save className="h-4 w-4 mr-1" /> {saving ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          )}
 
           {lastUpdated && (
             <p className="text-xs text-muted-foreground pt-2 border-t border-border">

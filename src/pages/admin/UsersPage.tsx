@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth, UserRole } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
@@ -28,32 +30,30 @@ interface UserProfile {
   last_name: string | null;
   is_admin: boolean;
   is_active: boolean;
+  role: UserRole;
   created_at: string;
   feature_flags: Record<string, boolean>;
 }
 
 export default function UsersPage() {
+  const { isSuperAdmin } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
 
-  // Edit dialog
   const [editUser, setEditUser] = useState<UserProfile | null>(null);
   const [editFirst, setEditFirst] = useState('');
   const [editLast, setEditLast] = useState('');
-  const [editAdmin, setEditAdmin] = useState(false);
+  const [editRole, setEditRole] = useState<UserRole>('user');
   const [editActive, setEditActive] = useState(true);
   const [editFlags, setEditFlags] = useState<Record<string, boolean>>({});
   const [editSaving, setEditSaving] = useState(false);
 
-  // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<UserProfile | null>(null);
   const [deleting, setDeleting] = useState(false);
-
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const fetchUsers = async () => {
@@ -66,6 +66,7 @@ export default function UsersPage() {
     } else {
       setUsers((data ?? []).map(u => ({
         ...u,
+        role: ((u as any).role as UserRole) || (u.is_admin ? 'admin' : 'user'),
         feature_flags: (typeof (u as any).feature_flags === 'object' && (u as any).feature_flags !== null ? (u as any).feature_flags : {}) as Record<string, boolean>,
       })));
     }
@@ -74,7 +75,6 @@ export default function UsersPage() {
 
   useEffect(() => { fetchUsers(); }, []);
 
-  // --- Invite ---
   const handleInvite = async () => {
     if (!inviteEmail.toLowerCase().endsWith('@achieveit.com')) {
       toast.error('Only @achieveit.com emails can be invited.');
@@ -101,7 +101,6 @@ export default function UsersPage() {
     }
   };
 
-  // --- Admin action helper ---
   const invokeAdminAction = async (action: string, userId: string, email?: string) => {
     const { data: { session } } = await supabase.auth.getSession();
     const res = await supabase.functions.invoke('admin-user-actions', {
@@ -113,7 +112,6 @@ export default function UsersPage() {
     if (payload?.error) throw new Error(payload.error);
   };
 
-  // --- Reset password ---
   const handleResetPassword = async (u: UserProfile) => {
     if (!u.email) return;
     setActionLoading(u.id);
@@ -127,7 +125,6 @@ export default function UsersPage() {
     }
   };
 
-  // --- Delete user ---
   const handleDeleteUser = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -143,12 +140,11 @@ export default function UsersPage() {
     }
   };
 
-  // --- Edit dialog ---
   const openEdit = (u: UserProfile) => {
     setEditUser(u);
     setEditFirst(u.first_name || '');
     setEditLast(u.last_name || '');
-    setEditAdmin(u.is_admin);
+    setEditRole(u.role);
     setEditActive(u.is_active);
     setEditFlags({ ...u.feature_flags });
   };
@@ -161,7 +157,8 @@ export default function UsersPage() {
       .update({
         first_name: editFirst || null,
         last_name: editLast || null,
-        is_admin: editAdmin,
+        role: editRole,
+        is_admin: editRole === 'admin' || editRole === 'super_admin',
         is_active: editActive,
         feature_flags: editFlags,
       } as any)
@@ -173,7 +170,8 @@ export default function UsersPage() {
         ...u,
         first_name: editFirst || null,
         last_name: editLast || null,
-        is_admin: editAdmin,
+        role: editRole,
+        is_admin: editRole === 'admin' || editRole === 'super_admin',
         is_active: editActive,
         feature_flags: editFlags,
       } : u));
@@ -183,13 +181,45 @@ export default function UsersPage() {
     setEditSaving(false);
   };
 
+  // Inline toggle helper
+  const inlineUpdate = async (userId: string, field: string, value: any) => {
+    const { error } = await supabase.from('user_profiles').update({ [field]: value } as any).eq('id', userId);
+    if (error) {
+      toast.error(`Failed to update: ${error.message}`);
+      return false;
+    }
+    return true;
+  };
+
+  const toggleActive = async (u: UserProfile) => {
+    const newVal = !u.is_active;
+    if (await inlineUpdate(u.id, 'is_active', newVal)) {
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, is_active: newVal } : x));
+    }
+  };
+
+  const toggleFlag = async (u: UserProfile, flag: string) => {
+    const newFlags = { ...u.feature_flags, [flag]: !u.feature_flags[flag] };
+    if (await inlineUpdate(u.id, 'feature_flags', newFlags)) {
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, feature_flags: newFlags } : x));
+    }
+  };
+
+  const roleBadge = (r: UserRole) => {
+    if (r === 'super_admin') return <Badge className="bg-purple-600 hover:bg-purple-700">Super Admin</Badge>;
+    if (r === 'admin') return <Badge>Admin</Badge>;
+    return <Badge variant="outline">User</Badge>;
+  };
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">User Management</h1>
-        <Button onClick={() => setInviteOpen(true)} size="sm">
-          <UserPlus className="h-4 w-4 mr-2" /> Invite User
-        </Button>
+        {isSuperAdmin && (
+          <Button onClick={() => setInviteOpen(true)} size="sm">
+            <UserPlus className="h-4 w-4 mr-2" /> Invite User
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -197,16 +227,18 @@ export default function UsersPage() {
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="border rounded-lg">
+        <div className="border rounded-lg overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Email</TableHead>
                 <TableHead>Name</TableHead>
-                <TableHead>Status</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead className="text-center">Active</TableHead>
+                <TableHead className="text-center">Feedback</TableHead>
+                <TableHead className="text-center">Re-import</TableHead>
                 <TableHead>Joined</TableHead>
-                <TableHead className="w-12" />
+                {isSuperAdmin && <TableHead className="w-12" />}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -214,42 +246,46 @@ export default function UsersPage() {
                 <TableRow key={u.id} className={!u.is_active ? 'opacity-50' : ''}>
                   <TableCell className="font-medium">{u.email ?? '—'}</TableCell>
                   <TableCell>{[u.first_name, u.last_name].filter(Boolean).join(' ') || '—'}</TableCell>
-                  <TableCell>
-                    {u.is_active
-                      ? <Badge variant="outline" className="text-green-600 border-green-600/30">Active</Badge>
-                      : <Badge variant="destructive">Inactive</Badge>}
+                  <TableCell>{roleBadge(u.role)}</TableCell>
+                  <TableCell className="text-center">
+                    <Switch checked={u.is_active} onCheckedChange={() => toggleActive(u)} disabled={!isSuperAdmin} />
                   </TableCell>
-                  <TableCell>
-                    {u.is_admin && <Badge>Admin</Badge>}
+                  <TableCell className="text-center">
+                    <Switch checked={u.feature_flags.showFeedback ?? false} onCheckedChange={() => toggleFlag(u, 'showFeedback')} disabled={!isSuperAdmin} />
+                  </TableCell>
+                  <TableCell className="text-center">
+                    <Switch checked={u.feature_flags.showReimport ?? false} onCheckedChange={() => toggleFlag(u, 'showReimport')} disabled={!isSuperAdmin} />
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
                     {new Date(u.created_at).toLocaleDateString()}
                   </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionLoading === u.id}>
-                          {actionLoading === u.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEdit(u)}>
-                          <Pencil className="h-4 w-4 mr-2" /> Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => handleResetPassword(u)} disabled={!u.email}>
-                          <KeyRound className="h-4 w-4 mr-2" /> Reset Password
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={() => setDeleteTarget(u)} className="text-destructive focus:text-destructive">
-                          <Trash2 className="h-4 w-4 mr-2" /> Delete User
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+                  {isSuperAdmin && (
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={actionLoading === u.id}>
+                            {actionLoading === u.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEdit(u)}>
+                            <Pencil className="h-4 w-4 mr-2" /> Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleResetPassword(u)} disabled={!u.email}>
+                            <KeyRound className="h-4 w-4 mr-2" /> Reset Password
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setDeleteTarget(u)} className="text-destructive focus:text-destructive">
+                            <Trash2 className="h-4 w-4 mr-2" /> Delete User
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
               {users.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                  <TableCell colSpan={isSuperAdmin ? 8 : 7} className="text-center text-muted-foreground py-8">
                     No users found
                   </TableCell>
                 </TableRow>
@@ -299,9 +335,16 @@ export default function UsersPage() {
                 <Input value={editLast} onChange={e => setEditLast(e.target.value)} />
               </div>
             </div>
-            <div className="flex items-center justify-between">
-              <Label>Admin</Label>
-              <Switch checked={editAdmin} onCheckedChange={setEditAdmin} />
+            <div className="space-y-1">
+              <Label>Role</Label>
+              <Select value={editRole} onValueChange={v => setEditRole(v as UserRole)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">User</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex items-center justify-between">
               <Label>Active</Label>
