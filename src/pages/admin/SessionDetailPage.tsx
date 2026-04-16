@@ -149,9 +149,9 @@ function ClassificationCard({ classification }: { classification: Record<string,
   return (
     <Collapsible>
       <Card>
-        <CollapsibleTrigger className="w-full">
+        <CollapsibleTrigger className="w-full [&[data-state=open]_svg.chevron-caret]:rotate-180">
           <div className="flex items-center gap-3 p-4 text-sm hover:bg-muted/30 transition-colors">
-            <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+            <ChevronDown className="chevron-caret h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200" />
             <span className="font-semibold">Document Classification</span>
             <Badge variant="outline">{docType}</Badge>
             {confidence != null && <span className="text-xs text-muted-foreground">{Math.round(confidence * 100)}% confidence</span>}
@@ -448,8 +448,8 @@ export default function SessionDetailPage() {
               )}
               {changes && changes.length > 0 && (
                 <Collapsible>
-                  <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
-                    <ChevronDown className="h-3 w-3" /> View Details ({changes.length} changes)
+                  <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 [&[data-state=open]_svg.chevron-caret]:rotate-180">
+                    <ChevronDown className="chevron-caret h-3 w-3 transition-transform duration-200" /> View Details ({changes.length} changes)
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <ScrollArea className="max-h-[300px] mt-2">
@@ -478,9 +478,9 @@ export default function SessionDetailPage() {
         {logs.map((log) => (
           <Collapsible key={log.id}>
             <Card>
-              <CollapsibleTrigger className="w-full">
+              <CollapsibleTrigger className="w-full [&[data-state=open]_svg.chevron-caret]:rotate-180">
                 <div className="flex items-center gap-3 p-4 text-sm hover:bg-muted/30 transition-colors">
-                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <ChevronDown className="chevron-caret h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200" />
                   <span className="font-medium">{log.step_label || log.edge_function}</span>
                   <Badge variant="outline" className="text-xs">{log.edge_function}</Badge>
                   {log.model && <span className="text-xs text-muted-foreground">{log.model}</span>}
@@ -552,9 +552,9 @@ export default function SessionDetailPage() {
         return (
           <Collapsible>
             <Card>
-              <CollapsibleTrigger className="w-full">
+              <CollapsibleTrigger className="w-full [&[data-state=open]_svg.chevron-caret]:rotate-180">
                 <div className="flex items-center gap-3 p-4 text-sm hover:bg-muted/30 transition-colors">
-                  <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <ChevronDown className="chevron-caret h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200" />
                   <span className="font-semibold">Results Preview ({count} items)</span>
                 </div>
               </CollapsibleTrigger>
