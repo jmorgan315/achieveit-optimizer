@@ -530,6 +530,9 @@ export function PlanOptimizerStep({
         ) : null;
       })()}
 
+      {/* Reimport History */}
+      {reimportHistory && <ReimportHistoryCard history={reimportHistory} />}
+
       {/* Stats Bar Header */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
