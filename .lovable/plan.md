@@ -1,30 +1,37 @@
 
 
-## Admin "All Imports" Toggle on RecentSessionsPage
+## Admin Settings Page for Token Pricing
 
-### Changes
+Move hardcoded `MODEL_RATES` to a database table and add an admin Settings page for managing them.
 
-**`src/pages/Index.tsx`** — Pass `isAdmin` prop to `RecentSessionsPage`:
-```tsx
-<RecentSessionsPage onNewImport={handleNewImport} onSelectSession={handleSelectSession} userId={user.id} isAdmin={isAdmin} />
-```
+### Database Migration
 
-**`src/components/RecentSessionsPage.tsx`** — All changes in this file:
+Create `admin_settings` table with RLS policies and seed current rates:
+- `key TEXT PRIMARY KEY`, `value JSONB`, `updated_at`, `updated_by`
+- Admin full access policy, authenticated read-only policy
+- Seed with current `model_rates` values
 
-1. **Props**: Add `isAdmin?: boolean` to `RecentSessionsPageProps`
-2. **SessionRow**: Add `user_id?: string | null` to the interface (needed for "All Imports" display)
-3. **State**: Add `showAll` toggle state, default `false`
-4. **User profiles map**: When `isAdmin && showAll`, fetch `user_profiles` to map user_id → display name/email for subtitles
-5. **Query**: Modify `fetchSessions` — when `showAll` is true, omit the `.eq('user_id', userId)` filter and also select `user_id`. RLS already grants admins SELECT on all sessions.
-6. **Toggle UI**: Between the "Recent Imports" heading and the session list, render a segmented toggle ("My Imports" / "All Imports") only when `isAdmin` is true
-7. **Session card**: When `showAll`, show the user's name/email as a small subtitle line under the document name
+### New Files
 
-No backend/migration changes needed — admin RLS already covers this.
+**`src/hooks/useModelRates.ts`** — Shared hook that fetches rates from `admin_settings` where `key = 'model_rates'`, caches in module-level variable so it only queries once per app session. Returns `Record<string, { input: number; output: number }>`.
 
-### Files
+**`src/pages/admin/SettingsPage.tsx`** — Admin settings page with:
+- "Token Pricing (per million tokens)" section
+- Editable input/output rate fields per model
+- "Add Model" button for new entries
+- "Save" button that upserts `admin_settings` row
+- "Last updated by [name] at [time]" display
+
+### Modified Files
 
 | File | Change |
 |------|--------|
-| `src/components/RecentSessionsPage.tsx` | Add toggle, conditional query, user display |
-| `src/pages/Index.tsx` | Pass `isAdmin` prop |
+| `src/pages/admin/AdminLayout.tsx` | Add "Settings" nav item with `Settings` icon |
+| `src/App.tsx` | Add `/admin/settings` route |
+| `src/pages/admin/SessionDetailPage.tsx` | Remove hardcoded `MODEL_RATES`, import from `useModelRates` hook, pass rates to `calcCost` |
+
+### Technical Notes
+- `MODEL_RATES` only exists in `SessionDetailPage.tsx` (confirmed via search) — single consumption point
+- Module-level cache in `useModelRates` avoids repeated queries across page navigations
+- `updated_by` references `auth.users(id)` for tracking who changed settings — resolved to display name via `user_profiles` join on the Settings page
 
