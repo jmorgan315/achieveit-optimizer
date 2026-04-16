@@ -41,6 +41,36 @@ async function dispatchChain(sessionId: string): Promise<void> {
   console.log(`[process-plan] Chained next invocation for session ${sessionId}`);
 }
 
+async function notifyUser(sessionId: string, status: "completed" | "error"): Promise<void> {
+  try {
+    const client = getServiceClient();
+    const { data: session } = await client
+      .from("processing_sessions")
+      .select("user_id, org_name, document_name, total_items_extracted")
+      .eq("id", sessionId)
+      .single();
+    if (!session?.user_id) return;
+    const url = `${SUPABASE_URL}/functions/v1/send-notification`;
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        userId: session.user_id,
+        sessionId,
+        status,
+        orgName: session.org_name,
+        documentName: session.document_name,
+        itemCount: session.total_items_extracted,
+      }),
+    }).catch((err) => console.error("[process-plan] notifyUser dispatch failed:", err));
+  } catch (e) {
+    console.error("[process-plan] notifyUser exception:", e);
+  }
+}
+
 async function updateSessionProgress(sessionId: string, updates: Record<string, unknown>): Promise<void> {
   try {
     const client = getServiceClient();
@@ -1168,6 +1198,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         current_step: "error",
         step_results: { error: agent1Error || "Extraction produced no items", pipelineStep: "agent1" },
       });
+      await notifyUser(sessionId, "error");
       return;
     }
 
@@ -1388,6 +1419,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         current_step: "error",
         step_results: { error: "Pipeline processing failed. Please try again." },
       });
+      await notifyUser(sessionId, "error");
     } else {
       console.warn(`[process-plan] Suppressing error write — run ${pipelineRunId} was superseded`);
     }
@@ -1623,6 +1655,7 @@ async function runResume(sessionId: string): Promise<void> {
           current_step: "error",
           step_results: { error: "Resume failed: could not load stored page images" },
         });
+        await notifyUser(sessionId, "error");
         return;
       }
 
@@ -1794,6 +1827,7 @@ async function runResume(sessionId: string): Promise<void> {
         current_step: "error",
         step_results: { error: "Resume pipeline failed. Please try again." },
       });
+      await notifyUser(sessionId, "error");
     } else {
       console.warn(`[process-plan] Suppressing resume error write — run ${pipelineRunId} was superseded`);
     }
@@ -2137,6 +2171,8 @@ async function runAgent3Only(
     },
     total_items_extracted: finalItemCount,
   });
+
+  await notifyUser(sessionId, "completed");
 
   await logApiCall({
     session_id: sessionId,
