@@ -93,8 +93,10 @@ export function useAuth() {
 
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Redirect to password setup for invite/recovery tokens
-      if (_event === 'PASSWORD_RECOVERY') {
+      // Redirect to password setup for invite/recovery tokens — but don't
+      // re-navigate if already on /reset-password (would remount the page
+      // and interrupt the token exchange).
+      if (_event === 'PASSWORD_RECOVERY' && window.location.pathname !== '/reset-password') {
         navigate('/reset-password');
         // Don't return — fall through so profile check still runs for subsequent events
       }
