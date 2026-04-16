@@ -1,0 +1,3 @@
+ALTER TABLE public.user_profiles
+  ADD COLUMN IF NOT EXISTS invited_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS first_login_at TIMESTAMPTZ;

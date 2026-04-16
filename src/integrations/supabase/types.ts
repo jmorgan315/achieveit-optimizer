@@ -266,8 +266,10 @@ export type Database = {
           created_at: string
           email: string | null
           feature_flags: Json
+          first_login_at: string | null
           first_name: string | null
           id: string
+          invited_at: string | null
           is_active: boolean
           is_admin: boolean
           last_name: string | null
@@ -278,8 +280,10 @@ export type Database = {
           created_at?: string
           email?: string | null
           feature_flags?: Json
+          first_login_at?: string | null
           first_name?: string | null
           id: string
+          invited_at?: string | null
           is_active?: boolean
           is_admin?: boolean
           last_name?: string | null
@@ -290,8 +294,10 @@ export type Database = {
           created_at?: string
           email?: string | null
           feature_flags?: Json
+          first_login_at?: string | null
           first_name?: string | null
           id?: string
+          invited_at?: string | null
           is_active?: boolean
           is_admin?: boolean
           last_name?: string | null

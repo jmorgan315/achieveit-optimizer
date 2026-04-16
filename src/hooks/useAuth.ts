@@ -7,6 +7,7 @@ import { logActivity } from '@/utils/logActivity';
 export type UserRole = 'user' | 'admin' | 'super_admin';
 
 export function useAuth() {
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [role, setRole] = useState<UserRole>('user');
   const [displayName, setDisplayName] = useState<string | null>(null);
@@ -34,7 +35,7 @@ export function useAuth() {
 
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('is_admin, is_active, first_name, last_name, feature_flags, role')
+      .select('is_admin, is_active, first_name, last_name, feature_flags, role, first_login_at')
       .eq('id', currentUser.id)
       .single();
 
@@ -46,7 +47,8 @@ export function useAuth() {
         last_name: currentUser.user_metadata?.full_name?.split(' ').slice(1).join(' ') || currentUser.user_metadata?.name?.split(' ').slice(1).join(' ') || null,
         is_admin: false,
         is_active: true,
-      });
+        first_login_at: new Date().toISOString(),
+      } as any);
       setRole('user');
       setProfileLoaded(true);
       setLoading(false);
@@ -60,6 +62,15 @@ export function useAuth() {
         setLoading(false);
         return;
       }
+
+      // Track first login
+      if (!(profile as any).first_login_at) {
+        await supabase
+          .from('user_profiles')
+          .update({ first_login_at: new Date().toISOString() } as any)
+          .eq('id', currentUser.id);
+      }
+
       const profileRole = (profile as any).role as string | undefined;
       if (profileRole === 'super_admin') setRole('super_admin');
       else if (profileRole === 'admin') setRole('admin');
@@ -78,8 +89,6 @@ export function useAuth() {
   const prevUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const navigate = useNavigate();
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       // Redirect to password setup for invite/recovery tokens
       if (_event === 'PASSWORD_RECOVERY') {
@@ -115,7 +124,7 @@ export function useAuth() {
     });
 
     return () => subscription.unsubscribe();
-  }, [checkDomainAndProfile]);
+  }, [checkDomainAndProfile, navigate]);
 
   const signIn = async (email: string, password: string) => {
     setDomainError(null);
