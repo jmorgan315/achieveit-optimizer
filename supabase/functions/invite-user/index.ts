@@ -1,9 +1,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { buildInviteEmail, sendAuthEmail } from "../_shared/auth-emails.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -46,31 +48,44 @@ Deno.serve(async (req) => {
       return json({ error: "Only @achieveit.com emails allowed" }, 400);
     }
 
-    // Determine site URL for redirect
     const origin = req.headers.get("origin") || req.headers.get("referer")?.replace(/\/+$/, "") || Deno.env.get("SITE_URL") || supabaseUrl.replace('.supabase.co', '.lovable.app');
 
-    // Invite user via admin API
-    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      redirectTo: `${origin}/reset-password`,
+    // Mint an invite link (creates the user if needed) without sending Supabase's default email.
+    const { data, error } = await adminClient.auth.admin.generateLink({
+      type: "invite",
+      email,
+      options: { redirectTo: `${origin}/reset-password` },
     });
-    if (error) {
-      return json({ error: error.message }, 400);
+    if (error || !data?.properties?.action_link) {
+      return json({ error: error?.message ?? "Failed to generate invite link" }, 400);
     }
 
-    // Set invited_at on profile
-    await adminClient
-      .from("user_profiles")
-      .update({ invited_at: new Date().toISOString() })
-      .eq("id", data.user.id);
+    const actionLink = data.properties.action_link;
+    const newUserId = data.user?.id;
 
-    // Log to user_activity_log
+    // Send branded email via Resend
+    const { subject, html } = buildInviteEmail(actionLink, email);
+    const send = await sendAuthEmail({ to: email, subject, html });
+    if (!send.ok) {
+      return json({ error: `Email send failed: ${send.error}` }, 502);
+    }
+
+    // Mark invited_at on profile
+    if (newUserId) {
+      await adminClient
+        .from("user_profiles")
+        .update({ invited_at: new Date().toISOString() })
+        .eq("id", newUserId);
+    }
+
+    // Activity log
     await adminClient.from("user_activity_log").insert({
       user_id: caller.id,
       activity_type: "user_invited",
-      metadata: { target_email: email, target_user_id: data.user.id },
+      metadata: { target_email: email, target_user_id: newUserId },
     });
 
-    return json({ success: true, userId: data.user.id });
+    return json({ success: true, userId: newUserId });
   } catch (err) {
     return json({ error: (err as Error).message }, 500);
   }

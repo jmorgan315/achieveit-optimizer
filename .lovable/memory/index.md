@@ -55,4 +55,5 @@ Email: Resend connector via gateway; opt-out flag user_profiles.feature_flags.em
 - [Feedback System](mem://features/feedback-system) — Rating system leveraging original actual_item_count for unbiased scoring
 - [General Feedback](mem://features/general-feedback) — Header feedback button for bug reports/feature requests gated by showFeedback flag
 - [Feature Flags](mem://features/feature-flags) — JSONB flags gated per-user by administrators
+- [Auth Email Routing](mem://features/auth-email-routing) — Invites, password resets, notifications all go through Resend gateway via generateLink + branded HTML
 - [Email Notifications](mem://features/email-notifications) — Resend-powered terminal-status emails with per-user opt-out toggle
