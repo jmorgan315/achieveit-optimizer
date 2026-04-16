@@ -114,7 +114,7 @@ export default function SettingsPage() {
           {entries.map((entry, idx) => (
             <div key={idx} className="grid grid-cols-[1fr_120px_120px] gap-2 items-center">
               <span className="text-sm font-medium px-3 h-9 flex items-center">
-                {MODEL_DISPLAY_NAMES[entry.model] || entry.model}
+                {MODEL_DISPLAY_NAMES[entry.model] || cleanLevelName(entry.model)}
               </span>
               <Input
                 type="number"
