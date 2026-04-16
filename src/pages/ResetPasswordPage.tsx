@@ -176,10 +176,10 @@ export default function ResetPasswordPage() {
         <CardContent>
           {linkExpired ? (
             <div className="space-y-3">
-              <Button onClick={() => navigate('/')} className="w-full">
+              <Button onClick={goHome} className="w-full">
                 Request a new link
               </Button>
-              <Button onClick={() => navigate('/')} variant="outline" className="w-full">
+              <Button onClick={goHome} variant="outline" className="w-full">
                 Back to sign in
               </Button>
             </div>
