@@ -328,6 +328,8 @@ export default function SessionDetailPage() {
     }
     window.open(data.signedUrl, '_blank');
   };
+
+  const assignedUser = users.find(u => u.id === session?.user_id);
   const userDisplayName = (u: UserProfile) => {
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ');
     return name ? `${u.email} (${name})` : u.email || u.id;
