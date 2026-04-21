@@ -750,6 +750,16 @@ export function generatePlanItems(
       let sectionItemId: string | null = null;
       const sourceSheet = getSourceSheet(section);
 
+      // [ssdebug:gen] section.in
+      console.log('[ssdebug:gen] section.in', {
+        section: section.headerText,
+        dataRowStart: section.dataRowStart,
+        dataRowEnd: section.dataRowEnd,
+        dataRowCount: section.dataRowCount,
+        nameCol,
+      });
+      let emittedCount = 0;
+
       if (useSectionAsLevel && section.headerText) {
         orderCounter++;
         const sectionLevelName = levels.find(l => l.depth === sectionDepth)?.name || `Level ${sectionDepth}`;
@@ -765,17 +775,38 @@ export function generatePlanItems(
         });
         items.push(sectionItem);
         sectionItemId = sectionItem.id;
+        emittedCount++;
+        // [ssdebug:gen] item.out (section header)
+        console.log('[ssdebug:gen] item.out', {
+          section: section.headerText,
+          rowIndex: section.headerRowIndex,
+          name: sectionItem.name,
+          parentId: sectionItem.parentId,
+          levelDepth: sectionItem.levelDepth,
+          kind: 'section-header',
+        });
       }
 
       for (let r = section.dataRowStart; r < section.dataRowEnd; r++) {
         const row = sheet.rows[r];
-        if (!row) continue;
+        if (!row) {
+          console.log('[ssdebug:gen] row.decision', { section: section.headerText, rowIndex: r, row: null, nameColMapped: nameCol, resolvedName: '', skippedReason: 'no-row' });
+          continue;
+        }
 
         const filled = row.filter(c => c != null && String(c).trim() !== '');
-        if (filled.length === 0) continue;
+        if (filled.length === 0) {
+          console.log('[ssdebug:gen] row.decision', { section: section.headerText, rowIndex: r, row, nameColMapped: nameCol, resolvedName: '', skippedReason: 'empty' });
+          continue;
+        }
 
         const name = nameCol ? getColumnValue(row, nameCol) : '';
-        if (!name) continue;
+        if (!name) {
+          console.log('[ssdebug:gen] row.decision', { section: section.headerText, rowIndex: r, row, nameColMapped: nameCol, resolvedName: name, skippedReason: 'no-name' });
+          continue;
+        }
+
+        console.log('[ssdebug:gen] row.decision', { section: section.headerText, rowIndex: r, row, nameColMapped: nameCol, resolvedName: name, skippedReason: null });
 
         orderCounter++;
         const owner = ownerCol ? getColumnValue(row, ownerCol) : '';
@@ -818,7 +849,23 @@ export function generatePlanItems(
         }
 
         items.push(item);
+        emittedCount++;
+        // [ssdebug:gen] item.out (data row)
+        console.log('[ssdebug:gen] item.out', {
+          section: section.headerText,
+          rowIndex: r,
+          name: item.name,
+          parentId: item.parentId,
+          levelDepth: item.levelDepth,
+          kind: 'data',
+        });
       }
+
+      // [ssdebug:gen] section.out
+      console.log('[ssdebug:gen] section.out', {
+        section: section.headerText,
+        emittedCount,
+      });
     }
   }
 
