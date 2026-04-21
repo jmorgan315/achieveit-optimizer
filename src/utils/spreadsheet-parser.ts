@@ -277,10 +277,49 @@ function detectGenericPattern(sheet: ParsedSheet, rows: (string | number | null)
           colHeaders.map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
         );
 
+        // [ssdebug:detect] section.start
+        console.log('[ssdebug:detect] section.start', {
+          sheet: sheet.name,
+          headerText,
+          headerRowIndex,
+          columnHeaderRowIndex,
+          colHeaders,
+        });
+
         const dataRowStart = i;
+        let stopReason: 'isSectionHeader' | 'headerSetMatch' | 'eof' = 'eof';
         while (i < rows.length && !isLikelySectionHeader(rows[i], avgCols)) {
           const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
+
+          // [ssdebug:detect] suspect-row diagnostics
+          const firstCell = String(rows[i]?.[0] ?? '').trim();
+          const isSuspect = /^(2\.3|2\.4|3\.3|4\.3|5\.3)\b/.test(firstCell)
+            || /establish metric reporting methodology|submit updated project plan to cms|report initial metric progress to cms|complete post-program planning|report updated metric progress to cms/i.test(rows[i].map(c => String(c ?? '')).join(' '));
+          if (isSuspect) {
+            console.log('[ssdebug:detect] suspect.row.eval', {
+              sheet: sheet.name,
+              section: headerText,
+              rowIndex: i,
+              row: rows[i],
+              filledCount: filled.length,
+              isLikelySectionHeader: isLikelySectionHeader(rows[i], avgCols),
+              isLikelyColumnHeaderRow: isLikelyColumnHeaderRow(rows[i]),
+              headerSet: Array.from(headerSet),
+              avgCols,
+            });
+          }
+
           if (filled.length === 0) { i++; continue; }
+
+          // [ssdebug:detect] consume.row
+          console.log('[ssdebug:detect] consume.row', {
+            sheet: sheet.name,
+            section: headerText,
+            rowIndex: i,
+            row: rows[i],
+            filledCount: filled.length,
+          });
+
           // Only break if this row IS a repeat of THIS section's column-header row:
           // every non-empty cell exactly matches one of the section's headers
           // (case- and whitespace-insensitive). Never break when the section has no headers.
@@ -288,10 +327,24 @@ function detectGenericPattern(sheet: ParsedSheet, rows: (string | number | null)
             const allCellsAreHeaders = filled.every(c =>
               headerSet.has(String(c).trim().toLowerCase())
             );
-            if (allCellsAreHeaders) break;
+            if (allCellsAreHeaders) { stopReason = 'headerSetMatch'; break; }
           }
           i++;
         }
+        if (i < rows.length && stopReason === 'eof' && isLikelySectionHeader(rows[i], avgCols)) {
+          stopReason = 'isSectionHeader';
+        }
+
+        // [ssdebug:detect] section.end
+        console.log('[ssdebug:detect] section.end', {
+          sheet: sheet.name,
+          section: headerText,
+          dataRowStart,
+          dataRowEnd: i,
+          dataRowCount: i - dataRowStart,
+          stopReason,
+          stopRow: rows[i] ?? null,
+        });
 
         sections.push({
           headerText,
@@ -490,6 +543,14 @@ export function generatePlanItems(
       });
     }
   }
+
+  // [ssdebug:gen] colIndexMap.built
+  console.log('[ssdebug:gen] colIndexMap.built', {
+    refSection: refSection?.headerText ?? null,
+    refSectionColumnHeaders: refSection?.columnHeaders ?? [],
+    colIndexEntries: Array.from(colIndexMap.entries()),
+    columnMappings,
+  });
 
   const getColumnValue = (row: (string | number | null)[], colName: string): string => {
     const idx = colIndexMap.get(colName);
