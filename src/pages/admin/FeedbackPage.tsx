@@ -64,6 +64,21 @@ type SortDir = 'asc' | 'desc';
 
 export default function FeedbackPage() {
   const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const handleDownloadSource = async (e: React.MouseEvent, path: string | null) => {
+    e.stopPropagation();
+    if (!path) return;
+    const { data, error } = await supabase.storage
+      .from('source-documents')
+      .createSignedUrl(path, 300);
+    if (error || !data?.signedUrl) {
+      toast({ title: 'Failed to generate download link', description: error?.message, variant: 'destructive' });
+      return;
+    }
+    window.open(data.signedUrl, '_blank');
+  };
+
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [generalRows, setGeneralRows] = useState<GeneralFeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -314,7 +329,28 @@ export default function FeedbackPage() {
                       </TableCell>
                       <TableCell className="text-sm">{format(new Date(r.created_at), 'MMM d, yyyy')}</TableCell>
                       <TableCell className="text-sm">{r.user_email ?? '—'}</TableCell>
-                      <TableCell className="text-sm max-w-[150px] truncate">{r.document_name ?? '—'}</TableCell>
+                      <TableCell className="text-sm max-w-[200px]">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDownloadSource(e, r.source_file_path)}
+                                  disabled={!r.source_file_path}
+                                  className={`shrink-0 ${r.source_file_path ? 'text-muted-foreground hover:text-foreground' : 'text-muted-foreground/40 cursor-not-allowed'}`}
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {r.source_file_path ? 'Download source document' : 'Source file not available'}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <span className="truncate">{r.document_name ?? '—'}</span>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-sm">{r.org_name ?? '—'}</TableCell>
                       <TableCell className="text-sm">{r.expected_item_count ?? '—'}</TableCell>
                       <TableCell className="text-sm">{r.actual_item_count}</TableCell>
