@@ -8,7 +8,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronDown, Copy, ArrowLeft } from 'lucide-react';
+import { ChevronDown, Copy, ArrowLeft, Download } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import type { Json } from '@/integrations/supabase/types';
@@ -41,6 +42,7 @@ interface Session {
   document_type: string | null;
   classification_result: Json;
   step_results: Json;
+  source_file_path: string | null;
 }
 
 interface UserProfile {
@@ -315,6 +317,18 @@ export default function SessionDetailPage() {
     setAssigning(false);
   };
 
+  const handleDownloadSource = async () => {
+    if (!session?.source_file_path) return;
+    const { data, error } = await supabase.storage
+      .from('source-documents')
+      .createSignedUrl(session.source_file_path, 300);
+    if (error || !data?.signedUrl) {
+      toast({ title: 'Failed to generate download link', description: error?.message, variant: 'destructive' });
+      return;
+    }
+    window.open(data.signedUrl, '_blank');
+  };
+
   const assignedUser = users.find(u => u.id === session?.user_id);
   const userDisplayName = (u: UserProfile) => {
     const name = [u.first_name, u.last_name].filter(Boolean).join(' ');
@@ -334,9 +348,33 @@ export default function SessionDetailPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-lg">{session.org_name || 'Unknown Org'}</CardTitle>
-            <Badge variant={statusVariant}>{session.status}</Badge>
+            <div className="flex items-center gap-2">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleDownloadSource}
+                        disabled={!session.source_file_path}
+                      >
+                        <Download className="h-3.5 w-3.5 mr-1.5" />
+                        Source Document
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {session.source_file_path
+                      ? 'Download original uploaded file'
+                      : 'No source document stored (legacy session)'}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <Badge variant={statusVariant}>{session.status}</Badge>
+            </div>
           </div>
         </CardHeader>
         <CardContent>

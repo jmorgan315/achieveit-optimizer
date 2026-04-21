@@ -30,6 +30,36 @@ const INDUSTRIES = [
 ];
 
 const MAX_PDF_PAGES = 250;
+const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+async function uploadSourceDocument(file: File, sessionId: string): Promise<void> {
+  try {
+    if (file.size > MAX_FILE_SIZE) {
+      console.error('[source-upload] File exceeds 50MB, skipping storage');
+      return;
+    }
+    const path = `${sessionId}/${file.name}`;
+    const { error: uploadError } = await supabase.storage
+      .from('source-documents')
+      .upload(path, file, {
+        upsert: true,
+        contentType: file.type || 'application/octet-stream',
+      });
+    if (uploadError) {
+      console.error('[source-upload] Upload failed:', uploadError);
+      return;
+    }
+    const { error: updateError } = await supabase
+      .from('processing_sessions')
+      .update({ source_file_path: path })
+      .eq('id', sessionId);
+    if (updateError) {
+      console.error('[source-upload] Failed to update session row:', updateError);
+    }
+  } catch (err) {
+    console.error('[source-upload] Unexpected error:', err);
+  }
+}
 
 
 export interface QuickScanResults {
@@ -100,6 +130,11 @@ export function UploadIdentifyStep({
   };
 
   const handleFileSelect = async (file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error('File exceeds 50MB limit. Please upload a smaller file.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
     setUploadedFile(file);
     setPageCountError(null);
     setPdfPageCount(null);
@@ -154,6 +189,9 @@ export function UploadIdentifyStep({
         })
         .eq('id', sid);
       if (updateError) console.error('[UploadIdentify] Session update error:', updateError);
+
+      // Fire-and-forget: store original source document for admin debugging
+      uploadSourceDocument(uploadedFile, sid);
 
       // For spreadsheets: only org lookup, then advance
       if (isSpreadsheet(uploadedFile)) {

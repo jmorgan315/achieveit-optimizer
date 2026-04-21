@@ -9,7 +9,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { Loader2, Star, ChevronDown, ChevronRight, Upload } from 'lucide-react';
+import { Loader2, Star, ChevronDown, ChevronRight, Upload, FileText } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 
 interface ReimportSummary {
@@ -41,6 +43,7 @@ interface FeedbackRow {
   org_name: string | null;
   document_name: string | null;
   user_email: string | null;
+  source_file_path: string | null;
   reimport?: { summary: ReimportSummary; changes: ReimportChange[] } | null;
   hasFeedback: boolean;
 }
@@ -61,6 +64,21 @@ type SortDir = 'asc' | 'desc';
 
 export default function FeedbackPage() {
   const navigate = useNavigate();
+  const { toast } = useToast();
+
+  const handleDownloadSource = async (e: React.MouseEvent, path: string | null) => {
+    e.stopPropagation();
+    if (!path) return;
+    const { data, error } = await supabase.storage
+      .from('source-documents')
+      .createSignedUrl(path, 300);
+    if (error || !data?.signedUrl) {
+      toast({ title: 'Failed to generate download link', description: error?.message, variant: 'destructive' });
+      return;
+    }
+    window.open(data.signedUrl, '_blank');
+  };
+
   const [rows, setRows] = useState<FeedbackRow[]>([]);
   const [generalRows, setGeneralRows] = useState<GeneralFeedbackRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,7 +104,7 @@ export default function FeedbackPage() {
         sessionIds.forEach(id => feedbackSessionIds.add(id));
 
         const [{ data: sessions }, { data: profiles }] = await Promise.all([
-          supabase.from('processing_sessions').select('id, org_name, document_name, step_results').in('id', sessionIds),
+          supabase.from('processing_sessions').select('id, org_name, document_name, step_results, source_file_path').in('id', sessionIds),
           supabase.from('user_profiles').select('id, email').in('id', userIds),
         ]);
 
@@ -103,6 +121,7 @@ export default function FeedbackPage() {
             org_name: s?.org_name ?? null,
             document_name: s?.document_name ?? null,
             user_email: p?.email ?? null,
+            source_file_path: s?.source_file_path ?? null,
             reimport: reimport ?? null,
             hasFeedback: true,
           };
@@ -112,7 +131,7 @@ export default function FeedbackPage() {
       // Fetch sessions with reimports but no feedback row
       const { data: reimportSessions } = await supabase
         .from('processing_sessions')
-        .select('id, user_id, org_name, document_name, step_results, created_at')
+        .select('id, user_id, org_name, document_name, step_results, created_at, source_file_path')
         .not('step_results->reimport', 'is', null);
 
       if (reimportSessions && reimportSessions.length > 0) {
@@ -144,6 +163,7 @@ export default function FeedbackPage() {
               org_name: s.org_name ?? null,
               document_name: s.document_name ?? null,
               user_email: p?.email ?? null,
+              source_file_path: s.source_file_path ?? null,
               reimport,
               hasFeedback: false,
             });
@@ -309,7 +329,28 @@ export default function FeedbackPage() {
                       </TableCell>
                       <TableCell className="text-sm">{format(new Date(r.created_at), 'MMM d, yyyy')}</TableCell>
                       <TableCell className="text-sm">{r.user_email ?? '—'}</TableCell>
-                      <TableCell className="text-sm max-w-[150px] truncate">{r.document_name ?? '—'}</TableCell>
+                      <TableCell className="text-sm max-w-[200px]">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleDownloadSource(e, r.source_file_path)}
+                                  disabled={!r.source_file_path}
+                                  className={`shrink-0 ${r.source_file_path ? 'text-muted-foreground hover:text-foreground' : 'text-muted-foreground/40 cursor-not-allowed'}`}
+                                >
+                                  <FileText className="h-3.5 w-3.5" />
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {r.source_file_path ? 'Download source document' : 'Source file not available'}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <span className="truncate">{r.document_name ?? '—'}</span>
+                        </div>
+                      </TableCell>
                       <TableCell className="text-sm">{r.org_name ?? '—'}</TableCell>
                       <TableCell className="text-sm">{r.expected_item_count ?? '—'}</TableCell>
                       <TableCell className="text-sm">{r.actual_item_count}</TableCell>
