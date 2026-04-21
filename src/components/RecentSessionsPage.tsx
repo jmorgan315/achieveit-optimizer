@@ -172,13 +172,13 @@ export function RecentSessionsPage({ onNewImport, onSelectSession, userId, isAdm
     try {
       const { error } = await supabase
         .from('processing_sessions')
-        .update({ status: 'failed', current_step: 'cancelled', pipeline_run_id: null })
+        .update({ status: 'cancelled', current_step: 'cancelled', pipeline_run_id: null })
         .eq('id', sessionId);
       if (error) throw error;
 
       setSessions((prev) =>
         prev.map((s) =>
-          s.id === sessionId ? { ...s, status: 'failed', current_step: 'cancelled' } : s,
+          s.id === sessionId ? { ...s, status: 'cancelled', current_step: 'cancelled' } : s,
         ),
       );
       toast.success('Import cancelled');

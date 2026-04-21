@@ -18,6 +18,7 @@ import {
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface } from '@/components/spreadsheet/MappingInterface';
 import { Loader2 } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 
 type Phase = 'parsing' | 'detection' | 'mapping' | 'generating';
 
@@ -100,7 +101,7 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
     setPhase('mapping');
   };
 
-  const handleApplyMapping = (config: MappingConfig) => {
+  const handleApplyMapping = async (config: MappingConfig) => {
     if (!detection) return;
     setPhase('generating');
 
@@ -131,41 +132,40 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
 
     const sheetNames = selectedSheetIndices.map(i => detection.sheets[i]?.sheet.name).filter(Boolean);
 
-    // Update session
-    supabase.from('processing_sessions').upsert({
-      id: sessionId,
-      extraction_method: 'spreadsheet',
-      total_items_extracted: items.length,
-      status: 'completed',
-      document_type: file.name.split('.').pop() || 'xlsx',
-      step_results: {
-        success: true,
-        method: 'spreadsheet',
-        data: { items: buildTree(items) },
-        totalItems: items.length,
-        sessionConfidence: 100,
-        extractionMethod: 'spreadsheet',
-        mappingConfig: {
-          columnMappings: config.columnMappings,
-          sectionMapping: config.sectionMapping,
-          measurementMode: config.measurementMode,
-        },
-        sheetsProcessed: sheetNames,
-        hasStrategyPattern: detection.hasStrategyPattern,
-      } as any,
-    }, { onConflict: 'id' }).then(({ error }) => {
-      if (error) console.error('[Session] Failed to update spreadsheet session:', error);
-    });
+    // Mark session as completed (awaited so the row update lands before transition).
+    const { error: updateError } = await supabase
+      .from('processing_sessions')
+      .update({
+        extraction_method: 'spreadsheet',
+        total_items_extracted: items.length,
+        status: 'completed',
+        document_type: file.name.split('.').pop() || 'xlsx',
+        step_results: {
+          success: true,
+          method: 'spreadsheet',
+          data: { items: buildTree(items) },
+          totalItems: items.length,
+          sessionConfidence: 100,
+          extractionMethod: 'spreadsheet',
+          mappingConfig: {
+            columnMappings: config.columnMappings,
+            sectionMapping: config.sectionMapping,
+            measurementMode: config.measurementMode,
+          },
+          sheetsProcessed: sheetNames,
+          hasStrategyPattern: detection.hasStrategyPattern,
+        } as any,
+      })
+      .eq('id', sessionId);
 
-    console.log('[ssdebug:final] before onComplete', {
-      totalItems: items.length,
-      byParent: items.reduce((acc, it) => {
-        const k = it.parentId ?? 'ROOT';
-        acc[k] = (acc[k] ?? 0) + 1;
-        return acc;
-      }, {} as Record<string, number>),
-      names: items.map(i => ({ order: i.order, depth: i.levelDepth, name: i.name, parentId: i.parentId })),
-    });
+    if (updateError) {
+      console.error('[Session] Failed to mark spreadsheet session complete:', updateError);
+      toast({
+        title: 'Heads up',
+        description: 'Failed to mark session complete. Continuing anyway.',
+        variant: 'destructive',
+      });
+    }
 
     onComplete(items, personMappings, levels);
   };

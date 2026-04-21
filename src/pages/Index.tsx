@@ -150,6 +150,19 @@ const Index = () => {
   };
 
   const handleStartOver = () => {
+    // If user is bailing on an in-progress spreadsheet import, mark it cancelled.
+    // Guarded by .eq('status','in_progress') so completed/failed/cancelled rows are never demoted.
+    const isSpreadsheetFile = !!uploadedFile && /\.(xlsx|xls|csv)$/i.test(uploadedFile.name);
+    if (state.sessionId && isSpreadsheetFile) {
+      supabase
+        .from('processing_sessions')
+        .update({ status: 'cancelled', current_step: 'cancelled' })
+        .eq('id', state.sessionId)
+        .eq('status', 'in_progress')
+        .then(({ error }) => {
+          if (error) console.error('[Session] Cancel on Start Over failed:', error);
+        });
+    }
     sessionIdRef.current = null;
     sessionPromiseRef.current = null;
     resetState();
@@ -481,12 +494,26 @@ const Index = () => {
   };
 
   const handleSpreadsheetComplete = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
-    console.log('[ssdebug:state] handleSpreadsheetComplete received', {
-      totalItems: items.length,
-      names: items.map(i => i.name),
-    });
     setLevels(levels);
     setItems(items, personMappings);
+
+    // Safety-net completion: if change 1 didn't land for any reason, ensure the session
+    // ends up marked completed. Guarded so we never demote a non-in_progress row.
+    if (state.sessionId) {
+      supabase
+        .from('processing_sessions')
+        .update({
+          status: 'completed',
+          extraction_method: 'spreadsheet',
+          total_items_extracted: items.length,
+        })
+        .eq('id', state.sessionId)
+        .eq('status', 'in_progress')
+        .then(({ error }) => {
+          if (error) console.error('[Session] Safety-net completion failed:', error);
+        });
+    }
+
     if (personMappings.length > 0) {
       advanceToStep(3);
     } else {
