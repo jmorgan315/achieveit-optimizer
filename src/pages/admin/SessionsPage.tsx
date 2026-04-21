@@ -84,6 +84,7 @@ export default function SessionsPage() {
   const statusVariant = (s: string) => {
     if (s === 'completed') return 'default';
     if (s === 'failed') return 'destructive';
+    if (s === 'cancelled') return 'outline';
     return 'secondary';
   };
 
@@ -115,6 +116,7 @@ export default function SessionsPage() {
               <SelectItem value="in_progress">In Progress</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
               <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -126,6 +128,7 @@ export default function SessionsPage() {
               <SelectItem value="all">All</SelectItem>
               <SelectItem value="text">Text</SelectItem>
               <SelectItem value="vision">Vision</SelectItem>
+              <SelectItem value="spreadsheet">Spreadsheet</SelectItem>
               <SelectItem value="fallback_parser">Fallback</SelectItem>
             </SelectContent>
           </Select>
