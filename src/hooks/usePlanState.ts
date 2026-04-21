@@ -28,6 +28,10 @@ export function usePlanState() {
   }, []);
 
   const setItems = useCallback((items: PlanItem[], personMappings: PersonMapping[]) => {
+    console.log('[ssdebug:state] usePlanState.setItems', {
+      totalItems: items.length,
+      names: items.map(i => i.name),
+    });
     setState((prev) => ({ ...prev, items, personMappings }));
   }, []);
 

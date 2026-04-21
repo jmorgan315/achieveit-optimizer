@@ -481,6 +481,10 @@ const Index = () => {
   };
 
   const handleSpreadsheetComplete = (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => {
+    console.log('[ssdebug:state] handleSpreadsheetComplete received', {
+      totalItems: items.length,
+      names: items.map(i => i.name),
+    });
     setLevels(levels);
     setItems(items, personMappings);
     if (personMappings.length > 0) {

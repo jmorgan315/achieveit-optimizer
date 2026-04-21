@@ -157,6 +157,16 @@ export function SpreadsheetImportStep({ file, sessionId, onComplete }: Spreadshe
       if (error) console.error('[Session] Failed to update spreadsheet session:', error);
     });
 
+    console.log('[ssdebug:final] before onComplete', {
+      totalItems: items.length,
+      byParent: items.reduce((acc, it) => {
+        const k = it.parentId ?? 'ROOT';
+        acc[k] = (acc[k] ?? 0) + 1;
+        return acc;
+      }, {} as Record<string, number>),
+      names: items.map(i => ({ order: i.order, depth: i.levelDepth, name: i.name, parentId: i.parentId })),
+    });
+
     onComplete(items, personMappings, levels);
   };
 
