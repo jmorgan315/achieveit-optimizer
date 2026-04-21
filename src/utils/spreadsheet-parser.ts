@@ -690,15 +690,8 @@ export function generatePlanItems(
       let sectionItemId: string | null = null;
       const sourceSheet = getSourceSheet(section);
 
-      // [ssdebug:gen] section.in
-      console.log('[ssdebug:gen] section.in', {
-        section: section.headerText,
-        dataRowStart: section.dataRowStart,
-        dataRowEnd: section.dataRowEnd,
-        dataRowCount: section.dataRowCount,
-        nameCol,
-      });
-      let emittedCount = 0;
+
+
 
       if (useSectionAsLevel && section.headerText) {
         orderCounter++;
