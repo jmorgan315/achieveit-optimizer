@@ -272,11 +272,24 @@ function detectGenericPattern(sheet: ParsedSheet, rows: (string | number | null)
         const columnHeaderRowIndex = i;
         i++;
 
+        // Normalize this section's column headers once for exact-match comparison.
+        const headerSet = new Set(
+          colHeaders.map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
+        );
+
         const dataRowStart = i;
         while (i < rows.length && !isLikelySectionHeader(rows[i], avgCols)) {
           const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
           if (filled.length === 0) { i++; continue; }
-          if (isLikelyColumnHeaderRow(rows[i]) && i > dataRowStart + 1) break;
+          // Only break if this row IS a repeat of THIS section's column-header row:
+          // every non-empty cell exactly matches one of the section's headers
+          // (case- and whitespace-insensitive). Never break when the section has no headers.
+          if (headerSet.size > 0 && i > dataRowStart + 1) {
+            const allCellsAreHeaders = filled.every(c =>
+              headerSet.has(String(c).trim().toLowerCase())
+            );
+            if (allCellsAreHeaders) break;
+          }
           i++;
         }
 
