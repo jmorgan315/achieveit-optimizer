@@ -1,80 +1,92 @@
 
-## Plan: Store source documents for feedback debugging (revised)
+## Plan: Fix 2-children-per-parent cap in spreadsheet import (revised)
 
-Retain the original uploaded file alongside each session so admins can download it later when reviewing feedback. New private storage bucket, fire-and-forget upload, downloadable from two admin surfaces.
+Replace the over-eager column-header guard at `src/utils/spreadsheet-parser.ts:279` with an exact-match check against the **local `colHeaders`** array (confirmed; not `section.columnHeaders`). Apply the same fix to the parallel guard at line 310 in the headerless code path so the same bug doesn't survive in a different shape.
 
-### Revisions from previous plan
+### Variable name confirmation
 
-- **Add `text/plain` to bucket MIME allowlist** so `.txt` uploads (already accepted by the file picker) actually land in storage instead of silently failing.
-- **Confirmed call-site ordering**: in `UploadIdentifyStep.handleContinue`, the source upload fires immediately after the `processing_sessions` update that follows `ensureSessionId`. By that point the row exists with `user_id` populated (created by `ensureSessionId` with `user_id: auth.uid()`), so storage RLS passes.
-- **Post-ship regression gate**: run the 40-page Chattanooga PDF and confirm 47 items, unchanged processing time, source file visible/downloadable from admin detail.
+Read lines 255–310 of `spreadsheet-parser.ts`. Inside `detectGenericPattern` there is no `section` / `currentSection` object — the column headers for the section currently being walked live in a local `const colHeaders = rows[i].map(...).filter(...)` built on lines 269–271 (and on lines 301–303 for the headerless variant). The fix references `colHeaders` directly. No ambiguity.
 
-### 1. Database migration (new file in `supabase/migrations/`)
+### Change A — line 279 (sectioned path)
 
-- Add `source_file_path TEXT` (nullable) to `processing_sessions`.
-- Create private `source-documents` bucket: `public=false`, `file_size_limit=52428800` (50MB), allowed MIME types:
-  - `application/pdf`
-  - `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-  - `application/msword`
-  - `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
-  - `application/vnd.ms-excel`
-  - `text/csv`
-  - `text/plain` ← added
-- Storage RLS on `storage.objects`:
-  - SELECT: owner via join to `processing_sessions.user_id` matching first folder segment of object name.
-  - SELECT: admins (`is_admin(auth.uid())`).
-  - INSERT: authenticated users into folders matching their own session ids.
-  - No DELETE/UPDATE policy → implicit deny (service role only).
+Today:
+```ts
+const dataRowStart = i;
+while (i < rows.length && !isLikelySectionHeader(rows[i], avgCols)) {
+  const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
+  if (filled.length === 0) { i++; continue; }
+  if (isLikelyColumnHeaderRow(rows[i]) && i > dataRowStart + 1) break;
+  i++;
+}
+```
 
-### 2. `src/components/steps/UploadIdentifyStep.tsx`
+After:
+```ts
+// Normalize this section's column headers once for exact-match comparison.
+const headerSet = new Set(
+  colHeaders.map(h => h.trim().toLowerCase()).filter(h => h.length > 0)
+);
 
-- Add `MAX_FILE_SIZE = 50 * 1024 * 1024` constant.
-- In `handleFileSelect`: pre-upload size check. If `file.size > MAX_FILE_SIZE`, toast "File exceeds 50MB limit. Please upload a smaller file." and return without setting state.
-- Add helper `uploadSourceDocument(file, sessionId)` that:
-  - Builds path `${sessionId}/${file.name}`.
-  - Calls `supabase.storage.from('source-documents').upload(path, file, { upsert: true, contentType: file.type })`.
-  - On success, updates `processing_sessions.source_file_path = path`.
-  - All errors caught and logged to `console.error('[source-upload] …')`. Never throws.
-- In `handleContinue`, immediately after the `processing_sessions` update that follows `ensureSessionId` (so `user_id` is already on the row), invoke `uploadSourceDocument(uploadedFile, sid)` **without await** (fire-and-forget). Critical path proceeds unchanged for spreadsheet, text, and PDF branches.
+const dataRowStart = i;
+while (i < rows.length && !isLikelySectionHeader(rows[i], avgCols)) {
+  const filled = rows[i].filter(c => c != null && String(c).trim() !== '');
+  if (filled.length === 0) { i++; continue; }
 
-### 3. `src/pages/admin/SessionDetailPage.tsx`
+  // Only break if this row IS a repeat of THIS section's column-header row:
+  // every non-empty cell exactly matches one of the section's headers
+  // (case- and whitespace-insensitive). Never break when the section has no headers.
+  if (headerSet.size > 0 && i > dataRowStart + 1) {
+    const allCellsAreHeaders = filled.every(c =>
+      headerSet.has(String(c).trim().toLowerCase())
+    );
+    if (allCellsAreHeaders) break;
+  }
+  i++;
+}
+```
 
-- Extend `Session` interface with `source_file_path: string | null`.
-- Add `handleDownloadSource()`: calls `supabase.storage.from('source-documents').createSignedUrl(session.source_file_path, 300)`; opens signed URL in a new tab on success; toast error on failure.
-- Render a "Download Source Document" button in the top header card (next to status badge or in the metadata grid). Disabled with tooltip "No source document stored (legacy session)" when `source_file_path` is null. Use `lucide-react` `Download` icon.
+### Change B — line 310 (headerless first-section path)
 
-### 4. `src/pages/admin/FeedbackPage.tsx` (Import Signals tab)
+Same shape: the guard inside the `while (i < rows.length)` loop starting at line 307 also calls `isLikelyColumnHeaderRow(rows[i])` to decide when to stop consuming data rows. Replace it with the same exact-match check against the local `colHeaders` from lines 301–303. (Will read lines 300–340 during the edit to confirm the exact line and apply the identical pattern.)
 
-- Extend the `processing_sessions` select on lines 89 and 115 to include `source_file_path`.
-- Extend `FeedbackRow` interface with `source_file_path: string | null` and populate from session map in both code paths (regular feedback rows + reimport-only rows).
-- In the Document column cell (line 312), render a small icon button next to the document name:
-  - If `source_file_path` present: enabled `FileText` icon button, tooltip "Download source document", `onClick` (with `e.stopPropagation()` so it doesn't toggle the row) triggers the same signed-URL download flow.
-  - If null: muted/disabled icon, tooltip "Source file not available".
-- Use existing `Tooltip` from `@/components/ui/tooltip`.
+### What stays untouched
+
+- `isLikelyColumnHeaderRow` helper itself (lines 127–133) — may have other callers; leave it.
+- `isLikelySectionHeader`.
+- Metrics / `colIndexMap` / `refSection` logic — explicitly deferred.
+- `generatePlanItems`, mapping UI, multi-tab merge.
+- AI extraction path (PDF/Word).
+- Source-document storage feature.
+
+### Known residual risk (acknowledged, not engineered around)
+
+The exact-match guard can still false-positive if a future spreadsheet has an interior data row where every non-empty cell coincidentally equals a column-header string of that same section. Vastly narrower than the original bug (which fired on any short multi-cell row). The DRAFT template, Chattanooga, and Operational Plan don't have such rows. Logging this here so a future "lost items" report points at this as the first suspect.
+
+### Regression gates (all must pass before ship)
+
+1. **Chattanooga PDF (40 pages)** → 47 items via AI path. Spreadsheet parser is untouched on that code path; gate is for safety.
+2. **Operational Plan .xlsx (20 sheets)** → 685 items, no drops, no duplicates.
+3. **DRAFT_State_Reporting_Template.xlsx, Initiative 1 tab** → 24 items:
+   - 6 Stage parents (Stage 0 – Stage 5)
+   - 17 Checkpoint children with correct parents:
+     - Stage 0 → 0.1, 0.2
+     - Stage 1 → 1.1, 1.2
+     - **Stage 2 → 2.1, 2.2, 2.3, 2.4** (critical)
+     - Stage 3 → 3.1, 3.2, 3.3
+     - Stage 4 → 4.1, 4.2, 4.3
+     - Stage 5 → 5.1, 5.2, 5.3
+   - 1 "Metrics" section header (no children — unchanged, deferred)
+
+Pull the original `.xlsx` from the `source-documents` bucket for the affected session for gate 3 so the test runs on the exact bytes that surfaced the bug.
 
 ### Files affected
 
 | File | Change |
 |------|--------|
-| `supabase/migrations/<new>.sql` | Add column, bucket (incl. `text/plain`), RLS policies |
-| `src/components/steps/UploadIdentifyStep.tsx` | 50MB pre-check + fire-and-forget upload helper after `user_id` is set |
-| `src/pages/admin/SessionDetailPage.tsx` | Download Source Document button (header) |
-| `src/pages/admin/FeedbackPage.tsx` | Source-doc download icon in Document column; include `source_file_path` in queries |
+| `src/utils/spreadsheet-parser.ts` | Two guards replaced with exact-match check against local `colHeaders` (≈16 lines net across both sites) |
 
-### Out of scope (explicitly unchanged)
+### Report-back after ship
 
-- `page-images` bucket and its policies.
-- Pipeline edge functions (`process-plan`, `classify-document`, `extract-plan-items`, `extract-plan-vision`, `audit-completeness`, `validate-hierarchy`).
-- 250-page PDF blocker (still runs first).
-- Re-import flow source storage (separate follow-up).
-- Spreadsheet parser, auto-start/resume logic, accept string.
-
-### Post-ship regression checks
-
-1. Chattanooga 40-page PDF → 47 items, processing time unchanged, source file appears in admin detail and downloads via signed URL.
-2. `.docx` round-trip → upload, store, download.
-3. `.xlsx` round-trip → upload, store, spreadsheet import flow still completes; download works.
-4. `.txt` round-trip → confirms `text/plain` MIME fix.
-5. Oversized (>50MB) → blocked client-side with toast.
-6. Legacy session → admin button disabled with correct tooltip; no crash.
-7. Non-admin user → can download own source doc, RLS denies access to others.
+- Exact lines changed in `spreadsheet-parser.ts` (both sites).
+- Gate results: 47 / 685 / 24.
+- One-line confirmation that nothing else in the parser was modified.
