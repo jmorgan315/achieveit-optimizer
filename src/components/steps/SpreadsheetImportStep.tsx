@@ -25,10 +25,11 @@ type Phase = 'parsing' | 'detection' | 'mapping' | 'generating';
 interface SpreadsheetImportStepProps {
   file: File;
   sessionId: string;
+  documentHints?: string;
   onComplete: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
 }
 
-export function SpreadsheetImportStep({ file, sessionId, onComplete }: SpreadsheetImportStepProps) {
+export function SpreadsheetImportStep({ file, sessionId, documentHints, onComplete }: SpreadsheetImportStepProps) {
   const [phase, setPhase] = useState<Phase>('parsing');
   const [detection, setDetection] = useState<StructureDetection | null>(null);
   const [selectedSheetIndices, setSelectedSheetIndices] = useState<number[]>([]);
