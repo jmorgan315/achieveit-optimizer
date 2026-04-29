@@ -1364,6 +1364,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         organizationName,
         industry,
         planLevels,
+        documentHints,
         classification: classification || null,
         dedupRemovedNames: dedupRemovedNames.length > 0 ? dedupRemovedNames : undefined,
       };
@@ -1878,6 +1879,7 @@ async function runAgent2Only(
       organizationName,
       industry,
       planLevels,
+      documentHints,
       classification,
       sourceText,
     };
@@ -1988,6 +1990,7 @@ async function runAgent3Only(
         organizationName,
         industry,
         planLevels,
+        documentHints,
       });
       if (result.ok && (result.data as { success: boolean }).success) {
         validationResult = (result.data as { data: ValidationResult }).data;
@@ -2048,6 +2051,7 @@ async function runAgent3Only(
           organizationName,
           industry,
           planLevels,
+          documentHints,
           globalContext,
         });
 
