@@ -9,6 +9,13 @@ const corsHeaders = {
 const MAX_SOURCE_LENGTH = 180000;
 const MAX_VISION_IMAGES = 10; // Send at most 10 pages for audit (lighter than extraction)
 
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
+
 const TEXT_AUDIT_SYSTEM_PROMPT = `You are a completeness auditor for strategic plan extraction. Your ONLY job is to compare extracted plan items against the source document and identify anything that was MISSED, INCORRECTLY MERGED, or REPHRASED.
 
 You are NOT re-extracting the document. You are AUDITING an existing extraction for accuracy and completeness.
