@@ -1022,6 +1022,7 @@ export function FileUploadStep({
         <SpreadsheetImportStep
           file={spreadsheetFile}
           sessionId={sessionId}
+          documentHints={orgProfile?.documentHints}
           onComplete={onSpreadsheetComplete}
         />
       </div>
