@@ -1802,6 +1802,8 @@ async function runResume(sessionId: string): Promise<void> {
     const planLevels = pipeCtx.planLevels as unknown[] | undefined;
     const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
     const sourceText = (pipeCtx.documentText || "") as string;
+    // Hydrate documentHints: prefer pipeCtx, fall back to the persisted session row column
+    const documentHints = (pipeCtx.documentHints as string | undefined) || ((session as Record<string, unknown>).document_hints as string | undefined) || undefined;
 
     if (currentStep === "extraction_complete" || currentStep === "auditing") {
       // Time check before Agent 2
@@ -1813,13 +1815,13 @@ async function runResume(sessionId: string): Promise<void> {
       }
       // Agent 2 hasn't finished — run (or re-run) Agent 2
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 2`);
-      await runAgent2Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, pipelineRunId, stepResults);
+      await runAgent2Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, documentHints, pipelineRunId, stepResults);
       cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
     } else if (currentStep === "audited" || currentStep === "validating") {
       // Agent 2 done, Agent 3 hasn't finished — run (or re-run) Agent 3
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 3`);
       const auditFindings = (stepResults.audit || null) as AuditFindings | null;
-      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, pipelineRunId, stepResults, startTime);
+      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, documentHints, pipelineRunId, stepResults, startTime);
     }
 
   } catch (error) {
