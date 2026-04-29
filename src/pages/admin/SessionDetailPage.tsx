@@ -43,6 +43,8 @@ interface Session {
   classification_result: Json;
   step_results: Json;
   source_file_path: string | null;
+  layout_classification: Json;
+  layout_classified_at: string | null;
 }
 
 interface UserProfile {
