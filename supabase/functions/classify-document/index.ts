@@ -278,6 +278,7 @@ async function classifyChunk(
   apiKey: string,
   baseUserPrompt: string,
   sessionId: string,
+  additionalNotes: string | null,
 ): Promise<{ classification: Record<string, unknown>; inputTokens: number; outputTokens: number } | null> {
   const startPage = pageOffset + 1;
   const endPage = pageOffset + chunkImages.length;
@@ -292,7 +293,7 @@ async function classifyChunk(
   const requestBody = {
     model: "claude-opus-4-6",
     max_tokens: 4096,
-    system: CLASSIFICATION_SYSTEM_PROMPT,
+    system: `${buildUserContextBlock(additionalNotes)}${CLASSIFICATION_SYSTEM_PROMPT}`,
     messages: [{ role: "user", content: userContent }],
   };
 
