@@ -1,74 +1,111 @@
-## Plan: Phase 2 — Add Screen 2 to the Excel/CSV flow
+# Phase 3 — AI Layout Classifier for Excel/CSV (revised)
 
-Today the spreadsheet path skips Screen 2 entirely: Screen 1 → straight to processing (which renders the mapping UI). This change inserts the existing `ScanResultsStep` between them, reusing all the PDF-path components (no fork). After Continue, routing falls through to today's mapping UI unchanged.
+Analysis-only. Classifier runs fire-and-forget after spreadsheet parse, persists structured result to the session, and surfaces in an admin viewer for user-driven validation. Phase 4 (later) wires the result into the parser dispatch.
 
-### Note on persistence column
+## What ships
 
-Prompt 20 says "Persist `additional_notes` on `processing_sessions` (confirmed in Phase 1 to live there)." The column added in Phase 1 is actually named **`document_hints`** (text). It already exists, is already populated by `handleStartProcessing` via `setOrgProfile({ ...config.orgProfile, documentHints: notes })`, and is already persisted by the PDF orchestrator. For the spreadsheet path we'll write the same `document_hints` column directly from the client when the spreadsheet completion writes the session row — so notes survive even though no edge function runs. No new migration needed.
+### 1. DB migration
 
-### Changes
+Add to `processing_sessions`:
+- `layout_classification jsonb`
+- `layout_classified_at timestamptz`
 
-**1. `src/components/steps/UploadIdentifyStep.tsx`** — stop short-circuiting spreadsheets.
+### 2. New edge function `classify-spreadsheet-layout`
 
-Remove the spreadsheet-specific early-return branch (lines ~196–224) that runs only `lookup-organization` and returns. Spreadsheets will fall through to a unified path:
-- Run `lookup-organization` (same as today).
-- Skip `classify-document` (no page images for .xlsx/.csv).
-- Return `QuickScanResults` with `isSpreadsheet: true`, `pageCount: null`, `classificationResult: null`, `pageImages: null`.
+- Auth: standard JWT validation in code (`getClaims`), default deploy
+- Model: **`claude-sonnet-4-6`** via existing `ANTHROPIC_API_KEY` (matches the rest of the agent stack)
+- Input: `{ sessionId, orgName, documentHints?, workbookPreview }` where preview = per-sheet array of `{ sheetName, rows: string[][] }`, capped at **30 rows × 12 cols**, each cell truncated to **80 chars**
+- Chunking: classify sheets in groups of 5 to keep cost <$0.10/workbook
+- Tool-calling for structured output
+- Fail-soft: any error writes `{ error, model, classified_at }` sentinel; never throws back to client
+- Logs to `api_call_logs` with `step_label = 'classify_layout'`
+- Persists merged result to `layout_classification` and stamps `layout_classified_at`
 
-This means spreadsheets reach `handleQuickScanComplete` with the same shape — but `isSpreadsheet` is true.
-
-**2. `src/pages/Index.tsx`** — route spreadsheets through Screen 2.
-
-In `handleQuickScanComplete` (lines 404–411), remove the `isSpreadsheet` branch that calls `advanceToStep(2)`. Always `advanceToStep(1)` so both PDF and spreadsheet paths land on `ScanResultsStep`.
-
-`ScanResultsStep` already handles a null `pageCount` and null `classificationResult` gracefully:
-- The Document Scope card is wrapped in `{pageCount !== null && (...)}` — it simply won't render for spreadsheets.
-- The Time Estimate is wrapped in `{timeEstimate && ...}` — won't render either.
-- Plan Structure card and Additional Notes card both render unconditionally.
-- Org match card renders when `lookupResult` is non-null.
-
-Result: spreadsheet users see Org confirmation + Plan Structure (no-op for now, with no copy change per prompt) + Additional Notes. They click Start Processing → `handleStartProcessing` runs → `advanceToStep(2)` → `FileUploadStep` mounts → spreadsheet branch in there routes to mapping UI as today.
-
-**3. `src/components/steps/SpreadsheetImportStep.tsx`** — persist `document_hints`.
-
-In `handleApplyMapping`, the `.update({...})` call that marks the session completed currently writes `extraction_method`, `total_items_extracted`, `status`, `document_type`, `step_results`. Add one field:
-
-```ts
-document_hints: orgProfile?.documentHints || null,
+**Output schema (persisted):**
+```json
+{
+  "workbook_summary": {
+    "primary_pattern": "A|B|C|D|mixed",
+    "needs_user_clarification": true,
+    "clarification_reason": "Multiple time-versioned tabs detected (Jan, Feb, Mar)"
+  },
+  "sheets": [
+    {
+      "sheet_name": "All In",
+      "pattern": "A|B|C|D|not_plan_content|empty|unknown",
+      "confidence": 0,
+      "reasoning": "...",
+      "structure": {
+        "header_row_index": 2,
+        "data_starts_at_row": 3,
+        "name_column_index": 1,
+        "hierarchy_signal": "section_headers|category_columns|column_nested|pivot_rows",
+        "implied_levels": ["Strategy", "Outcome", "Action"],
+        "section_marker_pattern": "^(Strategy|Goal):"
+      }
+    }
+  ],
+  "model": "claude-sonnet-4-6",
+  "tokens": { "input": 0, "output": 0 },
+  "duration_ms": 0
+}
 ```
 
-This requires threading `orgProfile` (or just the hints string) into `SpreadsheetImportStep` props. Simplest: add an optional `documentHints?: string` prop, pass `state.orgProfile?.documentHints` from wherever `SpreadsheetImportStep` is rendered (likely `FileUploadStep`).
+### 3. Pattern definitions in the prompt
 
-**4. `src/components/steps/FileUploadStep.tsx`** — pass hints through.
+- **A — Form/section-block**: section headers like `Strategy:` / `Goal:` with rows below; column meaning shifts per section
+- **B — Flat list with hierarchy column(s)**: one row per item, level encoded in a column (e.g. "Type" = Goal/Strategy/Action) or by indent
+- **C — Column-nested**: hierarchy encoded across columns (Strategy col → Outcome col → Action col on same row)
+- **D — Pivot/scorecard**: metrics in rows, time/owner in columns
+- **not_plan_content**: README, config, dept lookup, budget — present but not plan items
+- **empty / unknown**: no extractable signal
 
-Forward `orgProfile.documentHints` to `SpreadsheetImportStep` so it can persist them.
+### 4. Client wiring (fire-and-forget, no UI on the import path)
 
-### What does NOT change
+- `src/components/steps/SpreadsheetImportStep.tsx`: after the existing parse step succeeds, call `supabase.functions.invoke('classify-spreadsheet-layout', { body: { sessionId, orgName, documentHints, workbookPreview } })` without `await` blocking the user
+- `src/components/steps/FileUploadStep.tsx`: forward `orgName` + `documentHints` props down so the classifier has org context
+- No loading state, no toast on the import flow — Phase 4 will read `layout_classification` from the session
 
-- `WizardProgress` — already generic; the indicator will naturally show the new path because spreadsheets now visit step index 1 just like PDFs.
-- The mapping UI (`DetectionSummary`, `MappingInterface`) — untouched (Phase 4 territory).
-- The PDF path — untouched.
-- AI agents — untouched (notes are collected but not used on the spreadsheet path; Phase 3 will wire them in).
-- Re-import flow — untouched (it bypasses Screen 1/2 entirely as before).
-- No new migration — `document_hints` column already exists from Phase 1.
+### 5. Admin viewer on `SessionDetailPage`
 
-### Behavioral notes
+When `layout_classification` is present on the session, render a new "Layout Classification" panel (admin-visible only, like other admin surfaces on that page):
+- **Workbook summary**: primary_pattern badge, needs_user_clarification flag, clarification_reason
+- **Per-sheet table**: sheet_name · pattern badge · confidence · hierarchy_signal · implied_levels · header_row_index / data_starts_at_row / name_column_index · reasoning (collapsible)
+- **Cost footer**: pulled from `api_call_logs` where `session_id = ? AND step_label = 'classify_layout'` — sum input/output tokens, compute $ at Sonnet rates, show duration
+- **Raw JSON toggle**: collapsible `<pre>` with the full `layout_classification` blob for copy/paste
+- Fail-soft sentinel renders as a red error card with the stored error message
 
-- For spreadsheets, the org lookup uses **filename + orgName + industry** (which is already what `lookup-organization` receives — it doesn't take the file content). Using sheet content as additional context is technically out of scope of `lookup-organization`'s current interface; sticking with the simpler "use what we already pass" path per the prompt's "If that's complex, just use the filename for now."
-- The `Plan Structure` checkbox on Screen 2 will show for spreadsheets but, as noted in the prompt, has no effect on the spreadsheet path today. The user can still set it; it's stored on `orgProfile.planLevels` and passed through to `setLevels` in `handleStartProcessing`. The spreadsheet mapper currently overrides levels based on detected pattern, so user-defined levels may get replaced. That mismatch is acknowledged by the prompt as Phase 3+ work — not addressed here.
+This is the validation surface — user uploads the 8 sample files and reads results here.
 
-### Regression gates (to run after implementation)
+## Regression gates (must all pass)
 
-1. **PDF flow (Chattanooga)** — Screen 1 → Screen 2 → Process → Map People → Review & Export still works.
-2. **Spreadsheet flow** — upload .xlsx, land on Screen 2 with org card + Notes field, click Continue, reach mapping UI.
-3. **`document_hints` persisted** — type something into Notes on Screen 2 for a spreadsheet upload; after mapping completes, verify `processing_sessions.document_hints` contains the text.
-4. **Operational Plan .xlsx (685 items)** — full flow still produces 685 items.
-5. **DRAFT Initiative 1 tab** — full flow still produces 24 items.
-6. **Re-import (PDF)** — bypasses Screen 2 as before.
+1. PDF flow unchanged — extraction, dedup, export still work
+2. Excel flow still completes to the mapping screen (classifier is non-blocking)
+3. Operational Plan .xlsx → 685 items
+4. DRAFT Initiative 1 → 24 items
 
-### Files changed
+## Files touched
 
-- `src/components/steps/UploadIdentifyStep.tsx` — remove spreadsheet early-return
-- `src/pages/Index.tsx` — remove spreadsheet branch in `handleQuickScanComplete`
-- `src/components/steps/SpreadsheetImportStep.tsx` — accept `documentHints` prop, persist on completion
-- `src/components/steps/FileUploadStep.tsx` — forward `documentHints` to `SpreadsheetImportStep`
+- `supabase/migrations/<timestamp>_layout_classification.sql` (new)
+- `supabase/functions/classify-spreadsheet-layout/index.ts` (new)
+- `src/components/steps/SpreadsheetImportStep.tsx` (fire-and-forget invoke)
+- `src/components/steps/FileUploadStep.tsx` (forward orgName/documentHints)
+- `src/pages/SessionDetailPage.tsx` (+ likely a new `LayoutClassificationPanel.tsx`) — admin viewer
+
+## Report-back after implementation
+
+- Files changed
+- Confirmation classifier deploys and is invoked from the spreadsheet path
+- Screenshot/description of the admin viewer rendering against one test session
+- Confirmation all 4 regression gates pass
+- Reference for user validation: expected patterns are
+  - Working_Master_SP (Alfred) → A
+  - Santa Cruz Operational Plan → B
+  - DRAFT State Reporting Template → A on Initiative tabs; not_plan_content on Config/README
+  - RWJUHS Strategic Scorecard → D
+  - Astera Health Operational Plan → A across 20 sheets, needs_user_clarification=true
+  - AchieveIt Final Excel Document → C on All In; not_plan_content on Programming Budget / Dept Leads
+  - OGSM CDO Monthly Update → C, needs_user_clarification=true (time-versioned sheets)
+  - Plan_upload_test (Carmen/Zonetta) → B
+
+User runs the 8 uploads, reads the admin viewer, and decides whether to escalate to `claude-opus-4-6` or proceed to Phase 4.
