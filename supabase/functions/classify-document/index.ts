@@ -617,7 +617,7 @@ serve(async (req) => {
 
       const result = await classifyChunk(
         chunkImages, ci, pageOffset, pageCount,
-        ANTHROPIC_API_KEY, userPrompt, sessionId,
+        ANTHROPIC_API_KEY, userPrompt, sessionId, additionalNotes,
       );
 
       if (result) {
