@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.admin-user-actions]
 verify_jwt = false
+
+[functions.classify-spreadsheet-layout]
+verify_jwt = false

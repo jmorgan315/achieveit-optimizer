@@ -129,6 +129,8 @@ export type Database = {
           document_type: string | null
           extraction_method: string | null
           id: string
+          layout_classification: Json | null
+          layout_classified_at: string | null
           org_industry: string | null
           org_name: string | null
           pipeline_run_id: string | null
@@ -152,6 +154,8 @@ export type Database = {
           document_type?: string | null
           extraction_method?: string | null
           id?: string
+          layout_classification?: Json | null
+          layout_classified_at?: string | null
           org_industry?: string | null
           org_name?: string | null
           pipeline_run_id?: string | null
@@ -175,6 +179,8 @@ export type Database = {
           document_type?: string | null
           extraction_method?: string | null
           id?: string
+          layout_classification?: Json | null
+          layout_classified_at?: string | null
           org_industry?: string | null
           org_name?: string | null
           pipeline_run_id?: string | null

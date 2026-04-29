@@ -25,11 +25,15 @@ type Phase = 'parsing' | 'detection' | 'mapping' | 'generating';
 interface SpreadsheetImportStepProps {
   file: File;
   sessionId: string;
+  orgName?: string;
   documentHints?: string;
   onComplete: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
 }
 
-export function SpreadsheetImportStep({ file, sessionId, documentHints, onComplete }: SpreadsheetImportStepProps) {
+const PREVIEW_MAX_ROWS = 30;
+const PREVIEW_MAX_COLS = 12;
+
+export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints, onComplete }: SpreadsheetImportStepProps) {
   const [phase, setPhase] = useState<Phase>('parsing');
   const [detection, setDetection] = useState<StructureDetection | null>(null);
   const [selectedSheetIndices, setSelectedSheetIndices] = useState<number[]>([]);
@@ -46,6 +50,25 @@ export function SpreadsheetImportStep({ file, sessionId, documentHints, onComple
         const sheets = await parseSpreadsheetFile(file);
         const det = detectStructure(sheets);
         setDetection(det);
+
+        // Fire-and-forget AI layout classifier (non-blocking)
+        try {
+          const workbookPreview = sheets.map(s => ({
+            sheetName: s.name,
+            rows: (s.rows || []).slice(0, PREVIEW_MAX_ROWS).map(r => (r || []).slice(0, PREVIEW_MAX_COLS)),
+          }));
+          // Don't await — classifier runs in background
+          supabase.functions
+            .invoke('classify-spreadsheet-layout', {
+              body: { sessionId, orgName, documentHints, workbookPreview },
+            })
+            .then(({ error }) => {
+              if (error) console.warn('[classify-layout] invoke error:', error);
+            })
+            .catch(err => console.warn('[classify-layout] invoke threw:', err));
+        } catch (clsErr) {
+          console.warn('[classify-layout] preview build failed:', clsErr);
+        }
 
         // Default sheet selection
         const defaultIndices = getDefaultSheetSelection(det.sheets);
