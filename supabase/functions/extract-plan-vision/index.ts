@@ -758,7 +758,8 @@ serve(async (req) => {
       const parts: string[] = [];
       if (organizationName) parts.push(`Organization: ${organizationName}`);
       if (industry) parts.push(`Industry: ${industry}`);
-      if (documentHints) parts.push(`User-provided document hints: ${documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
+      // Note: documentHints intentionally NOT pushed to user prompt — it is now prepended to the
+      // system prompt as USER-PROVIDED CONTEXT (see buildUserContextBlock).
       if (pageRange) {
         const rangeStr = typeof pageRange === "string" ? pageRange : `${(pageRange as any).startPage} through ${(pageRange as any).endPage}`;
         parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${rangeStr} of the original document. Focus your extraction ONLY on content from those pages.`);
