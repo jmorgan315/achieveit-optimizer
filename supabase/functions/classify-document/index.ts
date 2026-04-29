@@ -508,7 +508,7 @@ serve(async (req) => {
       const requestBody = {
         model: "claude-opus-4-6",
         max_tokens: 4096,
-        system: CLASSIFICATION_SYSTEM_PROMPT,
+        system: `${buildUserContextBlock(additionalNotes)}${CLASSIFICATION_SYSTEM_PROMPT}`,
         messages: [{ role: "user", content: userContent }],
       };
 
