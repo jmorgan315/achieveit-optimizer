@@ -95,6 +95,13 @@ function splitDocumentIntoChunks(text: string, maxChunkSize: number): string[] {
   return chunks;
 }
 
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
+
 const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
 
 === VERBATIM TEXT EXTRACTION (CRITICAL) ===
@@ -416,7 +423,8 @@ async function processChunk(
     const parts: string[] = [];
     if (orgContext.organizationName) parts.push(`Organization: ${orgContext.organizationName}`);
     if (orgContext.industry) parts.push(`Industry: ${orgContext.industry}`);
-    if (orgContext.documentHints) parts.push(`User-provided document hints: ${orgContext.documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
+    // Note: documentHints intentionally NOT pushed to user prompt — it is now prepended to the
+    // system prompt as USER-PROVIDED CONTEXT (see buildUserContextBlock).
     if (orgContext.pageRange) {
       let rangeText: string;
       if (typeof orgContext.pageRange === 'string') {
@@ -456,7 +464,7 @@ Document section:\n\n${chunkText}`;
   const requestBody = {
     model: "claude-opus-4-6",
     max_tokens: 16384,
-    system: EXTRACTION_SYSTEM_PROMPT,
+    system: `${buildUserContextBlock(orgContext?.documentHints)}${EXTRACTION_SYSTEM_PROMPT}`,
     messages: [{ role: "user", content: userMessage }],
     tools: [{
       name: "extract_plan_items",

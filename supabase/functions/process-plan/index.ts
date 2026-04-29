@@ -738,6 +738,10 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       classificationResult: preClassification,
     } = body;
 
+    // Persist documentHints to the session row so resume cycles (which only have access to the
+    // session row, not the original request body) can rehydrate user notes for later agents.
+    await updateSessionProgress(sessionId, { document_hints: (documentHints as string | undefined) || null });
+
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
     let useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
     let filteredPageImages = pageImages as string[] | undefined;
@@ -1360,6 +1364,7 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
         organizationName,
         industry,
         planLevels,
+        documentHints,
         classification: classification || null,
         dedupRemovedNames: dedupRemovedNames.length > 0 ? dedupRemovedNames : undefined,
       };
@@ -1798,6 +1803,8 @@ async function runResume(sessionId: string): Promise<void> {
     const planLevels = pipeCtx.planLevels as unknown[] | undefined;
     const extractionMethod = (pipeCtx.extractionMethod || "vision") as string;
     const sourceText = (pipeCtx.documentText || "") as string;
+    // Hydrate documentHints: prefer pipeCtx, fall back to the persisted session row column
+    const documentHints = (pipeCtx.documentHints as string | undefined) || ((session as Record<string, unknown>).document_hints as string | undefined) || undefined;
 
     if (currentStep === "extraction_complete" || currentStep === "auditing") {
       // Time check before Agent 2
@@ -1809,13 +1816,13 @@ async function runResume(sessionId: string): Promise<void> {
       }
       // Agent 2 hasn't finished — run (or re-run) Agent 2
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 2`);
-      await runAgent2Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, pipelineRunId, stepResults);
+      await runAgent2Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, sourceText, documentHints, pipelineRunId, stepResults);
       cleanupPageImages(sessionId).catch(e => console.error("[process-plan] Resume cleanup error:", e));
     } else if (currentStep === "audited" || currentStep === "validating") {
       // Agent 2 done, Agent 3 hasn't finished — run (or re-run) Agent 3
       console.log(`[process-plan] Resume: state '${currentStep}' → running Agent 3`);
       const auditFindings = (stepResults.audit || null) as AuditFindings | null;
-      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, pipelineRunId, stepResults, startTime);
+      await runAgent3Only(sessionId, agent1Items, agent1DetectedLevels, classification, organizationName, industry, planLevels, extractionMethod, auditFindings, documentHints, pipelineRunId, stepResults, startTime);
     }
 
   } catch (error) {
@@ -1845,6 +1852,7 @@ async function runAgent2Only(
   planLevels: unknown[] | undefined,
   extractionMethod: string,
   sourceText: string,
+  documentHints: string | undefined,
   pipelineRunId: string,
   existingStepResults: Record<string, unknown>
 ): Promise<void> {
@@ -1871,6 +1879,7 @@ async function runAgent2Only(
       organizationName,
       industry,
       planLevels,
+      documentHints,
       classification,
       sourceText,
     };
@@ -1945,6 +1954,7 @@ async function runAgent3Only(
   planLevels: unknown[] | undefined,
   extractionMethod: string,
   auditFindings: AuditFindings | null,
+  documentHints: string | undefined,
   pipelineRunId: string,
   existingStepResults?: Record<string, unknown>,
   startTime?: number
@@ -1980,6 +1990,7 @@ async function runAgent3Only(
         organizationName,
         industry,
         planLevels,
+        documentHints,
       });
       if (result.ok && (result.data as { success: boolean }).success) {
         validationResult = (result.data as { data: ValidationResult }).data;
@@ -2040,6 +2051,7 @@ async function runAgent3Only(
           organizationName,
           industry,
           planLevels,
+          documentHints,
           globalContext,
         });
 

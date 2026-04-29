@@ -7,6 +7,12 @@ const corsHeaders = {
 };
 
 
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
 
 const VALIDATION_SYSTEM_PROMPT = `You are a hierarchy and structure validator for strategic plan extractions. Your job is to produce a CORRECTED version of the extracted plan items by:
 
@@ -148,7 +154,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels, globalContext } = body;
+    const { extractedItems, auditFindings, detectedLevels, sessionId: incomingSessionId, organizationName, industry, planLevels, globalContext, documentHints } = body;
 
     if (!extractedItems) {
       return new Response(JSON.stringify({ success: false, error: "extractedItems required" }), {
@@ -242,7 +248,7 @@ Please validate and correct the hierarchy. Output the COMPLETE corrected items t
     const requestBody = {
       model: "claude-sonnet-4-6",
       max_tokens: 32768,
-      system: VALIDATION_SYSTEM_PROMPT,
+      system: `${buildUserContextBlock(documentHints)}${VALIDATION_SYSTEM_PROMPT}`,
       messages: [{ role: "user", content: userMessage }],
       tools: [{
         name: "submit_corrected_plan",

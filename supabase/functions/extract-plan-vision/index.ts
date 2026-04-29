@@ -13,6 +13,13 @@ const ANTHROPIC_MAX_RETRIES = 4;
 const ANTHROPIC_BASE_DELAY_MS = 3000;
 const RETRYABLE_ANTHROPIC_STATUSES = new Set([429, 500, 502, 503, 529]);
 
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
+
 function createSafeError(
   status: number,
   publicMessage: string,
@@ -751,7 +758,8 @@ serve(async (req) => {
       const parts: string[] = [];
       if (organizationName) parts.push(`Organization: ${organizationName}`);
       if (industry) parts.push(`Industry: ${industry}`);
-      if (documentHints) parts.push(`User-provided document hints: ${documentHints}\n(Use these hints to guide your focus — e.g., if a page range is mentioned, prioritize that section but don't ignore surrounding context that may be relevant.)`);
+      // Note: documentHints intentionally NOT pushed to user prompt — it is now prepended to the
+      // system prompt as USER-PROVIDED CONTEXT (see buildUserContextBlock).
       if (pageRange) {
         const rangeStr = typeof pageRange === "string" ? pageRange : `${(pageRange as any).startPage} through ${(pageRange as any).endPage}`;
         parts.push(`IMPORTANT: The user has indicated that the actionable plan content is on pages ${rangeStr} of the original document. Focus your extraction ONLY on content from those pages.`);
@@ -821,7 +829,7 @@ Extract all strategic plan items with their proper hierarchy.`
       const tablePayload: Record<string, unknown> = {
         model: "claude-opus-4-6",
         max_tokens: 16384,
-        system: tableSystemPrompt,
+        system: `${buildUserContextBlock(documentHints)}${tableSystemPrompt}`,
         messages: [
           { role: "user", content: anthropicContent }
         ],
@@ -909,7 +917,7 @@ Extract all strategic plan items with their proper hierarchy.`
       const presentationPayload: Record<string, unknown> = {
         model: "claude-opus-4-6",
         max_tokens: 16384,
-        system: presentationSystemPrompt,
+        system: `${buildUserContextBlock(documentHints)}${presentationSystemPrompt}`,
         messages: [
           { role: "user", content: anthropicContent }
         ],
@@ -988,7 +996,7 @@ Extract all strategic plan items with their proper hierarchy.`
     const anthropicPayload: Record<string, unknown> = {
       model: "claude-opus-4-6",
       max_tokens: 16384,
-      system: VISION_EXTRACTION_PROMPT,
+      system: `${buildUserContextBlock(documentHints)}${VISION_EXTRACTION_PROMPT}`,
       messages: [
         { role: "user", content: anthropicContent }
       ],

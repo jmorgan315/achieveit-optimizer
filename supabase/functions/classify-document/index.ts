@@ -183,11 +183,17 @@ function buildUserPrompt(
   if (pageRange) {
     prompt += `\nUser-specified page range: ${pageRange}`;
   }
-  if (additionalNotes) {
-    prompt += `\nAdditional context: ${additionalNotes}`;
-  }
+  // Note: additionalNotes intentionally NOT appended here — it is now prepended to the
+  // system prompt as USER-PROVIDED CONTEXT (see buildUserContextBlock).
   prompt += `\n\nAnalyze all provided page images and return ONLY the JSON classification object.`;
   return prompt;
+}
+
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
 }
 
 function buildImageContent(pageImages: string[]): Array<Record<string, unknown>> {
@@ -272,6 +278,7 @@ async function classifyChunk(
   apiKey: string,
   baseUserPrompt: string,
   sessionId: string,
+  additionalNotes: string | null,
 ): Promise<{ classification: Record<string, unknown>; inputTokens: number; outputTokens: number } | null> {
   const startPage = pageOffset + 1;
   const endPage = pageOffset + chunkImages.length;
@@ -286,7 +293,7 @@ async function classifyChunk(
   const requestBody = {
     model: "claude-opus-4-6",
     max_tokens: 4096,
-    system: CLASSIFICATION_SYSTEM_PROMPT,
+    system: `${buildUserContextBlock(additionalNotes)}${CLASSIFICATION_SYSTEM_PROMPT}`,
     messages: [{ role: "user", content: userContent }],
   };
 
@@ -501,7 +508,7 @@ serve(async (req) => {
       const requestBody = {
         model: "claude-opus-4-6",
         max_tokens: 4096,
-        system: CLASSIFICATION_SYSTEM_PROMPT,
+        system: `${buildUserContextBlock(additionalNotes)}${CLASSIFICATION_SYSTEM_PROMPT}`,
         messages: [{ role: "user", content: userContent }],
       };
 
@@ -610,7 +617,7 @@ serve(async (req) => {
 
       const result = await classifyChunk(
         chunkImages, ci, pageOffset, pageCount,
-        ANTHROPIC_API_KEY, userPrompt, sessionId,
+        ANTHROPIC_API_KEY, userPrompt, sessionId, additionalNotes,
       );
 
       if (result) {

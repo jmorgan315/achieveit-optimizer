@@ -123,6 +123,7 @@ export type Database = {
           classification_result: Json | null
           created_at: string
           current_step: string
+          document_hints: string | null
           document_name: string | null
           document_size_bytes: number | null
           document_type: string | null
@@ -145,6 +146,7 @@ export type Database = {
           classification_result?: Json | null
           created_at?: string
           current_step?: string
+          document_hints?: string | null
           document_name?: string | null
           document_size_bytes?: number | null
           document_type?: string | null
@@ -167,6 +169,7 @@ export type Database = {
           classification_result?: Json | null
           created_at?: string
           current_step?: string
+          document_hints?: string | null
           document_name?: string | null
           document_size_bytes?: number | null
           document_type?: string | null

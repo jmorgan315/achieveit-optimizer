@@ -414,7 +414,11 @@ const Index = () => {
   // === Screen 2 completion handler ===
   const handleStartProcessing = (config: ProcessingConfig) => {
     setProcessingConfig(config);
-    setOrgProfile(config.orgProfile);
+    // Plumb Additional Notes (Screen 2) into orgProfile.documentHints so FileUploadStep
+    // forwards it on the process-plan request body, and mirror to documentHints state.
+    const notes = config.additionalNotes?.trim() || '';
+    setOrgProfile({ ...config.orgProfile, documentHints: notes || undefined });
+    setDocumentHints(notes);
 
     // If user defined plan levels, set them now
     if (config.planLevels.length > 0) {

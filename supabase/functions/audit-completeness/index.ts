@@ -9,6 +9,13 @@ const corsHeaders = {
 const MAX_SOURCE_LENGTH = 180000;
 const MAX_VISION_IMAGES = 10; // Send at most 10 pages for audit (lighter than extraction)
 
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
+
 const TEXT_AUDIT_SYSTEM_PROMPT = `You are a completeness auditor for strategic plan extraction. Your ONLY job is to compare extracted plan items against the source document and identify anything that was MISSED, INCORRECTLY MERGED, or REPHRASED.
 
 You are NOT re-extracting the document. You are AUDITING an existing extraction for accuracy and completeness.
@@ -280,7 +287,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels, dedupRemovedNames } = body;
+    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels, dedupRemovedNames, documentHints } = body;
 
     // Build dedup exclusion note for the prompt
     let dedupExclusionNote = "";
@@ -319,7 +326,7 @@ serve(async (req) => {
 
       const anthropicContent = buildVisionContent(imagesToSend, itemListing, contextPrefix, extractedItems.length);
 
-      const visionSystemPrompt = dedupExclusionNote ? VISION_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : VISION_AUDIT_SYSTEM_PROMPT;
+      const visionSystemPrompt = `${buildUserContextBlock(documentHints)}${dedupExclusionNote ? VISION_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : VISION_AUDIT_SYSTEM_PROMPT}`;
       requestBody = {
         model: "claude-sonnet-4-6",
         max_tokens: 16384,
@@ -352,7 +359,7 @@ ${truncatedText}${truncationNote}
 
 Please audit the extraction above against the source document. Identify any missing items, merged items, or rephrased items.`;
 
-      const textSystemPrompt = dedupExclusionNote ? TEXT_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : TEXT_AUDIT_SYSTEM_PROMPT;
+      const textSystemPrompt = `${buildUserContextBlock(documentHints)}${dedupExclusionNote ? TEXT_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : TEXT_AUDIT_SYSTEM_PROMPT}`;
       requestBody = {
         model: "claude-sonnet-4-6",
         max_tokens: 16384,
