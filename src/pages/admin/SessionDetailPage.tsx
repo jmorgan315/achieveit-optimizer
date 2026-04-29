@@ -195,6 +195,147 @@ function ClassificationCard({ classification }: { classification: Record<string,
   );
 }
 
+function LayoutClassificationCard({
+  classification,
+  logs,
+  rates,
+}: {
+  classification: Record<string, Json>;
+  logs: ApiLog[];
+  rates: ModelRates;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Sentinel error case
+  if (classification.error && !classification.sheets) {
+    return (
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <CardTitle className="text-base text-destructive">Layout Classification — Error</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm space-y-2">
+          <div className="text-destructive">{String(classification.error)}</div>
+          <div className="text-xs text-muted-foreground">
+            Model: {String(classification.model || '—')} · {classification.classified_at ? format(new Date(String(classification.classified_at)), 'MMM d, yyyy HH:mm') : '—'}
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const summary = (classification.workbook_summary as Record<string, Json> | undefined) || {};
+  const sheets = (classification.sheets as Array<Record<string, Json>> | undefined) || [];
+  const model = String(classification.model || 'claude-sonnet-4-6');
+
+  // Cost from logs
+  const layoutLogs = logs.filter(l => l.step_label === 'classify_layout');
+  const totalIn = layoutLogs.reduce((a, l) => a + (l.input_tokens || 0), 0);
+  const totalOut = layoutLogs.reduce((a, l) => a + (l.output_tokens || 0), 0);
+  const totalDur = layoutLogs.reduce((a, l) => a + (l.duration_ms || 0), 0);
+  const costs = layoutLogs.map(l => calcCost(l.model, l.input_tokens, l.output_tokens, rates) || 0);
+  const totalCost = costs.reduce((a, b) => a + b, 0);
+
+  const patternColor = (p: string) => {
+    if (p === 'A' || p === 'B' || p === 'C' || p === 'D') return 'default';
+    if (p === 'not_plan_content') return 'secondary';
+    return 'outline';
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <CardTitle className="text-base">Layout Classification</CardTitle>
+          <div className="flex items-center gap-2 text-xs">
+            <Badge variant="default">Pattern {String(summary.primary_pattern || '?')}</Badge>
+            {summary.needs_user_clarification === true && (
+              <Badge variant="destructive">Needs clarification</Badge>
+            )}
+            <span className="text-muted-foreground">{model}</span>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        {summary.clarification_reason ? (
+          <div className="rounded border border-border bg-muted/30 p-3 text-xs">
+            <span className="font-medium">Why clarification: </span>{String(summary.clarification_reason)}
+          </div>
+        ) : null}
+
+        {sheets.length > 0 && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-border text-left text-muted-foreground">
+                  <th className="py-2 pr-3 font-medium">Sheet</th>
+                  <th className="py-2 pr-3 font-medium">Pattern</th>
+                  <th className="py-2 pr-3 font-medium">Conf.</th>
+                  <th className="py-2 pr-3 font-medium">Hierarchy signal</th>
+                  <th className="py-2 pr-3 font-medium">Implied levels</th>
+                  <th className="py-2 pr-3 font-medium">Header / Data / Name</th>
+                  <th className="py-2 font-medium">Reasoning</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sheets.map((s, i) => {
+                  const struct = (s.structure as Record<string, Json> | undefined) || {};
+                  const levels = (struct.implied_levels as string[] | undefined) || [];
+                  const pattern = String(s.pattern || '?');
+                  return (
+                    <tr key={i} className="border-b border-border/50 align-top">
+                      <td className="py-2 pr-3 font-mono">{String(s.sheet_name || '—')}</td>
+                      <td className="py-2 pr-3"><Badge variant={patternColor(pattern) as any} className="text-xs">{pattern}</Badge></td>
+                      <td className="py-2 pr-3">{s.confidence != null ? String(s.confidence) : '—'}</td>
+                      <td className="py-2 pr-3 text-muted-foreground">{struct.hierarchy_signal ? String(struct.hierarchy_signal) : '—'}</td>
+                      <td className="py-2 pr-3">
+                        <div className="flex flex-wrap gap-1">
+                          {levels.length > 0
+                            ? levels.map((l, j) => <Badge key={j} variant="secondary" className="text-xs">{l}</Badge>)
+                            : <span className="text-muted-foreground">—</span>}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3 font-mono text-muted-foreground">
+                        {struct.header_row_index != null ? String(struct.header_row_index) : '—'}
+                        {' / '}
+                        {struct.data_starts_at_row != null ? String(struct.data_starts_at_row) : '—'}
+                        {' / '}
+                        {struct.name_column_index != null ? String(struct.name_column_index) : '—'}
+                      </td>
+                      <td className="py-2 max-w-md">{String(s.reasoning || '—')}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex items-center gap-4 text-xs text-muted-foreground border-t border-border pt-3">
+          <span>{layoutLogs.length} call{layoutLogs.length === 1 ? '' : 's'}</span>
+          <span>Tokens: {totalIn.toLocaleString()} in / {totalOut.toLocaleString()} out</span>
+          <span>Duration: {(totalDur / 1000).toFixed(1)}s</span>
+          <span>Cost: {totalCost > 0 ? `$${totalCost.toFixed(4)}` : '—'}</span>
+          {classification.classified_at && (
+            <span>Classified: {format(new Date(String(classification.classified_at)), 'MMM d, HH:mm')}</span>
+          )}
+        </div>
+
+        <Collapsible open={expanded} onOpenChange={setExpanded}>
+          <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+            <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+            Full layout_classification JSON
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <pre className="mt-2 text-xs bg-muted/30 rounded p-3 whitespace-pre overflow-x-auto max-h-[400px] overflow-y-auto">
+              {JSON.stringify(classification, null, 2)}
+            </pre>
+          </CollapsibleContent>
+        </Collapsible>
+      </CardContent>
+    </Card>
+  );
+}
+
 function CopyButton({ text }: { text: string }) {
   const { toast } = useToast();
   return (
