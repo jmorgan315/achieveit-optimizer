@@ -1,110 +1,79 @@
+## Plumb Additional Notes to all 5 AI agents (Phase 1, PDF/vision/text path only)
 
+Approved adjustments captured: keep the duplicated 5-line helper inline with a `// duplicated in 5 agents; keep in sync` comment in each file; gate #5 (resume) is a live test, not a code-review test; new gate #6 verifies the user-prompt duplicate-removal half of Change 4 actually shipped.
 
-## Plan: Ship spreadsheet completion + cancelled status (with .eq fix)
+### Pre-fix diagnosis (confirmed)
 
-Approved fix going in. One correction applied per user: all status guards use `.eq('status', 'in_progress')`, never `.is(...)`. `.is()` is PostgREST syntax for NULL/boolean checks and would silently fail to match the string `'in_progress'`.
+The textarea on Screen 2 (ScanResultsStep) collects `additionalNotes` and passes it to `onStartProcessing(config)` at line 221. `Index.tsx` `handleStartProcessing` (line 415) ignores `config.additionalNotes` entirely. Downstream `FileUploadStep` reads `orgProfile?.documentHints`, which `ScanResultsStep` never sets. Result: zero of the 5 agents receive the user's notes today.
 
-### Change 1 — Harden completion at mapping confirm
+Server-side, three of the five agents already have prompt construction code that reads `documentHints` (classify-document, extract-plan-items, extract-plan-vision) — but they never get a non-undefined value because the front-end gap blocks it. The remaining two agents (audit-completeness, validate-hierarchy) don't even accept the field on their request body.
 
-`src/components/steps/SpreadsheetImportStep.tsx` `handleApplyMapping` (lines ~135–158):
-- Replace `.upsert(..., { onConflict: 'id' })` with `.update(...).eq('id', sessionId)`.
-- `await` it before `onComplete(...)`.
-- On error: `toast.error('Failed to mark session complete')`, log, but still call `onComplete` (don't block user).
-- Remove `[ssdebug:final]` log block (17c cleanup).
+### Changes
 
-### Change 2 — Safety-net completion (with .eq fix)
-
-`src/pages/Index.tsx` `handleSpreadsheetComplete` (line ~483), after `setItems(...)`:
+**1. `src/pages/Index.tsx` `handleStartProcessing`** — copy `config.additionalNotes` into `orgProfile.documentHints` and mirror to `documentHints` state:
 
 ```ts
-supabase
-  .from('processing_sessions')
-  .update({
-    status: 'completed',
-    extraction_method: 'spreadsheet',
-    total_items_extracted: items.length,
-  })
-  .eq('id', state.sessionId)
-  .eq('status', 'in_progress')   // ← .eq, not .is
-  .then(({ error }) => {
-    if (error) console.error('[Session] Safety-net completion failed:', error);
-  });
+const notes = config.additionalNotes?.trim() || '';
+setOrgProfile({ ...config.orgProfile, documentHints: notes || undefined });
+setDocumentHints(notes);
 ```
 
-Remove `[ssdebug:state] handleSpreadsheetComplete received` log (17c cleanup).
+**2. New migration** — `ALTER TABLE public.processing_sessions ADD COLUMN document_hints text;`
 
-### Change 3 — Cancel on Start Over (spreadsheet path only, with .eq fix)
+**3. `supabase/functions/process-plan/index.ts`**
+- On pipeline start (around line 727): persist `document_hints: documentHints || null` to the session row alongside `pipeline_run_id`.
+- In the resume path (around line 1485): if `pipeCtx.documentHints` is undefined, fall back to `session.document_hints`.
+- At every `callEdgeFunction("audit-completeness", ...)` site (lines 1378, 1879) and every `callEdgeFunction("validate-hierarchy", ...)` site (lines 1975, 2035): add `documentHints` to the payload.
+- Thread `documentHints` through `runAgent2Only` and `runAgent3Only` signatures (lines 1838, 1938) and their two callers in the resume orchestrator (lines 1812, 1818) so the resume path retains notes.
 
-`src/pages/Index.tsx` `handleStartOver` (line ~152), before resetting React state:
-- If `state.sessionId` exists AND the current session was a spreadsheet import (`state.extractionMethod === 'spreadsheet'` or filename matches `.xlsx|.xls|.csv`):
+**4. Per-agent prompt edits** — add this duplicated 5-line helper to each of the 5 edge function files, with a `// duplicated in 5 agents; keep in sync` comment, then prepend the result to the **system** prompt and remove any existing duplicate user-prompt mention:
 
 ```ts
-supabase
-  .from('processing_sessions')
-  .update({ status: 'cancelled', current_step: 'cancelled' })
-  .eq('id', state.sessionId)
-  .eq('status', 'in_progress')   // ← .eq guard, never demote completed
-  .then(({ error }) => {
-    if (error) console.error('[Session] Cancel on Start Over failed:', error);
-  });
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
 ```
 
-Do NOT add this to the PDF/Word path.
+Per-file:
+- `classify-document/index.ts`: prepend block to `CLASSIFICATION_SYSTEM_PROMPT` at both call sites (lines 504, 289). Remove `Additional context: …` append in `buildUserPrompt` (line 186-188).
+- `extract-plan-items/index.ts`: in `processChunk`, prepend block to the `system:` value (line 459) using `orgContext?.documentHints`. Remove the `User-provided document hints: …` line in `parts.push` (line 419).
+- `extract-plan-vision/index.ts`: prepend block to every `system:` field (text + table + presentation modes) using `documentHints` from request body. Remove the `User-provided document hints: …` line in `parts.push` (line 754).
+- `audit-completeness/index.ts`: accept `documentHints` from request body; prepend block to both system prompts (text + vision) wherever they are used (the `dedupExclusionNote` branches around lines 322 and 355).
+- `validate-hierarchy/index.ts`: accept `documentHints` from request body; prepend block to `VALIDATION_SYSTEM_PROMPT` at the call site (line 245).
 
-### Change 4 — Realign Recent Sessions cancel to `'cancelled'`
+Empty/null notes ⇒ helper returns `""` ⇒ zero added tokens.
 
-`src/components/RecentSessionsPage.tsx` `handleCancel` (line ~175):
-- Change update payload `{ status: 'failed', current_step: 'cancelled', pipeline_run_id: null }` → `{ status: 'cancelled', current_step: 'cancelled', pipeline_run_id: null }`.
-- Update local state mirror on line ~181 to `'cancelled'`.
-
-### Change 5 — Admin Sessions filter + badge
-
-`src/pages/admin/SessionsPage.tsx`:
-- Add `<SelectItem value="cancelled">Cancelled</SelectItem>` to Status dropdown (line ~113–119).
-- `statusVariant` (line ~84): return `'outline'` for `'cancelled'`.
-- Add `<SelectItem value="spreadsheet">Spreadsheet</SelectItem>` to Method dropdown.
-
-### Change 6 — Cleanup of 17c instrumentation
-
-Remove all `[ssdebug:*]` console logs added in prompt 17c:
-- `src/utils/spreadsheet-parser.ts` — `[ssdebug:detect]` and `[ssdebug:gen]` logs
-- `src/components/steps/SpreadsheetImportStep.tsx` — `[ssdebug:final]` log
-- `src/pages/Index.tsx` — `[ssdebug:state]` log in `handleSpreadsheetComplete`
-- `src/hooks/usePlanState.ts` — `[ssdebug:state]` log in `setItems`
-
-### Files affected
+### Files modified
 
 | File | Change |
-|------|--------|
-| `src/components/steps/SpreadsheetImportStep.tsx` | Awaited `.update()`; remove ssdebug log |
-| `src/pages/Index.tsx` | Safety-net completion + Start Over cancel (both with `.eq`); remove ssdebug log |
-| `src/components/RecentSessionsPage.tsx` | Cancel writes `'cancelled'` not `'failed'` |
-| `src/pages/admin/SessionsPage.tsx` | Cancelled status filter + variant; Spreadsheet method filter |
-| `src/utils/spreadsheet-parser.ts` | Remove ssdebug logs |
-| `src/hooks/usePlanState.ts` | Remove ssdebug log |
+|---|---|
+| `src/pages/Index.tsx` | Copy `additionalNotes` into orgProfile + state |
+| `supabase/migrations/<new>.sql` | Add `processing_sessions.document_hints text` |
+| `supabase/functions/process-plan/index.ts` | Persist hints, hydrate on resume, forward to audit + validate, thread through runAgent2/3Only |
+| `supabase/functions/classify-document/index.ts` | Helper + system-prompt prepend; remove user-prompt duplicate |
+| `supabase/functions/extract-plan-items/index.ts` | Helper + system-prompt prepend; remove user-prompt duplicate |
+| `supabase/functions/extract-plan-vision/index.ts` | Helper + system-prompt prepend; remove user-prompt duplicate |
+| `supabase/functions/audit-completeness/index.ts` | Helper + accept documentHints + system-prompt prepend |
+| `supabase/functions/validate-hierarchy/index.ts` | Helper + accept documentHints + system-prompt prepend |
 
 ### Out of scope
 
-- No `beforeunload` handler.
-- No backfill of existing stuck `in_progress` rows.
-- No `completed_at` column.
-- No PDF/Word pipeline changes.
-- No spreadsheet parser logic changes.
-- No status CHECK/enum migration (column is plain `text`).
+Spreadsheet path (Phase 2). UI changes to the textarea. Any prompt tuning beyond inserting the notes block.
 
-### Regression gates (all 7 must pass)
+### Regression gates (run live, not by code review)
 
-1. **Chattanooga PDF** — completes via `process-plan`, `status='completed'`, items populated.
-2. **Operational Plan .xlsx** — mapping confirm → 685 items, `status='completed'`, `extraction_method='spreadsheet'`, admin shows 685 Items.
-3. **DRAFT Initiative 1 .xlsx** — mapping confirm → 24 items, `status='completed'`.
-4. **Abandoned spreadsheet** — upload .xlsx, reach mapping, click Start Over → DB row flips to `'cancelled'`. Admin filter "Cancelled" surfaces it.
-5. **Recent Sessions cancel** — Cancel Import on running PDF row → DB row flips to `'cancelled'` (not `'failed'`).
-6. **No demotion** — Start Over from a `completed` Review & Export screen does NOT change status (the `.eq('status','in_progress')` guard).
-7. **17c log cleanup** — no `[ssdebug:*]` lines in console after fresh import.
+1. **Chattanooga PDF, no notes** — extracts to 47 items; logs show no `USER-PROVIDED CONTEXT` block in any agent.
+2. **Chattanooga PDF, notes = "Ignore the executive summary on pages 1-3"** — extracts to ~47 items; agent logs show the block in system prompts of all 5 agents.
+3. **Messier prior session, notes = "We use 3 levels: Goals, Objectives, Tactics"** — re-run; validate-hierarchy output reflects user-stated levels.
+4. **Token usage** — empty notes path adds zero tokens (verify against api_call_logs.input_tokens).
+5. **Live self-chained resume** — kill orchestrator mid-pipeline (e.g. cause a chain dispatch between Agent 1 and Agent 2). Confirm Agent 2 and Agent 3 still receive the notes block in their system prompts, sourced from `processing_sessions.document_hints` rather than the original request body. **Must be tested live, not via code review.**
+6. **Duplicate-removal verification** — after a notes-populated run, inspect the user prompt sent to extract-plan-items in `api_call_logs`. The string `User-provided document hints:` must NOT appear in the user prompt; it must only appear (transformed into the new block) in the system prompt. Same check for extract-plan-vision and classify-document.
 
-### Report-back
+### Report-back format
 
-- Lines changed per file.
-- All 7 gates pass (especially gate 4 cancelled write, gate 6 no-demotion, gate 7 cleanup).
-- Confirm `.eq('status','in_progress')` used at both guard sites (Change 2 and Change 3), zero `.is(...)` instances.
-
+- Files changed list with line ranges.
+- Live results for all 6 gates (especially #5 live resume test and #6 duplicate-removal evidence).
+- Sample edge function log line showing `USER-PROVIDED CONTEXT:` in a system prompt when notes are populated.
