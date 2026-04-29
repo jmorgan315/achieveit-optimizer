@@ -193,7 +193,7 @@ export function UploadIdentifyStep({
       // Fire-and-forget: store original source document for admin debugging
       uploadSourceDocument(uploadedFile, sid);
 
-      // For spreadsheets: only org lookup, then advance
+      // For spreadsheets: only org lookup (no classify), then advance through Screen 2
       if (isSpreadsheet(uploadedFile)) {
         safeSet(setScanStatuses, { lookup: 'running', classify: 'skipped' });
 
@@ -211,6 +211,10 @@ export function UploadIdentifyStep({
           updateStatus('lookup', 'error');
         }
 
+        // Phase 2: spreadsheets now route through ScanResultsStep (Screen 2) so users
+        // can confirm org and add Notes. classificationResult/pageCount/pageImages remain
+        // null — ScanResultsStep already gracefully omits the Document Scope card and
+        // time estimate when those are absent.
         onComplete({
           lookupResult,
           parsedText: null,

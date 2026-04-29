@@ -1,79 +1,74 @@
-## Plumb Additional Notes to all 5 AI agents (Phase 1, PDF/vision/text path only)
+## Plan: Phase 2 — Add Screen 2 to the Excel/CSV flow
 
-Approved adjustments captured: keep the duplicated 5-line helper inline with a `// duplicated in 5 agents; keep in sync` comment in each file; gate #5 (resume) is a live test, not a code-review test; new gate #6 verifies the user-prompt duplicate-removal half of Change 4 actually shipped.
+Today the spreadsheet path skips Screen 2 entirely: Screen 1 → straight to processing (which renders the mapping UI). This change inserts the existing `ScanResultsStep` between them, reusing all the PDF-path components (no fork). After Continue, routing falls through to today's mapping UI unchanged.
 
-### Pre-fix diagnosis (confirmed)
+### Note on persistence column
 
-The textarea on Screen 2 (ScanResultsStep) collects `additionalNotes` and passes it to `onStartProcessing(config)` at line 221. `Index.tsx` `handleStartProcessing` (line 415) ignores `config.additionalNotes` entirely. Downstream `FileUploadStep` reads `orgProfile?.documentHints`, which `ScanResultsStep` never sets. Result: zero of the 5 agents receive the user's notes today.
-
-Server-side, three of the five agents already have prompt construction code that reads `documentHints` (classify-document, extract-plan-items, extract-plan-vision) — but they never get a non-undefined value because the front-end gap blocks it. The remaining two agents (audit-completeness, validate-hierarchy) don't even accept the field on their request body.
+Prompt 20 says "Persist `additional_notes` on `processing_sessions` (confirmed in Phase 1 to live there)." The column added in Phase 1 is actually named **`document_hints`** (text). It already exists, is already populated by `handleStartProcessing` via `setOrgProfile({ ...config.orgProfile, documentHints: notes })`, and is already persisted by the PDF orchestrator. For the spreadsheet path we'll write the same `document_hints` column directly from the client when the spreadsheet completion writes the session row — so notes survive even though no edge function runs. No new migration needed.
 
 ### Changes
 
-**1. `src/pages/Index.tsx` `handleStartProcessing`** — copy `config.additionalNotes` into `orgProfile.documentHints` and mirror to `documentHints` state:
+**1. `src/components/steps/UploadIdentifyStep.tsx`** — stop short-circuiting spreadsheets.
+
+Remove the spreadsheet-specific early-return branch (lines ~196–224) that runs only `lookup-organization` and returns. Spreadsheets will fall through to a unified path:
+- Run `lookup-organization` (same as today).
+- Skip `classify-document` (no page images for .xlsx/.csv).
+- Return `QuickScanResults` with `isSpreadsheet: true`, `pageCount: null`, `classificationResult: null`, `pageImages: null`.
+
+This means spreadsheets reach `handleQuickScanComplete` with the same shape — but `isSpreadsheet` is true.
+
+**2. `src/pages/Index.tsx`** — route spreadsheets through Screen 2.
+
+In `handleQuickScanComplete` (lines 404–411), remove the `isSpreadsheet` branch that calls `advanceToStep(2)`. Always `advanceToStep(1)` so both PDF and spreadsheet paths land on `ScanResultsStep`.
+
+`ScanResultsStep` already handles a null `pageCount` and null `classificationResult` gracefully:
+- The Document Scope card is wrapped in `{pageCount !== null && (...)}` — it simply won't render for spreadsheets.
+- The Time Estimate is wrapped in `{timeEstimate && ...}` — won't render either.
+- Plan Structure card and Additional Notes card both render unconditionally.
+- Org match card renders when `lookupResult` is non-null.
+
+Result: spreadsheet users see Org confirmation + Plan Structure (no-op for now, with no copy change per prompt) + Additional Notes. They click Start Processing → `handleStartProcessing` runs → `advanceToStep(2)` → `FileUploadStep` mounts → spreadsheet branch in there routes to mapping UI as today.
+
+**3. `src/components/steps/SpreadsheetImportStep.tsx`** — persist `document_hints`.
+
+In `handleApplyMapping`, the `.update({...})` call that marks the session completed currently writes `extraction_method`, `total_items_extracted`, `status`, `document_type`, `step_results`. Add one field:
 
 ```ts
-const notes = config.additionalNotes?.trim() || '';
-setOrgProfile({ ...config.orgProfile, documentHints: notes || undefined });
-setDocumentHints(notes);
+document_hints: orgProfile?.documentHints || null,
 ```
 
-**2. New migration** — `ALTER TABLE public.processing_sessions ADD COLUMN document_hints text;`
+This requires threading `orgProfile` (or just the hints string) into `SpreadsheetImportStep` props. Simplest: add an optional `documentHints?: string` prop, pass `state.orgProfile?.documentHints` from wherever `SpreadsheetImportStep` is rendered (likely `FileUploadStep`).
 
-**3. `supabase/functions/process-plan/index.ts`**
-- On pipeline start (around line 727): persist `document_hints: documentHints || null` to the session row alongside `pipeline_run_id`.
-- In the resume path (around line 1485): if `pipeCtx.documentHints` is undefined, fall back to `session.document_hints`.
-- At every `callEdgeFunction("audit-completeness", ...)` site (lines 1378, 1879) and every `callEdgeFunction("validate-hierarchy", ...)` site (lines 1975, 2035): add `documentHints` to the payload.
-- Thread `documentHints` through `runAgent2Only` and `runAgent3Only` signatures (lines 1838, 1938) and their two callers in the resume orchestrator (lines 1812, 1818) so the resume path retains notes.
+**4. `src/components/steps/FileUploadStep.tsx`** — pass hints through.
 
-**4. Per-agent prompt edits** — add this duplicated 5-line helper to each of the 5 edge function files, with a `// duplicated in 5 agents; keep in sync` comment, then prepend the result to the **system** prompt and remove any existing duplicate user-prompt mention:
+Forward `orgProfile.documentHints` to `SpreadsheetImportStep` so it can persist them.
 
-```ts
-// duplicated in 5 agents; keep in sync
-function buildUserContextBlock(notes?: string | null): string {
-  const t = (notes ?? "").trim();
-  if (!t) return "";
-  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
-}
-```
+### What does NOT change
 
-Per-file:
-- `classify-document/index.ts`: prepend block to `CLASSIFICATION_SYSTEM_PROMPT` at both call sites (lines 504, 289). Remove `Additional context: …` append in `buildUserPrompt` (line 186-188).
-- `extract-plan-items/index.ts`: in `processChunk`, prepend block to the `system:` value (line 459) using `orgContext?.documentHints`. Remove the `User-provided document hints: …` line in `parts.push` (line 419).
-- `extract-plan-vision/index.ts`: prepend block to every `system:` field (text + table + presentation modes) using `documentHints` from request body. Remove the `User-provided document hints: …` line in `parts.push` (line 754).
-- `audit-completeness/index.ts`: accept `documentHints` from request body; prepend block to both system prompts (text + vision) wherever they are used (the `dedupExclusionNote` branches around lines 322 and 355).
-- `validate-hierarchy/index.ts`: accept `documentHints` from request body; prepend block to `VALIDATION_SYSTEM_PROMPT` at the call site (line 245).
+- `WizardProgress` — already generic; the indicator will naturally show the new path because spreadsheets now visit step index 1 just like PDFs.
+- The mapping UI (`DetectionSummary`, `MappingInterface`) — untouched (Phase 4 territory).
+- The PDF path — untouched.
+- AI agents — untouched (notes are collected but not used on the spreadsheet path; Phase 3 will wire them in).
+- Re-import flow — untouched (it bypasses Screen 1/2 entirely as before).
+- No new migration — `document_hints` column already exists from Phase 1.
 
-Empty/null notes ⇒ helper returns `""` ⇒ zero added tokens.
+### Behavioral notes
 
-### Files modified
+- For spreadsheets, the org lookup uses **filename + orgName + industry** (which is already what `lookup-organization` receives — it doesn't take the file content). Using sheet content as additional context is technically out of scope of `lookup-organization`'s current interface; sticking with the simpler "use what we already pass" path per the prompt's "If that's complex, just use the filename for now."
+- The `Plan Structure` checkbox on Screen 2 will show for spreadsheets but, as noted in the prompt, has no effect on the spreadsheet path today. The user can still set it; it's stored on `orgProfile.planLevels` and passed through to `setLevels` in `handleStartProcessing`. The spreadsheet mapper currently overrides levels based on detected pattern, so user-defined levels may get replaced. That mismatch is acknowledged by the prompt as Phase 3+ work — not addressed here.
 
-| File | Change |
-|---|---|
-| `src/pages/Index.tsx` | Copy `additionalNotes` into orgProfile + state |
-| `supabase/migrations/<new>.sql` | Add `processing_sessions.document_hints text` |
-| `supabase/functions/process-plan/index.ts` | Persist hints, hydrate on resume, forward to audit + validate, thread through runAgent2/3Only |
-| `supabase/functions/classify-document/index.ts` | Helper + system-prompt prepend; remove user-prompt duplicate |
-| `supabase/functions/extract-plan-items/index.ts` | Helper + system-prompt prepend; remove user-prompt duplicate |
-| `supabase/functions/extract-plan-vision/index.ts` | Helper + system-prompt prepend; remove user-prompt duplicate |
-| `supabase/functions/audit-completeness/index.ts` | Helper + accept documentHints + system-prompt prepend |
-| `supabase/functions/validate-hierarchy/index.ts` | Helper + accept documentHints + system-prompt prepend |
+### Regression gates (to run after implementation)
 
-### Out of scope
+1. **PDF flow (Chattanooga)** — Screen 1 → Screen 2 → Process → Map People → Review & Export still works.
+2. **Spreadsheet flow** — upload .xlsx, land on Screen 2 with org card + Notes field, click Continue, reach mapping UI.
+3. **`document_hints` persisted** — type something into Notes on Screen 2 for a spreadsheet upload; after mapping completes, verify `processing_sessions.document_hints` contains the text.
+4. **Operational Plan .xlsx (685 items)** — full flow still produces 685 items.
+5. **DRAFT Initiative 1 tab** — full flow still produces 24 items.
+6. **Re-import (PDF)** — bypasses Screen 2 as before.
 
-Spreadsheet path (Phase 2). UI changes to the textarea. Any prompt tuning beyond inserting the notes block.
+### Files changed
 
-### Regression gates (run live, not by code review)
-
-1. **Chattanooga PDF, no notes** — extracts to 47 items; logs show no `USER-PROVIDED CONTEXT` block in any agent.
-2. **Chattanooga PDF, notes = "Ignore the executive summary on pages 1-3"** — extracts to ~47 items; agent logs show the block in system prompts of all 5 agents.
-3. **Messier prior session, notes = "We use 3 levels: Goals, Objectives, Tactics"** — re-run; validate-hierarchy output reflects user-stated levels.
-4. **Token usage** — empty notes path adds zero tokens (verify against api_call_logs.input_tokens).
-5. **Live self-chained resume** — kill orchestrator mid-pipeline (e.g. cause a chain dispatch between Agent 1 and Agent 2). Confirm Agent 2 and Agent 3 still receive the notes block in their system prompts, sourced from `processing_sessions.document_hints` rather than the original request body. **Must be tested live, not via code review.**
-6. **Duplicate-removal verification** — after a notes-populated run, inspect the user prompt sent to extract-plan-items in `api_call_logs`. The string `User-provided document hints:` must NOT appear in the user prompt; it must only appear (transformed into the new block) in the system prompt. Same check for extract-plan-vision and classify-document.
-
-### Report-back format
-
-- Files changed list with line ranges.
-- Live results for all 6 gates (especially #5 live resume test and #6 duplicate-removal evidence).
-- Sample edge function log line showing `USER-PROVIDED CONTEXT:` in a system prompt when notes are populated.
+- `src/components/steps/UploadIdentifyStep.tsx` — remove spreadsheet early-return
+- `src/pages/Index.tsx` — remove spreadsheet branch in `handleQuickScanComplete`
+- `src/components/steps/SpreadsheetImportStep.tsx` — accept `documentHints` prop, persist on completion
+- `src/components/steps/FileUploadStep.tsx` — forward `documentHints` to `SpreadsheetImportStep`
