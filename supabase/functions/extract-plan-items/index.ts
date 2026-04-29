@@ -95,6 +95,13 @@ function splitDocumentIntoChunks(text: string, maxChunkSize: number): string[] {
   return chunks;
 }
 
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
+
 const EXTRACTION_SYSTEM_PROMPT = `You are an expert at analyzing strategic planning documents and extracting ONLY actionable, trackable items with PROPER HIERARCHICAL NESTING.
 
 === VERBATIM TEXT EXTRACTION (CRITICAL) ===
