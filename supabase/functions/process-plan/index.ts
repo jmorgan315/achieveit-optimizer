@@ -738,6 +738,10 @@ async function runPipeline(sessionId: string, body: Record<string, unknown>): Pr
       classificationResult: preClassification,
     } = body;
 
+    // Persist documentHints to the session row so resume cycles (which only have access to the
+    // session row, not the original request body) can rehydrate user notes for later agents.
+    await updateSessionProgress(sessionId, { document_hints: (documentHints as string | undefined) || null });
+
     const hasDocumentText = !!documentText && (documentText as string).trim().length > 50;
     let useVision = !!pageImages && Array.isArray(pageImages) && (pageImages as string[]).length > 0;
     let filteredPageImages = pageImages as string[] | undefined;
