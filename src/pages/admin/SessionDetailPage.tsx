@@ -565,6 +565,15 @@ export default function SessionDetailPage() {
         <ClassificationCard classification={session.classification_result as Record<string, Json>} />
       )}
 
+      {/* Layout Classification (spreadsheet AI classifier) */}
+      {session.layout_classification && typeof session.layout_classification === 'object' && (
+        <LayoutClassificationCard
+          classification={session.layout_classification as Record<string, Json>}
+          logs={logs}
+          rates={modelRates}
+        />
+      )}
+
       {/* Spreadsheet Import Details */}
       {session.extraction_method === 'spreadsheet' && session.step_results && (() => {
         const sr = session.step_results as Record<string, any>;
