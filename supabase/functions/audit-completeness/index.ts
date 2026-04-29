@@ -287,7 +287,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels, dedupRemovedNames } = body;
+    const { sourceText, pageImages, extractedItems, sessionId: incomingSessionId, organizationName, industry, planLevels, dedupRemovedNames, documentHints } = body;
 
     // Build dedup exclusion note for the prompt
     let dedupExclusionNote = "";
@@ -326,7 +326,7 @@ serve(async (req) => {
 
       const anthropicContent = buildVisionContent(imagesToSend, itemListing, contextPrefix, extractedItems.length);
 
-      const visionSystemPrompt = dedupExclusionNote ? VISION_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : VISION_AUDIT_SYSTEM_PROMPT;
+      const visionSystemPrompt = `${buildUserContextBlock(documentHints)}${dedupExclusionNote ? VISION_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : VISION_AUDIT_SYSTEM_PROMPT}`;
       requestBody = {
         model: "claude-sonnet-4-6",
         max_tokens: 16384,
@@ -359,7 +359,7 @@ ${truncatedText}${truncationNote}
 
 Please audit the extraction above against the source document. Identify any missing items, merged items, or rephrased items.`;
 
-      const textSystemPrompt = dedupExclusionNote ? TEXT_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : TEXT_AUDIT_SYSTEM_PROMPT;
+      const textSystemPrompt = `${buildUserContextBlock(documentHints)}${dedupExclusionNote ? TEXT_AUDIT_SYSTEM_PROMPT + dedupExclusionNote : TEXT_AUDIT_SYSTEM_PROMPT}`;
       requestBody = {
         model: "claude-sonnet-4-6",
         max_tokens: 16384,
