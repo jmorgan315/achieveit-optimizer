@@ -457,7 +457,7 @@ Document section:\n\n${chunkText}`;
   const requestBody = {
     model: "claude-opus-4-6",
     max_tokens: 16384,
-    system: EXTRACTION_SYSTEM_PROMPT,
+    system: `${buildUserContextBlock(orgContext?.documentHints)}${EXTRACTION_SYSTEM_PROMPT}`,
     messages: [{ role: "user", content: userMessage }],
     tools: [{
       name: "extract_plan_items",
