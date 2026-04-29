@@ -829,7 +829,7 @@ Extract all strategic plan items with their proper hierarchy.`
       const tablePayload: Record<string, unknown> = {
         model: "claude-opus-4-6",
         max_tokens: 16384,
-        system: tableSystemPrompt,
+        system: `${buildUserContextBlock(documentHints)}${tableSystemPrompt}`,
         messages: [
           { role: "user", content: anthropicContent }
         ],
@@ -917,7 +917,7 @@ Extract all strategic plan items with their proper hierarchy.`
       const presentationPayload: Record<string, unknown> = {
         model: "claude-opus-4-6",
         max_tokens: 16384,
-        system: presentationSystemPrompt,
+        system: `${buildUserContextBlock(documentHints)}${presentationSystemPrompt}`,
         messages: [
           { role: "user", content: anthropicContent }
         ],
@@ -996,7 +996,7 @@ Extract all strategic plan items with their proper hierarchy.`
     const anthropicPayload: Record<string, unknown> = {
       model: "claude-opus-4-6",
       max_tokens: 16384,
-      system: VISION_EXTRACTION_PROMPT,
+      system: `${buildUserContextBlock(documentHints)}${VISION_EXTRACTION_PROMPT}`,
       messages: [
         { role: "user", content: anthropicContent }
       ],
