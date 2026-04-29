@@ -138,6 +138,7 @@ export function SpreadsheetImportStep({ file, sessionId, documentHints, onComple
       .from('processing_sessions')
       .update({
         extraction_method: 'spreadsheet',
+        document_hints: documentHints?.trim() || null,
         total_items_extracted: items.length,
         status: 'completed',
         document_type: file.name.split('.').pop() || 'xlsx',
