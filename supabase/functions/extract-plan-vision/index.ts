@@ -13,6 +13,13 @@ const ANTHROPIC_MAX_RETRIES = 4;
 const ANTHROPIC_BASE_DELAY_MS = 3000;
 const RETRYABLE_ANTHROPIC_STATUSES = new Set([429, 500, 502, 503, 529]);
 
+// duplicated in 5 agents; keep in sync
+function buildUserContextBlock(notes?: string | null): string {
+  const t = (notes ?? "").trim();
+  if (!t) return "";
+  return `USER-PROVIDED CONTEXT (treat as authoritative guidance about this specific document):\n${t}\n\n`;
+}
+
 function createSafeError(
   status: number,
   publicMessage: string,
