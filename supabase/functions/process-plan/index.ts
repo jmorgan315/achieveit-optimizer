@@ -1851,6 +1851,7 @@ async function runAgent2Only(
   planLevels: unknown[] | undefined,
   extractionMethod: string,
   sourceText: string,
+  documentHints: string | undefined,
   pipelineRunId: string,
   existingStepResults: Record<string, unknown>
 ): Promise<void> {
@@ -1951,6 +1952,7 @@ async function runAgent3Only(
   planLevels: unknown[] | undefined,
   extractionMethod: string,
   auditFindings: AuditFindings | null,
+  documentHints: string | undefined,
   pipelineRunId: string,
   existingStepResults?: Record<string, unknown>,
   startTime?: number
