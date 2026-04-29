@@ -401,14 +401,10 @@ const Index = () => {
     };
     setOrgProfile(profile);
 
-    // Check if spreadsheet — skip ScanResultsStep and go directly to processing
-    const fileName = uploadedFile?.name?.toLowerCase() || '';
-    const isSpreadsheet = fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv');
-    if (isSpreadsheet) {
-      advanceToStep(2); // Skip configure, go to processing (FileUploadStep handles spreadsheet routing)
-    } else {
-      advanceToStep(1); // Go to ScanResultsStep
-    }
+    // Phase 2: spreadsheets now also route through ScanResultsStep (Screen 2) so users
+    // can confirm org and add Additional Notes before mapping. ScanResultsStep gracefully
+    // hides the Document Scope card and time estimate when pageCount/classification are null.
+    advanceToStep(1);
   };
 
   // === Screen 2 completion handler ===
