@@ -162,6 +162,20 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
     return map;
   }, [sheets]);
 
+  // Per-sheet structure detection (item counts, sections, columns) for plan-content rows.
+  // Wrapped in try/catch so a parser hiccup degrades silently to the lean view.
+  const detectionByName = useMemo(() => {
+    const map = new Map<string, SheetDetection>();
+    if (!sheets) return map;
+    try {
+      const det = detectStructure(sheets);
+      det.sheets.forEach(sd => map.set(sd.sheet.name, sd));
+    } catch (e) {
+      console.warn('[SheetPicker] detectStructure failed, falling back to lean view:', e);
+    }
+    return map;
+  }, [sheets]);
+
   // Pre-select plan-content sheets once both parse + classify resolve.
   useEffect(() => {
     if (initSelectedFromClassifier.current) return;
