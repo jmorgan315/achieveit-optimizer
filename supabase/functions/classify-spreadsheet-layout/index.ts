@@ -76,8 +76,23 @@ const layoutToolSchema = {
         primary_pattern: { type: "string", enum: ["A", "B", "C", "D", "mixed"] },
         needs_user_clarification: { type: "boolean" },
         clarification_reason: { type: "string" },
+        clarification_type: {
+          type: ["string", "null"],
+          enum: ["time_versioning", "scope_variation", "ambiguous_pattern", "mixed_patterns", "other", null],
+          description: "Set only when needs_user_clarification is true; null otherwise.",
+        },
       },
       required: ["primary_pattern", "needs_user_clarification"],
+    },
+    parser_directives: {
+      type: "object",
+      description: "Derived strictly from documentHints. Empty/false when no hints provided.",
+      properties: {
+        exclude_sheets: { type: "array", items: { type: "string" } },
+        exclude_row_predicates: { type: "array", items: { type: "string" } },
+        include_only_recent: { type: "boolean" },
+      },
+      required: ["exclude_sheets", "exclude_row_predicates", "include_only_recent"],
     },
     sheets: {
       type: "array",
