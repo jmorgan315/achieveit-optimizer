@@ -261,13 +261,45 @@ export function parseHierarchicalColumns(
   const sourceSheet = sheet.name;
   const baseTags = sourceSheet ? [`Source: ${sourceSheet}`] : [];
 
+  // ── DIAGNOSTIC (temporary) ──────────────────────────────────────────────
+  // Counters & samples for understanding row-level skip behavior. Remove
+  // once Tulane count-drop investigation concludes.
+  let diagRowsScanned = 0;
+  let diagRowsAllEmpty = 0;
+  let diagRowsSkippedNoLeaf = 0;
+  let diagRowsParsed = 0;
+  const diagSkippedSamples: Array<Record<string, unknown>> = [];
+  const diagPerRoot = new Map<string, { rows: number; leaves: number }>();
+  const toHex = (s: string): string =>
+    Array.from(String(s || ''))
+      .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
+      .join(' ');
+
+  console.log(
+    '[ssphase4b] row-scan start:',
+    JSON.stringify({
+      sheet: sheet.name,
+      pattern: sheetClassification.pattern,
+      hierarchySignal,
+      dataStartRow,
+      totalRows: sheet.rows.length,
+      rowsToScan: Math.max(0, sheet.rows.length - dataStartRow),
+      resolvedColumnIndices: resolution.resolvedColumnIndices,
+      resolvedLevels: resolution.resolvedLevels,
+    }),
+  );
+
   for (let r = dataStartRow; r < sheet.rows.length; r++) {
     const row = sheet.rows[r];
     if (!Array.isArray(row)) continue;
+    diagRowsScanned++;
 
     // Skip fully empty rows.
     const anyFilled = row.some(c => c != null && String(c).trim() !== '');
-    if (!anyFilled) continue;
+    if (!anyFilled) {
+      diagRowsAllEmpty++;
+      continue;
+    }
 
     // Read raw hierarchy values for this row.
     const rawValues: string[] = resolution.resolvedColumnIndices.map(colIdx =>
@@ -285,20 +317,45 @@ export function parseHierarchicalColumns(
 
     // Determine leaf depth for this row.
     let leafDepthIdx = -1;
+    let skipReason: string | null = null;
     if (isCategoryColumns) {
       // Pattern B: leaf is the deepest non-blank RAW cell for this row.
       // (Inherited values represent ancestors, not the row's own leaf.)
       for (let i = rawValues.length - 1; i >= 0; i--) {
         if (rawValues[i]) { leafDepthIdx = i; break; }
       }
-      // If row had no raw hierarchy values, it's an attribute-only row — skip.
-      if (leafDepthIdx < 0) continue;
+      if (leafDepthIdx < 0) skipReason = 'pattern-B: no raw hierarchy cell on row';
     } else {
       // Pattern C: leaf is the deepest configured level. Need that cell present
       // (after inheritance). If still empty, skip — row had nothing to anchor.
       leafDepthIdx = filled.length - 1;
-      if (!filled[leafDepthIdx]) continue;
+      if (!filled[leafDepthIdx]) skipReason = 'pattern-C: deepest level empty after inheritance';
     }
+
+    if (skipReason) {
+      diagRowsSkippedNoLeaf++;
+      if (diagSkippedSamples.length < 5) {
+        diagSkippedSamples.push({
+          rowIndex: r,
+          reason: skipReason,
+          leafDepthIdx,
+          rawValues,
+          filled,
+          rawHex: rawValues.map(toHex),
+          filledHex: filled.map(toHex),
+          fullRowFirst12: row.slice(0, 12).map(c => (c == null ? '' : String(c))),
+          fullRowFirst12Hex: row.slice(0, 12).map(c => toHex(c == null ? '' : String(c))),
+        });
+      }
+      continue;
+    }
+
+    diagRowsParsed++;
+    const rootKey = normalizeWhitespace(filled[0] || '').toLowerCase() || '<no-root>';
+    const rootStats = diagPerRoot.get(rootKey) || { rows: 0, leaves: 0 };
+    rootStats.rows++;
+    rootStats.leaves++;
+    diagPerRoot.set(rootKey, rootStats);
 
     // Build / reuse parent items for depths 0..leafDepthIdx-1, then create the leaf at leafDepthIdx.
     let parentId: string | null = null;
@@ -384,6 +441,29 @@ export function parseHierarchicalColumns(
 
   const parentsCreated = parentByKey.size;
   const leafItems = items.length - parentsCreated;
+
+  // ── DIAGNOSTIC (temporary) ──────────────────────────────────────────────
+  console.log(
+    '[ssphase4b] row-scan summary:',
+    JSON.stringify({
+      sheet: sheet.name,
+      rowsScanned: diagRowsScanned,
+      rowsAllEmpty: diagRowsAllEmpty,
+      rowsSkippedNoLeaf: diagRowsSkippedNoLeaf,
+      rowsParsed: diagRowsParsed,
+    }),
+  );
+  console.log(
+    '[ssphase4b] row-scan skipped-samples:',
+    JSON.stringify({ sheet: sheet.name, samples: diagSkippedSamples }),
+  );
+  console.log(
+    '[ssphase4b] root-summary:',
+    JSON.stringify({
+      sheet: sheet.name,
+      roots: Array.from(diagPerRoot.entries()).map(([root, s]) => ({ root, ...s })),
+    }),
+  );
   console.log(
     '[ssphase4b] parsed:',
     JSON.stringify({
