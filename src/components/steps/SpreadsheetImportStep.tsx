@@ -23,6 +23,7 @@ import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface } from '@/components/spreadsheet/MappingInterface';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
 type Phase = 'parsing' | 'detection' | 'mapping' | 'generating';
 
