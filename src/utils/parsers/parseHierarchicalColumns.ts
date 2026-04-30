@@ -211,6 +211,13 @@ export function parseHierarchicalColumns(
   const usableHierarchy = resolution.resolvedColumnIndices.filter(i => i >= 0);
   if (usableHierarchy.length === 0) {
     console.log('[ssphase4b] hierarchy: levels=[] resolved=[] unresolved=', resolution.unresolvedLevels);
+    void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'hierarchy', {
+      sheet: sheet.name,
+      levels: [],
+      resolved: [],
+      unresolved: resolution.unresolvedLevels,
+      bailedEarly: true,
+    }, sheet.name);
     return {
       items: [],
       personMappings: [],
