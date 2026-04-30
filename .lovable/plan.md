@@ -1,38 +1,85 @@
-# Fix: parent dedupe whitespace normalization
+## Diagnostic-only patch: `[ssphase4b] row-scan` instrumentation
 
-## Problem
-On Tulane (AchieveIt All In, Pattern C), parents 3.1.3, 6.3.2, and 8.3.1.2 split into 2-3 duplicates because some rows have trailing whitespace (or internal double spaces) on the hierarchy cell value while others don't. The dedupe path key currently uses `normalize()` which trims + lowercases but does not collapse internal whitespace runs.
+Goal: capture exactly what the parser sees when processing the original Tulane file, including byte-level hex of skipped rows. **No parser logic changes.** Logs only. Will be removed after diagnosis.
 
-## Fix
-In `src/utils/parsers/parseHierarchicalColumns.ts`:
+### File touched (only one)
+- `src/utils/parsers/parseHierarchicalColumns.ts`
 
-1. Add a dedicated `normalizeWhitespace(s: string): string` helper:
+### What gets added
+
+1. Local diagnostic state (declared just before the row loop):
+   - `diagRowsScanned`, `diagRowsAllEmpty`, `diagRowsSkippedNoLeaf`, `diagRowsParsed` counters
+   - `diagSkippedSamples: Array<...>` capped at 5 entries
+   - `diagPerRoot: Map<rootNormalizedKey, {rows, leaves}>`
+   - `toHex(s)` helper: `Array.from(s).map(c => c.charCodeAt(0).toString(16).padStart(2,'0')).join(' ')`
+
+2. Pre-loop log:
    ```ts
-   function normalizeWhitespace(s: string): string {
-     return String(s || '').trim().replace(/\s+/g, ' ');
-   }
+   console.log('[ssphase4b] row-scan start:', JSON.stringify({
+     sheet, pattern, hierarchySignal, dataStartRow,
+     totalRows, rowsToScan,
+     resolvedColumnIndices, resolvedLevels,
+   }));
    ```
-   (No case change, no punctuation change — whitespace only.)
 
-2. Change the parent dedupe path key construction (currently `filled.slice(0, d + 1).map(normalize).join(' > ')`) to layer whitespace collapse on top of the existing case/trim normalize:
+3. Inside the row loop (no behavior changes — same skip points):
+   - Increment `diagRowsScanned` after `Array.isArray` check.
+   - When fully-empty row skip triggers → bump `diagRowsAllEmpty`, continue.
+   - Compute `rawValues` and `filled` exactly as today.
+   - Replace today's `if (leafDepthIdx < 0) continue;` and `if (!filled[leafDepthIdx]) continue;` with assignments to a `skipReason` string:
+     - Pattern B: `'pattern-B: no raw hierarchy cell on row'`
+     - Pattern C: `'pattern-C: deepest level empty after inheritance'`
+   - If `skipReason` set:
+     - Bump `diagRowsSkippedNoLeaf`.
+     - If `diagSkippedSamples.length < 5`, push:
+       ```ts
+       {
+         rowIndex: r,
+         reason: skipReason,
+         leafDepthIdx,
+         rawValues,
+         filled,
+         rawHex: rawValues.map(toHex),
+         filledHex: filled.map(toHex),
+         fullRowFirst12: row.slice(0, 12).map(c => c == null ? '' : String(c)),
+         fullRowFirst12Hex: row.slice(0, 12).map(c => toHex(c == null ? '' : String(c))),
+       }
+       ```
+     - `continue;`
+   - Else bump `diagRowsParsed` and tally per-root:
+     ```ts
+     const rootKey = normalizeWhitespace(filled[0] || '').toLowerCase() || '<no-root>';
+     ```
+     `diagPerRoot[rootKey].rows++; .leaves++;` (one leaf per parsed row in Pattern C; close enough as a sanity check for B).
+
+   Important: control flow stays identical — same rows skipped, same rows parsed, same items produced. Only added counters and one `continue` path now branches via `skipReason` instead of two inline `continue`s.
+
+4. Post-loop logs (just before existing `parsed:` log):
    ```ts
-   const pathKey = filled
-     .slice(0, d + 1)
-     .map(v => normalizeWhitespace(v).toLowerCase())
-     .join(' > ');
+   console.log('[ssphase4b] row-scan summary:', JSON.stringify({
+     sheet: sheet.name,
+     rowsScanned: diagRowsScanned,
+     rowsAllEmpty: diagRowsAllEmpty,
+     rowsSkippedNoLeaf: diagRowsSkippedNoLeaf,
+     rowsParsed: diagRowsParsed,
+   }));
+   console.log('[ssphase4b] row-scan skipped-samples:', JSON.stringify(diagSkippedSamples));
+   console.log('[ssphase4b] root-summary:', JSON.stringify(
+     Array.from(diagPerRoot.entries()).map(([root, s]) => ({ root, ...s }))
+   ));
    ```
-   This preserves the existing case-insensitive behavior AND collapses internal whitespace runs, so `"3.1.3"`, `"3.1.3 "`, and `"3.1.3  "` all map to the same dedupe bucket.
 
-3. **Do not** change what gets stored on the item. The `name` field continues to be assigned from the raw `value` (already trimmed via `cellAt`), so the first variant encountered in source order is what displays — exactly as requested.
+5. Existing `parsed:` and `hierarchy:` logs stay as-is.
 
-## Out of scope (per user)
-- No new lowercase changes beyond what dedupe already does
-- No punctuation stripping
-- No fuzzy matching
-- No leaf-level dedupe changes (leaves remain unique per row)
+### Out of scope
+- No change to `normalizeWhitespace`, `pathKey`, dedupe, or leaf logic.
+- No change to `SpreadsheetImportStep.tsx` or any other file.
+- No change to classifier or upstream parsing.
 
-## Files changed
-- `src/utils/parsers/parseHierarchicalColumns.ts` — add `normalizeWhitespace` helper, update one line in the parent dedupe path key.
+### Expected diagnostic value
+- If `rowsSkippedNoLeaf` is large for the original file (and small for the round-tripped export), confirms rows are being silently dropped.
+- `skipped-samples` `rawHex` / `filledHex` will reveal `0xa0` (NBSP), `0x09` (tab), `0x200b` (zero-width space), or other Unicode whitespace landing in the deepest hierarchy column.
+- `root-summary` confirms whether Goal 1/Goal 2 rows are reaching the parser at all (vs being absent from `sheet.rows`, which would point upstream to `spreadsheet-parser.ts`).
 
-## Validation
-Re-upload Tulane (AchieveIt All In). Confirm 3.1.3, 6.3.2, and 8.3.1.2 each appear once as a single parent with all expected children consolidated underneath. Confirm overall leaf count stays ~191 (no leaves dropped — only parent buckets collapsed). Spot-check that no other parents collapsed unexpectedly.
+### After validation
+Once we identify the cause from the logs, the real fix proposal will follow (likely: extend `cellAt`'s emptiness check or `normalizeWhitespace` to treat Unicode whitespace as whitespace — but only after the logs prove it).
