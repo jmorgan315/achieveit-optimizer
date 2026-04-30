@@ -1,111 +1,85 @@
-# Phase 3 — AI Layout Classifier for Excel/CSV (revised)
+# Phase 4a: AI Classifier Schema Extension + Sheet Picker
 
-Analysis-only. Classifier runs fire-and-forget after spreadsheet parse, persists structured result to the session, and surfaces in an admin viewer for user-driven validation. Phase 4 (later) wires the result into the parser dispatch.
+Ship the classifier schema additions and a new wizard step that lets users confirm which sheets to import, driven by the AI classifier's output. Stop after this sub-phase for user validation in the admin Layout Classification panel before starting 4b.
 
 ## What ships
 
-### 1. DB migration
+### 1. Classifier schema extension (`supabase/functions/classify-spreadsheet-layout/index.ts`)
 
-Add to `processing_sessions`:
-- `layout_classification jsonb`
-- `layout_classified_at timestamptz`
+Add to `workbook_summary`:
+- `clarification_type`: enum `time_versioning | scope_variation | ambiguous_pattern | mixed_patterns | other` — only set when `needs_user_clarification: true`.
 
-### 2. New edge function `classify-spreadsheet-layout`
+Add new top-level field `parser_directives` — **derived strictly from `documentHints`, never from sheet structure**. If `documentHints` is empty or contains no exclusion/scope language, all fields are empty/false.
+- `exclude_sheets`: string[] — sheet names the user's notes explicitly say to skip (e.g., "skip the budget tab"). Independent of structural pattern; a sheet can be plan-content structurally and still appear here.
+- `exclude_row_predicates`: string[] — human-readable row filters from the user's notes (e.g., "rows where status = Archived").
+- `include_only_recent`: boolean — true only when notes explicitly say so ("just the latest version", "current year only"). The classifier may still flag time-versioning structurally via `clarification_type: time_versioning` without setting this.
 
-- Auth: standard JWT validation in code (`getClaims`), default deploy
-- Model: **`claude-sonnet-4-6`** via existing `ANTHROPIC_API_KEY` (matches the rest of the agent stack)
-- Input: `{ sessionId, orgName, documentHints?, workbookPreview }` where preview = per-sheet array of `{ sheetName, rows: string[][] }`, capped at **30 rows × 12 cols**, each cell truncated to **80 chars**
-- Chunking: classify sheets in groups of 5 to keep cost <$0.10/workbook
-- Tool-calling for structured output
-- Fail-soft: any error writes `{ error, model, classified_at }` sentinel; never throws back to client
-- Logs to `api_call_logs` with `step_label = 'classify_layout'`
-- Persists merged result to `layout_classification` and stamps `layout_classified_at`
+System prompt update makes the separation explicit:
+- Structural classification (per-sheet `pattern`, including `not_plan_content`) is what the AI sees in the data.
+- `parser_directives` is what the user told us in prose, parsed into structured form. No directives without hints.
 
-**Output schema (persisted):**
-```json
-{
-  "workbook_summary": {
-    "primary_pattern": "A|B|C|D|mixed",
-    "needs_user_clarification": true,
-    "clarification_reason": "Multiple time-versioned tabs detected (Jan, Feb, Mar)"
-  },
-  "sheets": [
-    {
-      "sheet_name": "All In",
-      "pattern": "A|B|C|D|not_plan_content|empty|unknown",
-      "confidence": 0,
-      "reasoning": "...",
-      "structure": {
-        "header_row_index": 2,
-        "data_starts_at_row": 3,
-        "name_column_index": 1,
-        "hierarchy_signal": "section_headers|category_columns|column_nested|pivot_rows",
-        "implied_levels": ["Strategy", "Outcome", "Action"],
-        "section_marker_pattern": "^(Strategy|Goal):"
-      }
-    }
-  ],
-  "model": "claude-sonnet-4-6",
-  "tokens": { "input": 0, "output": 0 },
-  "duration_ms": 0
-}
-```
+### 2. Multi-chunk merge logic (same file)
 
-### 3. Pattern definitions in the prompt
+When merging summaries across chunks:
+- `clarification_type`: pick first non-null; if chunks disagree, fall back to `mixed_patterns`.
+- `parser_directives.exclude_sheets`: union across chunks (dedup).
+- `parser_directives.exclude_row_predicates`: union across chunks (dedup).
+- `parser_directives.include_only_recent`: OR across chunks.
+- Preserve existing `primary_pattern` voting and `needs_user_clarification` OR logic.
 
-- **A — Form/section-block**: section headers like `Strategy:` / `Goal:` with rows below; column meaning shifts per section
-- **B — Flat list with hierarchy column(s)**: one row per item, level encoded in a column (e.g. "Type" = Goal/Strategy/Action) or by indent
-- **C — Column-nested**: hierarchy encoded across columns (Strategy col → Outcome col → Action col on same row)
-- **D — Pivot/scorecard**: metrics in rows, time/owner in columns
-- **not_plan_content**: README, config, dept lookup, budget — present but not plan items
-- **empty / unknown**: no extractable signal
+### 3. New wizard step: `src/components/steps/SheetPickerStep.tsx`
 
-### 4. Client wiring (fire-and-forget, no UI on the import path)
+Inserted between `FileUploadStep` and `SpreadsheetImportStep` for spreadsheet uploads only.
 
-- `src/components/steps/SpreadsheetImportStep.tsx`: after the existing parse step succeeds, call `supabase.functions.invoke('classify-spreadsheet-layout', { body: { sessionId, orgName, documentHints, workbookPreview } })` without `await` blocking the user
-- `src/components/steps/FileUploadStep.tsx`: forward `orgName` + `documentHints` props down so the classifier has org context
-- No loading state, no toast on the import flow — Phase 4 will read `layout_classification` from the session
+Behavior:
+- Mounts with "Analyzing workbook structure…" visible immediately (no delay, no blank frame).
+- Polls `processing_sessions.layout_classification` every 1.5s until populated or 60s timeout.
+- Renders sheets grouped by pattern (A / B / C / D / not_plan_content / empty / unknown) with the AI's per-sheet reasoning visible.
+- Pre-checks all sheets whose pattern is A/B/C/D; leaves not_plan_content / empty / unknown unchecked. User can override.
+- Shows `parser_directives` as a collapsible "From your notes" panel when any directive is non-empty. Default action = **Ignore**. User must explicitly click "Apply" per directive. No silent filtering. Panel hidden entirely when all directives are empty.
+- If `needs_user_clarification` is true, surfaces `clarification_type` + reason as a top info banner.
+- If classifier failed (sentinel error in JSON), falls back to existing detection-only flow with a warning banner.
+- Continue button passes selected sheet indices forward.
 
-### 5. Admin viewer on `SessionDetailPage`
+### 4. Wizard wiring
 
-When `layout_classification` is present on the session, render a new "Layout Classification" panel (admin-visible only, like other admin surfaces on that page):
-- **Workbook summary**: primary_pattern badge, needs_user_clarification flag, clarification_reason
-- **Per-sheet table**: sheet_name · pattern badge · confidence · hierarchy_signal · implied_levels · header_row_index / data_starts_at_row / name_column_index · reasoning (collapsible)
-- **Cost footer**: pulled from `api_call_logs` where `session_id = ? AND step_label = 'classify_layout'` — sum input/output tokens, compute $ at Sonnet rates, show duration
-- **Raw JSON toggle**: collapsible `<pre>` with the full `layout_classification` blob for copy/paste
-- Fail-soft sentinel renders as a red error card with the stored error message
+- `FileUploadStep.tsx` already forwards `orgName` and `documentHints`. Route spreadsheet files through `SheetPickerStep` before `SpreadsheetImportStep`.
+- `SpreadsheetImportStep.tsx` accepts an optional `preselectedSheetIndices` prop. When provided, skips its own default selection and goes straight to mapping using those sheets. Existing fire-and-forget classifier call stays as a safety net.
 
-This is the validation surface — user uploads the 8 sample files and reads results here.
+### 5. Self-test before handoff
 
-## Regression gates (must all pass)
+Upload one multi-sheet workbook with explicit notes ("skip the budget tab") and verify in the admin Layout Classification panel:
+- `workbook_summary.clarification_type` appears (or is correctly absent when `needs_user_clarification: false`).
+- `parser_directives.exclude_sheets` reflects the note, NOT structural classification.
+- A second upload of the same workbook with empty notes produces empty `parser_directives` even if a sheet is structurally `not_plan_content`.
+- Multi-chunk workbooks (>5 sheets) show merged directives, not just the last chunk's.
 
-1. PDF flow unchanged — extraction, dedup, export still work
-2. Excel flow still completes to the mapping screen (classifier is non-blocking)
-3. Operational Plan .xlsx → 685 items
-4. DRAFT Initiative 1 → 24 items
+## Out of scope for 4a
+
+- Pattern-specific parsers (4b/4c).
+- Mapping UI redesign (4d).
+- Pattern D dead-end UI (4e).
+- Honoring `parser_directives` in the parser — for now they're display-only suggestions.
 
 ## Files touched
 
-- `supabase/migrations/<timestamp>_layout_classification.sql` (new)
-- `supabase/functions/classify-spreadsheet-layout/index.ts` (new)
-- `src/components/steps/SpreadsheetImportStep.tsx` (fire-and-forget invoke)
-- `src/components/steps/FileUploadStep.tsx` (forward orgName/documentHints)
-- `src/pages/SessionDetailPage.tsx` (+ likely a new `LayoutClassificationPanel.tsx`) — admin viewer
+- `supabase/functions/classify-spreadsheet-layout/index.ts` — schema, prompt, merge logic.
+- `src/components/steps/SheetPickerStep.tsx` — new file.
+- `src/components/steps/FileUploadStep.tsx` — route spreadsheets through picker.
+- `src/components/steps/SpreadsheetImportStep.tsx` — accept preselected indices.
+- Wizard router — insert new step in spreadsheet path.
 
-## Report-back after implementation
+## Sanity check
 
-- Files changed
-- Confirmation classifier deploys and is invoked from the spreadsheet path
-- Screenshot/description of the admin viewer rendering against one test session
-- Confirmation all 4 regression gates pass
-- Reference for user validation: expected patterns are
-  - Working_Master_SP (Alfred) → A
-  - Santa Cruz Operational Plan → B
-  - DRAFT State Reporting Template → A on Initiative tabs; not_plan_content on Config/README
-  - RWJUHS Strategic Scorecard → D
-  - Astera Health Operational Plan → A across 20 sheets, needs_user_clarification=true
-  - AchieveIt Final Excel Document → C on All In; not_plan_content on Programming Budget / Dept Leads
-  - OGSM CDO Monthly Update → C, needs_user_clarification=true (time-versioned sheets)
-  - Plan_upload_test (Carmen/Zonetta) → B
+No hardcoded sheet names, column header strings, or filenames from the Phase 3 validation set will appear in the diff. Logic is pattern- and notes-driven only.
 
-User runs the 8 uploads, reads the admin viewer, and decides whether to escalate to `claude-opus-4-6` or proceed to Phase 4.
+## Validation scenarios for the user to test after 4a ships
+
+1. Single-sheet workbook, no notes → picker shows one sheet pre-checked; no clarification banner; no directives panel.
+2. Multi-sheet workbook with one structural lookup tab, no notes → lookup unchecked under "not_plan_content"; `exclude_sheets` is empty (structural ≠ directive).
+3. Same workbook + note "skip the budget tab" → `exclude_sheets: ["Budget"]` shown in directives panel as Ignore-by-default suggestion.
+4. Time-versioned workbook, no notes → `clarification_type: time_versioning`, banner visible, `include_only_recent: false`.
+5. Same workbook + note "just the latest version" → `include_only_recent: true`.
+6. Mixed-pattern workbook (OGSM-style) → `clarification_type: mixed_patterns`, sheets grouped by their distinct patterns.
+7. Workbook >5 sheets with notes → merged directives in admin panel reflect all chunks.
+8. Classifier failure → picker shows warning + falls back gracefully.
