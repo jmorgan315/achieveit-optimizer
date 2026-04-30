@@ -255,6 +255,7 @@ serve(async (req) => {
 
     const allSheets: any[] = [];
     const summaries: any[] = [];
+    const directivesList: any[] = [];
     let totalIn = 0;
     let totalOut = 0;
     let totalDuration = 0;
@@ -285,6 +286,7 @@ serve(async (req) => {
       if (result.ok && result.data) {
         if (Array.isArray(result.data.sheets)) allSheets.push(...result.data.sheets);
         if (result.data.workbook_summary) summaries.push(result.data.workbook_summary);
+        if (result.data.parser_directives) directivesList.push(result.data.parser_directives);
       } else {
         // Stub failed sheets so the user sees something
         for (const s of chunks[i]) {
@@ -313,11 +315,43 @@ serve(async (req) => {
     const needsClar = summaries.some(s => s.needs_user_clarification === true);
     const clarReason = summaries.find(s => s.clarification_reason)?.clarification_reason;
 
+    // Merge clarification_type: pick first non-null; if multiple chunks disagree → "mixed_patterns".
+    const clarTypes = summaries
+      .map(s => s.clarification_type)
+      .filter((t: unknown): t is string => typeof t === "string" && t.length > 0);
+    const uniqueClarTypes = [...new Set(clarTypes)];
+    let clarType: string | null = null;
+    if (needsClar) {
+      if (uniqueClarTypes.length === 0) clarType = "other";
+      else if (uniqueClarTypes.length === 1) clarType = uniqueClarTypes[0];
+      else clarType = "mixed_patterns";
+    }
+
+    // Merge parser_directives across chunks (union of arrays, OR of booleans).
+    const excludeSheetsSet = new Set<string>();
+    const excludePredsSet = new Set<string>();
+    let includeOnlyRecent = false;
+    for (const d of directivesList) {
+      if (Array.isArray(d.exclude_sheets)) {
+        for (const s of d.exclude_sheets) if (typeof s === "string" && s.trim()) excludeSheetsSet.add(s.trim());
+      }
+      if (Array.isArray(d.exclude_row_predicates)) {
+        for (const p of d.exclude_row_predicates) if (typeof p === "string" && p.trim()) excludePredsSet.add(p.trim());
+      }
+      if (d.include_only_recent === true) includeOnlyRecent = true;
+    }
+
     const merged = {
       workbook_summary: {
         primary_pattern: summaries.length === 1 ? summaries[0].primary_pattern : primary,
         needs_user_clarification: needsClar,
         ...(clarReason ? { clarification_reason: clarReason } : {}),
+        ...(clarType ? { clarification_type: clarType } : {}),
+      },
+      parser_directives: {
+        exclude_sheets: [...excludeSheetsSet],
+        exclude_row_predicates: [...excludePredsSet],
+        include_only_recent: includeOnlyRecent,
       },
       sheets: allSheets,
       model: MODEL,
