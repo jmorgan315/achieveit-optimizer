@@ -59,6 +59,15 @@ function normalize(s: string): string {
   return String(s || '').trim().toLowerCase();
 }
 
+/**
+ * Whitespace-only normalization for parent-dedupe comparisons.
+ * Trims leading/trailing whitespace AND collapses internal whitespace runs to
+ * a single space. Does NOT change case or strip punctuation — purely cosmetic.
+ */
+function normalizeWhitespace(s: string): string {
+  return String(s || '').trim().replace(/\s+/g, ' ');
+}
+
 function readHeaderRow(sheet: ParsedSheet, headerRowIndex: number): string[] {
   const row = sheet.rows[headerRowIndex];
   if (!Array.isArray(row)) return [];
