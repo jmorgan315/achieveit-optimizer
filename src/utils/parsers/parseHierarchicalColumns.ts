@@ -182,6 +182,64 @@ export function parseHierarchicalColumns(
   const structure = sheetClassification.structure || ({} as SheetClassificationStructure);
   const headerRowIndex = structure.header_row_index ?? SHEET_DEFAULT_HEADER_ROW;
   const dataStartRow = structure.data_starts_at_row ?? SHEET_DEFAULT_DATA_ROW;
+
+  // ── DIAGNOSTIC: raw-row-snapshot ─────────────────────────────────────────
+  // Capture the EXACT shape of the parsed row arrays for the configured
+  // header row + first 2 data rows BEFORE any logic touches them. This lets
+  // us settle whether SheetJS reads col D as Tactics or as null+Tactics-at-E
+  // for files with merged cells above the header (the Tulane case).
+  try {
+    const toHexSnapshot = (s: string): string =>
+      Array.from(String(s || ''))
+        .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
+        .join(' ');
+    const snapshotRow = (rowIndex: number) => {
+      const row = sheet.rows?.[rowIndex];
+      if (!Array.isArray(row)) {
+        return { rowIndex, length: 0, present: false, cells: [] as unknown[] };
+      }
+      const cellsToShow = Math.min(16, row.length);
+      const cells = [];
+      for (let i = 0; i < cellsToShow; i++) {
+        const v = row[i];
+        const asString = v == null ? '' : String(v);
+        cells.push({
+          idx: i,
+          raw: v,
+          type: typeof v,
+          isNull: v === null,
+          isUndefined: v === undefined,
+          length: asString.length,
+          hex: toHexSnapshot(asString),
+        });
+      }
+      return { rowIndex, length: row.length, present: true, cells };
+    };
+    const snapshotPayload = {
+      sheetName: sheet?.name,
+      headerRowIndex,
+      dataStartRow,
+      totalRowsInSheet: sheet?.rows?.length ?? 0,
+      totalColumnsInSheet: sheet?.columnCount ?? 0,
+      rows: [
+        snapshotRow(headerRowIndex),
+        snapshotRow(dataStartRow),
+        snapshotRow(dataStartRow + 1),
+      ],
+    };
+    console.log('[ssphase4b] raw-row-snapshot:', JSON.stringify(snapshotPayload));
+    void logParserDiagnostic(
+      sessionId,
+      'parseHierarchicalColumns',
+      'raw-row-snapshot',
+      snapshotPayload,
+      sheet?.name,
+    );
+  } catch (snapErr) {
+    // Diagnostics must never break the parser.
+    // eslint-disable-next-line no-console
+    console.error('[ssphase4b] raw-row-snapshot failed:', snapErr);
+  }
   const hierarchySignal = (structure.hierarchy_signal || 'column_nested') as HierarchySignal;
   const classifierLevels = structure.implied_levels || [];
 
