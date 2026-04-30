@@ -161,6 +161,7 @@ export function SpreadsheetImportStep({
     levels: PlanLevel[];
     sheetNames: string[];
   }> {
+    console.log('[ssphase4b] ENTERED tryDispatchHierarchical, selectedIndices:', args.selectedIndices, 'sheetCount:', args.parsedSheets.length);
     // Fetch layout_classification for this session.
     const { data, error } = await supabase
       .from('processing_sessions')
