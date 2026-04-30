@@ -575,6 +575,9 @@ export default function SessionDetailPage() {
         />
       )}
 
+      {/* Parser Diagnostics (server-side captured [ssphase4b] logs) */}
+      <ParserDiagnosticsCard sessionId={session.id} />
+
       {/* Spreadsheet Import Details */}
       {session.extraction_method === 'spreadsheet' && session.step_results && (() => {
         const sr = session.step_results as Record<string, any>;
