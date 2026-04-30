@@ -14,6 +14,7 @@ import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import type { Json } from '@/integrations/supabase/types';
 import { ResultsPreviewTree } from '@/components/admin/ResultsPreviewTree';
+import { ParserDiagnosticsCard } from '@/components/admin/ParserDiagnosticsCard';
 
 import { useModelRates, type ModelRates } from '@/hooks/useModelRates';
 
@@ -573,6 +574,9 @@ export default function SessionDetailPage() {
           rates={modelRates}
         />
       )}
+
+      {/* Parser Diagnostics (server-side captured [ssphase4b] logs) */}
+      <ParserDiagnosticsCard sessionId={session.id} />
 
       {/* Spreadsheet Import Details */}
       {session.extraction_method === 'spreadsheet' && session.step_results && (() => {

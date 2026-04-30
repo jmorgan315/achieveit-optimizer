@@ -23,6 +23,7 @@ import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface } from '@/components/spreadsheet/MappingInterface';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
 type Phase = 'parsing' | 'detection' | 'mapping' | 'generating';
 
@@ -118,6 +119,12 @@ export function SpreadsheetImportStep({
         }
 
         console.log('[ssphase4b] useEffect post-detect: preselectedSheetIndices=', preselectedSheetIndices, 'validPreselected=', validPreselected, 'sheetCount=', det.sheets.length);
+        void logParserDiagnostic(sessionId, 'dispatcher', 'useEffect-post-detect', {
+          preselectedSheetIndices: preselectedSheetIndices ?? null,
+          validPreselected: validPreselected ?? null,
+          sheetCount: det.sheets.length,
+          sheetNames: sheets.map(s => s.name),
+        });
         // === Phase 4b.1 dispatch ===
         // If picker pre-selected sheets AND every selected sheet routes to the
         // hierarchical parser, run it end-to-end and skip the mapping screen.
@@ -163,6 +170,10 @@ export function SpreadsheetImportStep({
     sheetNames: string[];
   }> {
     console.log('[ssphase4b] ENTERED tryDispatchHierarchical, selectedIndices:', args.selectedIndices, 'sheetCount:', args.parsedSheets.length);
+    void logParserDiagnostic(args.sessionId, 'dispatcher', 'entry', {
+      selectedIndices: args.selectedIndices,
+      sheetCount: args.parsedSheets.length,
+    });
     // Fetch layout_classification for this session.
     const { data, error } = await supabase
       .from('processing_sessions')
@@ -172,12 +183,22 @@ export function SpreadsheetImportStep({
 
     if (error || !data?.layout_classification) {
       console.log('[ssphase4b] dispatch: no layout_classification → fallback');
+      void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
+        outcome: 'fallback',
+        reason: 'no layout_classification',
+        error: error?.message ?? null,
+      });
       return null;
     }
 
     const cls = data.layout_classification as unknown as LayoutClassification;
     if (cls.error || !cls.sheets || cls.sheets.length === 0) {
       console.log('[ssphase4b] dispatch: layout_classification empty/error → fallback');
+      void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
+        outcome: 'fallback',
+        reason: 'layout_classification empty/error',
+        clsError: cls.error ?? null,
+      });
       return null;
     }
 
@@ -194,16 +215,15 @@ export function SpreadsheetImportStep({
       const sheet = args.parsedSheets[idx];
       const cls = clsBySheetName.get(sheet.name);
       const decision = decideDispatch(cls);
-      console.log(
-        '[ssphase4b] route:',
-        JSON.stringify({
-          sheet: sheet.name,
-          pattern: cls?.pattern ?? 'unknown',
-          confidence: cls?.confidence ?? null,
-          dispatchedTo: decision.kind === 'hierarchical' ? 'parseHierarchicalColumns' : 'detectGenericPattern',
-          reason: decision.kind === 'generic' ? decision.reason : (decision.lowConfidence ? 'low-confidence' : 'ok'),
-        }),
-      );
+      const routePayload = {
+        sheet: sheet.name,
+        pattern: cls?.pattern ?? 'unknown',
+        confidence: cls?.confidence ?? null,
+        dispatchedTo: decision.kind === 'hierarchical' ? 'parseHierarchicalColumns' : 'detectGenericPattern',
+        reason: decision.kind === 'generic' ? decision.reason : (decision.lowConfidence ? 'low-confidence' : 'ok'),
+      };
+      console.log('[ssphase4b] route:', JSON.stringify(routePayload));
+      void logParserDiagnostic(args.sessionId, 'dispatcher', 'route', routePayload, sheet.name);
       return { sheet, cls, decision };
     });
 
@@ -211,6 +231,11 @@ export function SpreadsheetImportStep({
     const allHierarchical = selected.every(s => s.decision.kind === 'hierarchical');
     if (!allHierarchical) {
       console.log('[ssphase4b] dispatch: mixed routing → falling back to existing mapping flow');
+      void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
+        outcome: 'fallback',
+        reason: 'mixed routing',
+        perSheet: selected.map(s => ({ sheet: s.sheet.name, kind: s.decision.kind })),
+      });
       return null;
     }
 
@@ -225,7 +250,7 @@ export function SpreadsheetImportStep({
       if (s.decision.lowConfidence) {
         console.warn('[ssphase4b] low-confidence dispatch:', s.sheet.name, 'pattern=', s.cls.pattern, 'confidence=', s.cls.confidence);
       }
-      const result = parseHierarchicalColumns(s.sheet, s.cls, undefined);
+      const result = parseHierarchicalColumns(s.sheet, s.cls, undefined, args.sessionId);
       // Collect canonical level name ordering across sheets (first wins).
       result.resolvedLevels.forEach(name => {
         if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);

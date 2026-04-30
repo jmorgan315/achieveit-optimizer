@@ -19,6 +19,7 @@
 
 import { PlanItem, PersonMapping } from '@/types/plan';
 import { ParsedSheet, ColumnRole, getDefaultColumnRole, parseSpreadsheetDate } from '@/utils/spreadsheet-parser';
+import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
 export type HierarchySignal =
   | 'section_headers'
@@ -174,8 +175,10 @@ export function parseHierarchicalColumns(
   sheet: ParsedSheet,
   sheetClassification: SheetClassification,
   userLevels?: string[],
+  sessionId?: string | null,
 ): ParseHierarchicalResult {
   console.log('[ssphase4b] ENTERED parseHierarchicalColumns for sheet:', sheet?.name);
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'entry', { sheetName: sheet?.name }, sheet?.name);
   const structure = sheetClassification.structure || ({} as SheetClassificationStructure);
   const headerRowIndex = structure.header_row_index ?? SHEET_DEFAULT_HEADER_ROW;
   const dataStartRow = structure.data_starts_at_row ?? SHEET_DEFAULT_DATA_ROW;
@@ -192,23 +195,29 @@ export function parseHierarchicalColumns(
     totalColumns,
   );
 
-  console.log(
-    '[ssphase4b] resolve-levels:',
-    JSON.stringify({
-      sheet: sheet.name,
-      provided: userLevels && userLevels.length > 0 ? userLevels : classifierLevels,
-      source: userLevels && userLevels.length > 0 ? 'user' : 'classifier',
-      resolvedLevels: resolution.resolvedLevels,
-      resolvedColumnIndices: resolution.resolvedColumnIndices,
-      unresolved: resolution.unresolvedLevels,
-    }),
-  );
+  const resolveLevelsPayload = {
+    sheet: sheet.name,
+    provided: userLevels && userLevels.length > 0 ? userLevels : classifierLevels,
+    source: userLevels && userLevels.length > 0 ? 'user' : 'classifier',
+    resolvedLevels: resolution.resolvedLevels,
+    resolvedColumnIndices: resolution.resolvedColumnIndices,
+    unresolved: resolution.unresolvedLevels,
+  };
+  console.log('[ssphase4b] resolve-levels:', JSON.stringify(resolveLevelsPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'resolve-levels', resolveLevelsPayload, sheet.name);
 
   // If we couldn't resolve any hierarchy column, return empty + unresolved
   // signal so the caller can prompt the user (4b.2) or fall back.
   const usableHierarchy = resolution.resolvedColumnIndices.filter(i => i >= 0);
   if (usableHierarchy.length === 0) {
     console.log('[ssphase4b] hierarchy: levels=[] resolved=[] unresolved=', resolution.unresolvedLevels);
+    void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'hierarchy', {
+      sheet: sheet.name,
+      levels: [],
+      resolved: [],
+      unresolved: resolution.unresolvedLevels,
+      bailedEarly: true,
+    }, sheet.name);
     return {
       items: [],
       personMappings: [],
@@ -276,19 +285,18 @@ export function parseHierarchicalColumns(
       .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
       .join(' ');
 
-  console.log(
-    '[ssphase4b] row-scan start:',
-    JSON.stringify({
-      sheet: sheet.name,
-      pattern: sheetClassification.pattern,
-      hierarchySignal,
-      dataStartRow,
-      totalRows: sheet.rows.length,
-      rowsToScan: Math.max(0, sheet.rows.length - dataStartRow),
-      resolvedColumnIndices: resolution.resolvedColumnIndices,
-      resolvedLevels: resolution.resolvedLevels,
-    }),
-  );
+  const rowScanStartPayload = {
+    sheet: sheet.name,
+    pattern: sheetClassification.pattern,
+    hierarchySignal,
+    dataStartRow,
+    totalRows: sheet.rows.length,
+    rowsToScan: Math.max(0, sheet.rows.length - dataStartRow),
+    resolvedColumnIndices: resolution.resolvedColumnIndices,
+    resolvedLevels: resolution.resolvedLevels,
+  };
+  console.log('[ssphase4b] row-scan start:', JSON.stringify(rowScanStartPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'row-scan-start', rowScanStartPayload, sheet.name);
 
   for (let r = dataStartRow; r < sheet.rows.length; r++) {
     const row = sheet.rows[r];
@@ -443,47 +451,45 @@ export function parseHierarchicalColumns(
   const parentsCreated = parentByKey.size;
   const leafItems = items.length - parentsCreated;
 
-  // ── DIAGNOSTIC (temporary) ──────────────────────────────────────────────
-  console.log(
-    '[ssphase4b] row-scan summary:',
-    JSON.stringify({
-      sheet: sheet.name,
-      rowsScanned: diagRowsScanned,
-      rowsAllEmpty: diagRowsAllEmpty,
-      rowsSkippedNoLeaf: diagRowsSkippedNoLeaf,
-      rowsParsed: diagRowsParsed,
-    }),
-  );
-  console.log(
-    '[ssphase4b] row-scan skipped-samples:',
-    JSON.stringify({ sheet: sheet.name, samples: diagSkippedSamples }),
-  );
-  console.log(
-    '[ssphase4b] root-summary:',
-    JSON.stringify({
-      sheet: sheet.name,
-      roots: Array.from(diagPerRoot.entries()).map(([root, s]) => ({ root, ...s })),
-    }),
-  );
-  console.log(
-    '[ssphase4b] parsed:',
-    JSON.stringify({
-      sheet: sheet.name,
-      pattern: sheetClassification.pattern,
-      items: items.length,
-      leaves: leafItems,
-      parentsCreated,
-    }),
-  );
-  console.log(
-    '[ssphase4b] hierarchy:',
-    JSON.stringify({
-      sheet: sheet.name,
-      levels: resolution.resolvedLevels,
-      resolved: resolution.resolvedColumnIndices,
-      unresolved: resolution.unresolvedLevels,
-    }),
-  );
+  const rowScanSummaryPayload = {
+    sheet: sheet.name,
+    rowsScanned: diagRowsScanned,
+    rowsAllEmpty: diagRowsAllEmpty,
+    rowsSkippedNoLeaf: diagRowsSkippedNoLeaf,
+    rowsParsed: diagRowsParsed,
+  };
+  console.log('[ssphase4b] row-scan summary:', JSON.stringify(rowScanSummaryPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'row-scan-summary', rowScanSummaryPayload, sheet.name);
+
+  const skippedSamplesPayload = { sheet: sheet.name, samples: diagSkippedSamples };
+  console.log('[ssphase4b] row-scan skipped-samples:', JSON.stringify(skippedSamplesPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'skipped-samples', skippedSamplesPayload, sheet.name);
+
+  const rootSummaryPayload = {
+    sheet: sheet.name,
+    roots: Array.from(diagPerRoot.entries()).map(([root, s]) => ({ root, ...s })),
+  };
+  console.log('[ssphase4b] root-summary:', JSON.stringify(rootSummaryPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'root-summary', rootSummaryPayload, sheet.name);
+
+  const parsedPayload = {
+    sheet: sheet.name,
+    pattern: sheetClassification.pattern,
+    items: items.length,
+    leaves: leafItems,
+    parentsCreated,
+  };
+  console.log('[ssphase4b] parsed:', JSON.stringify(parsedPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'parsed', parsedPayload, sheet.name);
+
+  const hierarchyPayload = {
+    sheet: sheet.name,
+    levels: resolution.resolvedLevels,
+    resolved: resolution.resolvedColumnIndices,
+    unresolved: resolution.unresolvedLevels,
+  };
+  console.log('[ssphase4b] hierarchy:', JSON.stringify(hierarchyPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'hierarchy', hierarchyPayload, sheet.name);
 
   const personMappings: PersonMapping[] = Array.from(personNames).map((name, i) => ({
     id: String(i + 1),
