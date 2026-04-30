@@ -118,6 +118,44 @@ export type Database = {
         }
         Relationships: []
       }
+      parser_diagnostics: {
+        Row: {
+          created_at: string
+          id: string
+          log_type: string
+          parser_name: string
+          payload: Json
+          session_id: string
+          sheet_name: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          log_type: string
+          parser_name: string
+          payload: Json
+          session_id: string
+          sheet_name?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          log_type?: string
+          parser_name?: string
+          payload?: Json
+          session_id?: string
+          sheet_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "parser_diagnostics_session_id_fkey"
+            columns: ["session_id"]
+            isOneToOne: false
+            referencedRelation: "processing_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       processing_sessions: {
         Row: {
           classification_result: Json | null
