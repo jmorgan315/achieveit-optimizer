@@ -125,7 +125,7 @@ const layoutToolSchema = {
       },
     },
   },
-  required: ["workbook_summary", "sheets"],
+  required: ["workbook_summary", "parser_directives", "sheets"],
 };
 
 function truncatePreview(sheets: SheetPreview[]): SheetPreview[] {
