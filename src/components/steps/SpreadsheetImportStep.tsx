@@ -27,13 +27,14 @@ interface SpreadsheetImportStepProps {
   sessionId: string;
   orgName?: string;
   documentHints?: string;
+  preselectedSheetIndices?: number[];
   onComplete: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
 }
 
 const PREVIEW_MAX_ROWS = 30;
 const PREVIEW_MAX_COLS = 12;
 
-export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints, onComplete }: SpreadsheetImportStepProps) {
+export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints, preselectedSheetIndices, onComplete }: SpreadsheetImportStepProps) {
   const [phase, setPhase] = useState<Phase>('parsing');
   const [detection, setDetection] = useState<StructureDetection | null>(null);
   const [selectedSheetIndices, setSelectedSheetIndices] = useState<number[]>([]);
@@ -71,8 +72,13 @@ export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints,
         }
 
         // Default sheet selection
-        const defaultIndices = getDefaultSheetSelection(det.sheets);
-        setSelectedSheetIndices(defaultIndices);
+        // Honor preselected indices from SheetPickerStep when provided.
+        const validPreselected = preselectedSheetIndices?.filter(i => i >= 0 && i < det.sheets.length);
+        const initialIndices =
+          validPreselected && validPreselected.length > 0
+            ? validPreselected
+            : getDefaultSheetSelection(det.sheets);
+        setSelectedSheetIndices(initialIndices);
 
         // Set levels based on pattern
         if (det.hasStrategyPattern) {
@@ -80,7 +86,7 @@ export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints,
         }
 
         // Set default column mappings from first selected sheet
-        const firstIdx = defaultIndices[0] ?? 0;
+        const firstIdx = initialIndices[0] ?? 0;
         const recSheet = det.sheets[firstIdx];
         if (recSheet) {
           const defaults: Record<string, ColumnRole> = {};
@@ -98,7 +104,8 @@ export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints,
           }
         }
 
-        setPhase('detection');
+        // If user already picked sheets in SheetPickerStep, jump past detection.
+        setPhase(validPreselected && validPreselected.length > 0 ? 'mapping' : 'detection');
       } catch (err) {
         console.error('Spreadsheet parse error:', err);
         setPhase('detection');

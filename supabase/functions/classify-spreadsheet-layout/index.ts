@@ -51,8 +51,19 @@ unknown — genuinely ambiguous; explain why.
 === WORKBOOK SUMMARY ===
 
 - primary_pattern: the dominant pattern across plan-content sheets, or "mixed".
-- needs_user_clarification: true when the workbook has multiple time-versioned sheets (Jan / Feb / Mar, FY24 / FY25), duplicate "draft" vs "final" sheets, or many similar sheets where the user must choose which to import.
+- needs_user_clarification: true when the workbook has multiple time-versioned sheets (Jan / Feb / Mar, FY24 / FY25), scope variations, or many similar sheets where the user must choose which to import.
 - clarification_reason: short human-readable reason when needs_user_clarification is true.
+- clarification_type: one of "time_versioning" | "scope_variation" | "ambiguous_pattern" | "mixed_patterns" | "other". Set ONLY when needs_user_clarification is true. Use "mixed_patterns" when sheets have genuinely different structural patterns. Use "time_versioning" for date/period-based duplicates. Use "scope_variation" for similar sheets covering different scopes (departments, regions). Use "ambiguous_pattern" when individual sheets are themselves hard to classify. Otherwise "other".
+
+=== PARSER DIRECTIVES ===
+
+parser_directives describes ONLY what the user told us in their notes (documentHints). It is NOT derived from sheet structure — that is what per-sheet "pattern" is for. If documentHints is empty or contains no exclusion/scope language, ALL fields are empty/false.
+
+A sheet structurally classified as "not_plan_content" does NOT belong in exclude_sheets — that's already conveyed by its pattern. Only put a sheet in exclude_sheets if the user's notes explicitly say to skip it (e.g., "ignore the budget tab", "skip last year's data").
+
+- exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Empty by default.
+- exclude_row_predicates: string[] — human-readable row filters from the user's notes (e.g., "rows where status = Archived"). Empty by default.
+- include_only_recent: boolean — true ONLY when the user explicitly asks for the latest/most-recent version ("just the latest", "current year only"). False by default. The classifier may still flag time-versioning structurally via clarification_type without setting this.
 
 Be precise. Respond ONLY via the report_layout tool.`;
 
@@ -65,8 +76,23 @@ const layoutToolSchema = {
         primary_pattern: { type: "string", enum: ["A", "B", "C", "D", "mixed"] },
         needs_user_clarification: { type: "boolean" },
         clarification_reason: { type: "string" },
+        clarification_type: {
+          type: ["string", "null"],
+          enum: ["time_versioning", "scope_variation", "ambiguous_pattern", "mixed_patterns", "other", null],
+          description: "Set only when needs_user_clarification is true; null otherwise.",
+        },
       },
       required: ["primary_pattern", "needs_user_clarification"],
+    },
+    parser_directives: {
+      type: "object",
+      description: "Derived strictly from documentHints. Empty/false when no hints provided.",
+      properties: {
+        exclude_sheets: { type: "array", items: { type: "string" } },
+        exclude_row_predicates: { type: "array", items: { type: "string" } },
+        include_only_recent: { type: "boolean" },
+      },
+      required: ["exclude_sheets", "exclude_row_predicates", "include_only_recent"],
     },
     sheets: {
       type: "array",
@@ -99,7 +125,7 @@ const layoutToolSchema = {
       },
     },
   },
-  required: ["workbook_summary", "sheets"],
+  required: ["workbook_summary", "parser_directives", "sheets"],
 };
 
 function truncatePreview(sheets: SheetPreview[]): SheetPreview[] {
@@ -229,6 +255,7 @@ serve(async (req) => {
 
     const allSheets: any[] = [];
     const summaries: any[] = [];
+    const directivesList: any[] = [];
     let totalIn = 0;
     let totalOut = 0;
     let totalDuration = 0;
@@ -259,6 +286,7 @@ serve(async (req) => {
       if (result.ok && result.data) {
         if (Array.isArray(result.data.sheets)) allSheets.push(...result.data.sheets);
         if (result.data.workbook_summary) summaries.push(result.data.workbook_summary);
+        if (result.data.parser_directives) directivesList.push(result.data.parser_directives);
       } else {
         // Stub failed sheets so the user sees something
         for (const s of chunks[i]) {
@@ -287,11 +315,43 @@ serve(async (req) => {
     const needsClar = summaries.some(s => s.needs_user_clarification === true);
     const clarReason = summaries.find(s => s.clarification_reason)?.clarification_reason;
 
+    // Merge clarification_type: pick first non-null; if multiple chunks disagree → "mixed_patterns".
+    const clarTypes = summaries
+      .map(s => s.clarification_type)
+      .filter((t: unknown): t is string => typeof t === "string" && t.length > 0);
+    const uniqueClarTypes = [...new Set(clarTypes)];
+    let clarType: string | null = null;
+    if (needsClar) {
+      if (uniqueClarTypes.length === 0) clarType = "other";
+      else if (uniqueClarTypes.length === 1) clarType = uniqueClarTypes[0];
+      else clarType = "mixed_patterns";
+    }
+
+    // Merge parser_directives across chunks (union of arrays, OR of booleans).
+    const excludeSheetsSet = new Set<string>();
+    const excludePredsSet = new Set<string>();
+    let includeOnlyRecent = false;
+    for (const d of directivesList) {
+      if (Array.isArray(d.exclude_sheets)) {
+        for (const s of d.exclude_sheets) if (typeof s === "string" && s.trim()) excludeSheetsSet.add(s.trim());
+      }
+      if (Array.isArray(d.exclude_row_predicates)) {
+        for (const p of d.exclude_row_predicates) if (typeof p === "string" && p.trim()) excludePredsSet.add(p.trim());
+      }
+      if (d.include_only_recent === true) includeOnlyRecent = true;
+    }
+
     const merged = {
       workbook_summary: {
         primary_pattern: summaries.length === 1 ? summaries[0].primary_pattern : primary,
         needs_user_clarification: needsClar,
         ...(clarReason ? { clarification_reason: clarReason } : {}),
+        ...(clarType ? { clarification_type: clarType } : {}),
+      },
+      parser_directives: {
+        exclude_sheets: [...excludeSheetsSet],
+        exclude_row_predicates: [...excludePredsSet],
+        include_only_recent: includeOnlyRecent,
       },
       sheets: allSheets,
       model: MODEL,
