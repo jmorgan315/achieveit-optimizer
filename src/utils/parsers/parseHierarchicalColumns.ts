@@ -19,6 +19,7 @@
 
 import { PlanItem, PersonMapping } from '@/types/plan';
 import { ParsedSheet, ColumnRole, getDefaultColumnRole, parseSpreadsheetDate } from '@/utils/spreadsheet-parser';
+import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
 export type HierarchySignal =
   | 'section_headers'
