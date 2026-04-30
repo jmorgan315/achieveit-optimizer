@@ -195,17 +195,16 @@ export function parseHierarchicalColumns(
     totalColumns,
   );
 
-  console.log(
-    '[ssphase4b] resolve-levels:',
-    JSON.stringify({
-      sheet: sheet.name,
-      provided: userLevels && userLevels.length > 0 ? userLevels : classifierLevels,
-      source: userLevels && userLevels.length > 0 ? 'user' : 'classifier',
-      resolvedLevels: resolution.resolvedLevels,
-      resolvedColumnIndices: resolution.resolvedColumnIndices,
-      unresolved: resolution.unresolvedLevels,
-    }),
-  );
+  const resolveLevelsPayload = {
+    sheet: sheet.name,
+    provided: userLevels && userLevels.length > 0 ? userLevels : classifierLevels,
+    source: userLevels && userLevels.length > 0 ? 'user' : 'classifier',
+    resolvedLevels: resolution.resolvedLevels,
+    resolvedColumnIndices: resolution.resolvedColumnIndices,
+    unresolved: resolution.unresolvedLevels,
+  };
+  console.log('[ssphase4b] resolve-levels:', JSON.stringify(resolveLevelsPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'resolve-levels', resolveLevelsPayload, sheet.name);
 
   // If we couldn't resolve any hierarchy column, return empty + unresolved
   // signal so the caller can prompt the user (4b.2) or fall back.
