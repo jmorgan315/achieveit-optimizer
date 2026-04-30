@@ -1,55 +1,43 @@
-## Phase 4a polish: picker timeout + classifier dedupe
+## Phase 4a polish: collapse picker + detection-screen duplication
 
-Two small fixes off the Test 3 (Astera) and Test 2 (DRAFT) findings. Picker producer/consumer wiring stays as-is.
+Picker becomes the canonical sheet-selection screen. The importer already skips its detection phase when the picker passes pre-selected indices, so the existing `DetectionSummary` UI stays in place as graceful-degradation fallback for the no-classifier path.
 
-### Fix 1 — Picker polling timeout: 60s → 120s
+### Change 1 — Enrich the picker with parser-side metadata
 
-**Why:** Astera (20 sheets, 4 chunks) finished classification at 66s, just past the picker's 60s timeout. JSON populated correctly in `processing_sessions.layout_classification`, but the picker had already fallen through to "AI analysis unavailable". Bumping to 120s gives ~2x headroom over the worst case in our sample.
+`src/components/steps/SheetPickerStep.tsx`: run `detectStructure` over the locally-parsed `ParsedSheet[]` (already produced by the existing `parseSpreadsheetFile` call). Memoize per-sheet `SheetDetection` keyed by sheet name. Render the new info **only on plan-content rows** (patterns A/B/C/D and `unknown`):
 
-**Change:** `src/components/steps/SheetPickerStep.tsx` line 25
-```
-const POLL_TIMEOUT_MS = 60_000;
-```
-→
-```
-const POLL_TIMEOUT_MS = 120_000;
-```
+- **Item-count estimate** — `sd.totalDataRows` shown as `~N items` next to the existing `{confidence}%` line.
+- **Detected sections** — first ~8 unique non-empty `sd.sections[].headerText` as `secondary` badges under the reasoning line; `+N more` overflow badge when applicable.
+- **Detected columns** — `sd.allColumnHeaders` as `outline` badges in a second row.
+- **Merge note** — single muted helper line (matching today's wording: *"Items duplicated across sheets will be merged automatically."*) shown once when ≥2 plan-content sheets are checked.
 
-Polling cadence (1.5s) and fallback UI unchanged. The "Analyzing workbook structure…" state is already shown for the full duration, so the longer timeout just means users on large workbooks wait a bit longer before the fallback kicks in — which is exactly what we want.
+Non-plan rows (`not_plan_content`, `empty`) keep current minimal display — no badges, no item count — to avoid steering noise.
 
-### Fix 2 — Canonicalize `exclude_sheets` at the classifier prompt (cleaner fix)
+The detection call is wrapped in try/catch so any parser hiccup degrades silently to today's picker rendering.
 
-**Why:** Test 2 surfaced both "Use of Funds" and "use of funds" as separate bullets in the suggestions panel because the model echoed the user's note phrasing alongside the canonical sheet name. Fixing at the source keeps downstream data clean (admin panel, future consumers, audits).
+### Change 2 — Importer skip behavior (no code change needed)
 
-**Change:** `supabase/functions/classify-spreadsheet-layout/index.ts`, in the `PARSER DIRECTIVES` section of `PATTERN_GUIDE` (line 64), tighten the `exclude_sheets` description:
+`src/components/steps/SpreadsheetImportStep.tsx` already routes:
 
-Replace:
-```
-- exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Empty by default.
-```
-with:
-```
-- exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Each entry MUST be the exact canonical sheet name as it appears in the workbook (matching one of the sheetName values in the input). Do NOT include the user's phrasing, paraphrases, or case variants. If the user's note refers to a sheet by an approximate name, resolve it to the single canonical sheet name. Deduplicate. Empty by default.
-```
+- `preselectedSheetIndices` non-empty → jump straight to `'mapping'` phase
+- otherwise → `'detection'` phase (the `DetectionSummary` UI)
 
-No schema change, no code change beyond the prompt string. Edge function redeploys automatically.
-
-### Out of scope
-
-- Producer/consumer wiring (already shipped, working in Tests 1–3 modulo the timeout).
-- Picker UI redesign (4d), Pattern D dead-end (4e), parsers (4b/4c) — still deferred.
-- Client-side dedupe fallback — skipping per your vote for the cleaner fix. If a future test still shows dupes, we can layer a `toLowerCase()` Set dedupe in `SheetPickerStep` as belt-and-suspenders.
-
-### Validation after deploy
-
-Re-run the Astera upload (20 sheets, ~66s classifier). Expect:
-1. Picker stays in "Analyzing workbook structure…" through the ~66s window, then transitions to the success view — no fallback banner.
-2. Sheets render grouped by pattern, plan-content sheets pre-checked.
-3. **Scope-variation banner check:** since Astera's classifier output had `needs_user_clarification: true` with `clarification_type: "scope_variation"`, the picker should now render the clarification `<Alert>` at the top with title "Scope variations" and the `clarification_reason` as the body. (Code path already exists at `SheetPickerStep.tsx:268-279` — this test just confirms it fires end-to-end for the first time.)
-
-Re-run the DRAFT upload. Expect the suggestions panel to show `Use of Funds` exactly once under "Sheets you asked to skip" — no case-variant duplicate.
+Since the picker now always passes indices when classifier output is present, the detection screen is already only reached on the fallback path (classifier failed/timed out, or user picked all). Confirming in the plan rather than touching the file.
 
 ### Files touched
 
-- `src/components/steps/SheetPickerStep.tsx` — one-line constant bump.
-- `supabase/functions/classify-spreadsheet-layout/index.ts` — prompt tightening for `exclude_sheets`.
+- `src/components/steps/SheetPickerStep.tsx` — import `detectStructure`, memoize per-sheet detection, render item-count + section/column badges + merge note inside the existing classified-sheet rows.
+
+### Out of scope (still deferred)
+
+- `DetectionSummary.tsx` removal — kept as fallback, unchanged.
+- 4b parsers, 4d picker redesign, 4e Pattern D dead-end.
+
+### Validation
+
+Re-run Astera (20 sheets) and DRAFT:
+
+1. Picker renders per-sheet `~N items`, section badges, and column badges on plan-content sheets.
+2. Merge note appears once ≥2 plan sheets are checked, disappears at ≤1.
+3. Continuing into the importer goes straight to **mapping** — no second sheet-list screen.
+4. Force-fail classifier path (timeout/error) still routes through `DetectionSummary` unchanged.

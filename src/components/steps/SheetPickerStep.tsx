@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { parseSpreadsheetFile, ParsedSheet } from '@/utils/spreadsheet-parser';
+import { parseSpreadsheetFile, detectStructure, ParsedSheet, SheetDetection } from '@/utils/spreadsheet-parser';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -162,6 +162,20 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
     return map;
   }, [sheets]);
 
+  // Per-sheet structure detection (item counts, sections, columns) for plan-content rows.
+  // Wrapped in try/catch so a parser hiccup degrades silently to the lean view.
+  const detectionByName = useMemo(() => {
+    const map = new Map<string, SheetDetection>();
+    if (!sheets) return map;
+    try {
+      const det = detectStructure(sheets);
+      det.sheets.forEach(sd => map.set(sd.sheet.name, sd));
+    } catch (e) {
+      console.warn('[SheetPicker] detectStructure failed, falling back to lean view:', e);
+    }
+    return map;
+  }, [sheets]);
+
   // Pre-select plan-content sheets once both parse + classify resolve.
   useEffect(() => {
     if (initSelectedFromClassifier.current) return;
@@ -207,6 +221,20 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
     ((directives.exclude_sheets && directives.exclude_sheets.length > 0) ||
       (directives.exclude_row_predicates && directives.exclude_row_predicates.length > 0) ||
       directives.include_only_recent === true);
+
+  // Count selected sheets that fall under plan-content patterns (A/B/C/D/unknown).
+  // Drives the "duplicates will be merged" helper.
+  const selectedPlanSheetCount = useMemo(() => {
+    if (!classification?.sheets) return 0;
+    let n = 0;
+    for (const s of classification.sheets) {
+      const idx = sheetIndexByName.get(s.sheet_name);
+      if (idx == null) continue;
+      const isPlan = PLAN_PATTERNS.includes(s.pattern) || s.pattern === 'unknown';
+      if (isPlan && selected.has(idx)) n += 1;
+    }
+    return n;
+  }, [classification, sheetIndexByName, selected]);
 
   // ---- Render ----
 
@@ -384,9 +412,16 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
 
           {classification?.sheets ? (
             <div className="space-y-4">
+              {selectedPlanSheetCount >= 2 && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Info className="h-3 w-3" />
+                  Items duplicated across sheets will be merged automatically.
+                </p>
+              )}
               {PATTERN_GROUP_ORDER.map(pattern => {
                 const items = grouped.get(pattern);
                 if (!items || items.length === 0) return null;
+                const isPlanGroup = PLAN_PATTERNS.includes(pattern) || pattern === 'unknown';
                 return (
                   <div key={pattern} className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -402,6 +437,17 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
                         const idx = sheetIndexByName.get(s.sheet_name);
                         if (idx == null) return null;
                         const isChecked = selected.has(idx);
+                        const sd = isPlanGroup ? detectionByName.get(s.sheet_name) : undefined;
+                        const sectionHeaders = sd
+                          ? Array.from(
+                              new Set(
+                                sd.sections
+                                  .map(sec => sec.headerText)
+                                  .filter((h): h is string => !!h && h.trim().length > 0),
+                              ),
+                            )
+                          : [];
+                        const columnHeaders = sd?.allColumnHeaders ?? [];
                         return (
                           <label
                             key={`${pattern}-${s.sheet_name}`}
@@ -415,15 +461,55 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="font-medium truncate">{s.sheet_name}</div>
-                                {typeof s.confidence === 'number' && (
-                                  <span className="text-xs text-muted-foreground shrink-0">
-                                    {Math.round(s.confidence)}% confidence
-                                  </span>
-                                )}
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {sd && (
+                                    <span className="text-xs text-muted-foreground">
+                                      ~{sd.totalDataRows} item{sd.totalDataRows === 1 ? '' : 's'}
+                                    </span>
+                                  )}
+                                  {typeof s.confidence === 'number' && (
+                                    <span className="text-xs text-muted-foreground">
+                                      {Math.round(s.confidence)}% confidence
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               {s.reasoning && (
                                 <div className="text-xs text-muted-foreground mt-0.5">
                                   {s.reasoning}
+                                </div>
+                              )}
+                              {sectionHeaders.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                                    Detected sections
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {sectionHeaders.slice(0, 8).map((h, i) => (
+                                      <Badge key={`sec-${i}`} variant="secondary" className="text-xs">
+                                        {h}
+                                      </Badge>
+                                    ))}
+                                    {sectionHeaders.length > 8 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        +{sectionHeaders.length - 8} more
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              {columnHeaders.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                                    Detected columns
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {columnHeaders.map((h, i) => (
+                                      <Badge key={`col-${i}`} variant="outline" className="text-xs">
+                                        {h}
+                                      </Badge>
+                                    ))}
+                                  </div>
                                 </div>
                               )}
                             </div>
