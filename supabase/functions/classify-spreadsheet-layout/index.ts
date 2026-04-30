@@ -51,8 +51,19 @@ unknown — genuinely ambiguous; explain why.
 === WORKBOOK SUMMARY ===
 
 - primary_pattern: the dominant pattern across plan-content sheets, or "mixed".
-- needs_user_clarification: true when the workbook has multiple time-versioned sheets (Jan / Feb / Mar, FY24 / FY25), duplicate "draft" vs "final" sheets, or many similar sheets where the user must choose which to import.
+- needs_user_clarification: true when the workbook has multiple time-versioned sheets (Jan / Feb / Mar, FY24 / FY25), scope variations, or many similar sheets where the user must choose which to import.
 - clarification_reason: short human-readable reason when needs_user_clarification is true.
+- clarification_type: one of "time_versioning" | "scope_variation" | "ambiguous_pattern" | "mixed_patterns" | "other". Set ONLY when needs_user_clarification is true. Use "mixed_patterns" when sheets have genuinely different structural patterns. Use "time_versioning" for date/period-based duplicates. Use "scope_variation" for similar sheets covering different scopes (departments, regions). Use "ambiguous_pattern" when individual sheets are themselves hard to classify. Otherwise "other".
+
+=== PARSER DIRECTIVES ===
+
+parser_directives describes ONLY what the user told us in their notes (documentHints). It is NOT derived from sheet structure — that is what per-sheet "pattern" is for. If documentHints is empty or contains no exclusion/scope language, ALL fields are empty/false.
+
+A sheet structurally classified as "not_plan_content" does NOT belong in exclude_sheets — that's already conveyed by its pattern. Only put a sheet in exclude_sheets if the user's notes explicitly say to skip it (e.g., "ignore the budget tab", "skip last year's data").
+
+- exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Empty by default.
+- exclude_row_predicates: string[] — human-readable row filters from the user's notes (e.g., "rows where status = Archived"). Empty by default.
+- include_only_recent: boolean — true ONLY when the user explicitly asks for the latest/most-recent version ("just the latest", "current year only"). False by default. The classifier may still flag time-versioning structurally via clarification_type without setting this.
 
 Be precise. Respond ONLY via the report_layout tool.`;
 
