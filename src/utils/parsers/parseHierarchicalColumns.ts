@@ -59,6 +59,15 @@ function normalize(s: string): string {
   return String(s || '').trim().toLowerCase();
 }
 
+/**
+ * Whitespace-only normalization for parent-dedupe comparisons.
+ * Trims leading/trailing whitespace AND collapses internal whitespace runs to
+ * a single space. Does NOT change case or strip punctuation — purely cosmetic.
+ */
+function normalizeWhitespace(s: string): string {
+  return String(s || '').trim().replace(/\s+/g, ' ');
+}
+
 function readHeaderRow(sheet: ParsedSheet, headerRowIndex: number): string[] {
   const row = sheet.rows[headerRowIndex];
   if (!Array.isArray(row)) return [];
@@ -302,7 +311,11 @@ export function parseHierarchicalColumns(
       }
 
       const isLeaf = d === leafDepthIdx;
-      const pathKey = filled.slice(0, d + 1).map(normalize).join(' > ');
+      // Whitespace-collapse + lowercase for dedupe only; storage keeps original `value`.
+      const pathKey = filled
+        .slice(0, d + 1)
+        .map(v => normalizeWhitespace(v).toLowerCase())
+        .join(' > ');
       const dedupeKey = `${d}|${pathKey}`;
 
       // Leaves are ALWAYS unique (each data row is its own leaf, even if name repeats).
