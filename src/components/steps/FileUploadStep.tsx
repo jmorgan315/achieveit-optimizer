@@ -17,6 +17,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 
 import { OrgProfile } from '@/types/plan';
 import { SpreadsheetImportStep } from './SpreadsheetImportStep';
+import { SheetPickerStep } from './SheetPickerStep';
 
 /** Parse a page range string like "1-5, 10, 15-20" into a Set of page numbers */
 function parsePageRangeString(rangeStr: string): Set<number> {
