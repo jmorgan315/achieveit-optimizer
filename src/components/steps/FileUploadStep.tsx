@@ -1018,8 +1018,22 @@ export function FileUploadStep({
   const isLoading = isProcessing || isExtracting;
   const [previewOpen, setPreviewOpen] = useState(false);
 
-  // Spreadsheet import path — render SpreadsheetImportStep instead of main UI
+  // Spreadsheet import path — show SheetPicker first, then SpreadsheetImportStep.
   if (spreadsheetFile && sessionId && onSpreadsheetComplete) {
+    if (!sheetPickerConfirmed) {
+      return (
+        <div className="w-full max-w-4xl mx-auto space-y-6">
+          <SheetPickerStep
+            file={spreadsheetFile}
+            sessionId={sessionId}
+            onContinue={(indices) => {
+              setPreselectedSheetIndices(indices);
+              setSheetPickerConfirmed(true);
+            }}
+          />
+        </div>
+      );
+    }
     return (
       <div className="w-full max-w-4xl mx-auto space-y-6">
         <SpreadsheetImportStep
@@ -1027,11 +1041,13 @@ export function FileUploadStep({
           sessionId={sessionId}
           orgName={orgProfile?.organizationName}
           documentHints={orgProfile?.documentHints}
+          preselectedSheetIndices={preselectedSheetIndices}
           onComplete={onSpreadsheetComplete}
         />
       </div>
     );
   }
+
 
   return (
     <div className="w-full max-w-4xl mx-auto space-y-4">
