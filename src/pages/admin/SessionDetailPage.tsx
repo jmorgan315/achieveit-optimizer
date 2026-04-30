@@ -14,6 +14,7 @@ import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import type { Json } from '@/integrations/supabase/types';
 import { ResultsPreviewTree } from '@/components/admin/ResultsPreviewTree';
+import { ParserDiagnosticsCard } from '@/components/admin/ParserDiagnosticsCard';
 
 import { useModelRates, type ModelRates } from '@/hooks/useModelRates';
 
