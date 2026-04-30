@@ -285,19 +285,18 @@ export function parseHierarchicalColumns(
       .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
       .join(' ');
 
-  console.log(
-    '[ssphase4b] row-scan start:',
-    JSON.stringify({
-      sheet: sheet.name,
-      pattern: sheetClassification.pattern,
-      hierarchySignal,
-      dataStartRow,
-      totalRows: sheet.rows.length,
-      rowsToScan: Math.max(0, sheet.rows.length - dataStartRow),
-      resolvedColumnIndices: resolution.resolvedColumnIndices,
-      resolvedLevels: resolution.resolvedLevels,
-    }),
-  );
+  const rowScanStartPayload = {
+    sheet: sheet.name,
+    pattern: sheetClassification.pattern,
+    hierarchySignal,
+    dataStartRow,
+    totalRows: sheet.rows.length,
+    rowsToScan: Math.max(0, sheet.rows.length - dataStartRow),
+    resolvedColumnIndices: resolution.resolvedColumnIndices,
+    resolvedLevels: resolution.resolvedLevels,
+  };
+  console.log('[ssphase4b] row-scan start:', JSON.stringify(rowScanStartPayload));
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'row-scan-start', rowScanStartPayload, sheet.name);
 
   for (let r = dataStartRow; r < sheet.rows.length; r++) {
     const row = sheet.rows[r];
