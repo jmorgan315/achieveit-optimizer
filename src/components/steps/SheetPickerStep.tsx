@@ -288,10 +288,9 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
 
   const handleContinue = () => {
     const indices = [...selected].sort((a, b) => a - b);
-    // If user picked everything (or classifier was unavailable), pass undefined so the
-    // downstream importer falls back to its own default selection logic.
-    if (indices.length === sheets!.length) onContinue(undefined);
-    else onContinue(indices);
+    // Always pass the explicit selection. The user has confirmed these sheets in the
+    // picker — the importer must honor that and skip its own detection/selection phase.
+    onContinue(indices);
   };
 
   const showFallbackBanner = classifierFailed || timedOut;
