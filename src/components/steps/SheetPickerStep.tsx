@@ -412,9 +412,16 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
 
           {classification?.sheets ? (
             <div className="space-y-4">
+              {selectedPlanSheetCount >= 2 && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Info className="h-3 w-3" />
+                  Items duplicated across sheets will be merged automatically.
+                </p>
+              )}
               {PATTERN_GROUP_ORDER.map(pattern => {
                 const items = grouped.get(pattern);
                 if (!items || items.length === 0) return null;
+                const isPlanGroup = PLAN_PATTERNS.includes(pattern) || pattern === 'unknown';
                 return (
                   <div key={pattern} className="space-y-2">
                     <div className="flex items-center gap-2">
@@ -430,6 +437,17 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
                         const idx = sheetIndexByName.get(s.sheet_name);
                         if (idx == null) return null;
                         const isChecked = selected.has(idx);
+                        const sd = isPlanGroup ? detectionByName.get(s.sheet_name) : undefined;
+                        const sectionHeaders = sd
+                          ? Array.from(
+                              new Set(
+                                sd.sections
+                                  .map(sec => sec.headerText)
+                                  .filter((h): h is string => !!h && h.trim().length > 0),
+                              ),
+                            )
+                          : [];
+                        const columnHeaders = sd?.allColumnHeaders ?? [];
                         return (
                           <label
                             key={`${pattern}-${s.sheet_name}`}
@@ -443,15 +461,55 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="font-medium truncate">{s.sheet_name}</div>
-                                {typeof s.confidence === 'number' && (
-                                  <span className="text-xs text-muted-foreground shrink-0">
-                                    {Math.round(s.confidence)}% confidence
-                                  </span>
-                                )}
+                                <div className="flex items-center gap-2 shrink-0">
+                                  {sd && (
+                                    <span className="text-xs text-muted-foreground">
+                                      ~{sd.totalDataRows} item{sd.totalDataRows === 1 ? '' : 's'}
+                                    </span>
+                                  )}
+                                  {typeof s.confidence === 'number' && (
+                                    <span className="text-xs text-muted-foreground">
+                                      {Math.round(s.confidence)}% confidence
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               {s.reasoning && (
                                 <div className="text-xs text-muted-foreground mt-0.5">
                                   {s.reasoning}
+                                </div>
+                              )}
+                              {sectionHeaders.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                                    Detected sections
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {sectionHeaders.slice(0, 8).map((h, i) => (
+                                      <Badge key={`sec-${i}`} variant="secondary" className="text-xs">
+                                        {h}
+                                      </Badge>
+                                    ))}
+                                    {sectionHeaders.length > 8 && (
+                                      <Badge variant="outline" className="text-xs">
+                                        +{sectionHeaders.length - 8} more
+                                      </Badge>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                              {columnHeaders.length > 0 && (
+                                <div className="mt-2">
+                                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
+                                    Detected columns
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {columnHeaders.map((h, i) => (
+                                      <Badge key={`col-${i}`} variant="outline" className="text-xs">
+                                        {h}
+                                      </Badge>
+                                    ))}
+                                  </div>
                                 </div>
                               )}
                             </div>
