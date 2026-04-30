@@ -27,13 +27,14 @@ interface SpreadsheetImportStepProps {
   sessionId: string;
   orgName?: string;
   documentHints?: string;
+  preselectedSheetIndices?: number[];
   onComplete: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
 }
 
 const PREVIEW_MAX_ROWS = 30;
 const PREVIEW_MAX_COLS = 12;
 
-export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints, onComplete }: SpreadsheetImportStepProps) {
+export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints, preselectedSheetIndices, onComplete }: SpreadsheetImportStepProps) {
   const [phase, setPhase] = useState<Phase>('parsing');
   const [detection, setDetection] = useState<StructureDetection | null>(null);
   const [selectedSheetIndices, setSelectedSheetIndices] = useState<number[]>([]);
