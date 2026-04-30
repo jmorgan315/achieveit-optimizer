@@ -1,58 +1,55 @@
-# Phase 4a fix: producer/consumer wiring for the sheet picker
+## Phase 4a polish: picker timeout + classifier dedupe
 
-## Root cause (confirmed)
+Two small fixes off the Test 3 (Astera) and Test 2 (DRAFT) findings. Picker producer/consumer wiring stays as-is.
 
-The picker is the *consumer* of `processing_sessions.layout_classification`, but the *producer* (the `classify-spreadsheet-layout` invoke) currently lives in `SpreadsheetImportStep.tsx`, which only mounts after the user clicks Continue past the picker. So when the picker mounts and polls, no classifier call has been made for the session — the column stays null until the picker's 60s timeout fires "AI analysis unavailable". The classifier only runs once the user clicks through, which is why the admin Layout Classification panel later shows perfect JSON for the same session.
+### Fix 1 — Picker polling timeout: 60s → 120s
 
-## sessionId availability check (the question you asked)
+**Why:** Astera (20 sheets, 4 chunks) finished classification at 66s, just past the picker's 60s timeout. JSON populated correctly in `processing_sessions.layout_classification`, but the picker had already fallen through to "AI analysis unavailable". Bumping to 120s gives ~2x headroom over the worst case in our sample.
 
-Verified in `src/pages/Index.tsx`: `sessionId` is created upstream by `ensureSessionId` and passed into `FileUploadStep` as a prop before the upload screen mounts. The existing render guard for the picker — `if (spreadsheetFile && sessionId && onSpreadsheetComplete)` at `FileUploadStep.tsx:1022` — already proves `sessionId` is populated by the time we set `spreadsheetFile`. So **resolution #1 applies**: fire the invoke right at `setSpreadsheetFile(file)`. No need to chain off `ensureSessionId`.
+**Change:** `src/components/steps/SheetPickerStep.tsx` line 25
+```
+const POLL_TIMEOUT_MS = 60_000;
+```
+→
+```
+const POLL_TIMEOUT_MS = 120_000;
+```
 
-## Changes
+Polling cadence (1.5s) and fallback UI unchanged. The "Analyzing workbook structure…" state is already shown for the full duration, so the longer timeout just means users on large workbooks wait a bit longer before the fallback kicks in — which is exactly what we want.
 
-### 1. `src/components/steps/FileUploadStep.tsx`
+### Fix 2 — Canonicalize `exclude_sheets` at the classifier prompt (cleaner fix)
 
-In the spreadsheet branch around line 888–892 (`else if (isExcel || fileName.endsWith('.csv'))`), before `setSpreadsheetFile(file)`:
+**Why:** Test 2 surfaced both "Use of Funds" and "use of funds" as separate bullets in the suggestions panel because the model echoed the user's note phrasing alongside the canonical sheet name. Fixing at the source keeps downstream data clean (admin panel, future consumers, audits).
 
-- Parse the workbook locally with `parseSpreadsheetFile(file)`.
-- Build the same `workbookPreview` payload the importer uses today: `{ sheetName, rows: rows.slice(0, 30).map(r => r.slice(0, 12)) }` per sheet (constants `PREVIEW_MAX_ROWS = 30`, `PREVIEW_MAX_COLS = 12`).
-- Fire-and-forget `supabase.functions.invoke('classify-spreadsheet-layout', { body: { sessionId, orgName: orgProfile?.organizationName, documentHints: orgProfile?.documentHints, workbookPreview } })`. No await. Log warnings on `error` / `.catch` exactly like today.
-- Guard with a `useRef<Set<string>>` keyed by `sessionId` so it only fires once per session even if React strict-mode double-invokes.
-- Wrap in try/catch so any parse failure here does not block setting `spreadsheetFile` — the picker's existing fallback ("AI analysis unavailable", select-all) will still apply.
+**Change:** `supabase/functions/classify-spreadsheet-layout/index.ts`, in the `PARSER DIRECTIVES` section of `PATTERN_GUIDE` (line 64), tighten the `exclude_sheets` description:
 
-Then call `setSpreadsheetFile(file)` as today.
+Replace:
+```
+- exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Empty by default.
+```
+with:
+```
+- exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Each entry MUST be the exact canonical sheet name as it appears in the workbook (matching one of the sheetName values in the input). Do NOT include the user's phrasing, paraphrases, or case variants. If the user's note refers to a sheet by an approximate name, resolve it to the single canonical sheet name. Deduplicate. Empty by default.
+```
 
-### 2. `src/components/steps/SpreadsheetImportStep.tsx`
+No schema change, no code change beyond the prompt string. Edge function redeploys automatically.
 
-Remove the entire fire-and-forget invoke block at lines 55–72 (the `try { … invoke('classify-spreadsheet-layout', …) … } catch (clsErr) { … }` section). Keep everything else — `parseSpreadsheetFile`, `detectStructure`, `getDefaultSheetSelection`, the `preselectedSheetIndices` handling, and the phase transition — unchanged.
+### Out of scope
 
-This makes the upstream invoke in `FileUploadStep` the single producer. No double-billing.
+- Producer/consumer wiring (already shipped, working in Tests 1–3 modulo the timeout).
+- Picker UI redesign (4d), Pattern D dead-end (4e), parsers (4b/4c) — still deferred.
+- Client-side dedupe fallback — skipping per your vote for the cleaner fix. If a future test still shows dupes, we can layer a `toLowerCase()` Set dedupe in `SheetPickerStep` as belt-and-suspenders.
 
-### 3. Picker (`SheetPickerStep.tsx`) — no changes
+### Validation after deploy
 
-Polling logic, "Analyzing workbook structure…" mount-time state, 60s timeout, fallback UI, pre-selection logic, directives panel — all stay as written. With the producer moved upstream, the column will populate within ~10–30s of picker mount on a typical workbook (well inside the 60s window).
+Re-run the Astera upload (20 sheets, ~66s classifier). Expect:
+1. Picker stays in "Analyzing workbook structure…" through the ~66s window, then transitions to the success view — no fallback banner.
+2. Sheets render grouped by pattern, plan-content sheets pre-checked.
+3. **Scope-variation banner check:** since Astera's classifier output had `needs_user_clarification: true` with `clarification_type: "scope_variation"`, the picker should now render the clarification `<Alert>` at the top with title "Scope variations" and the `clarification_reason` as the body. (Code path already exists at `SheetPickerStep.tsx:268-279` — this test just confirms it fires end-to-end for the first time.)
 
-## Out of scope
+Re-run the DRAFT upload. Expect the suggestions panel to show `Use of Funds` exactly once under "Sheets you asked to skip" — no case-variant duplicate.
 
-- Classifier edge function (schema, prompt, merge) — untouched, working correctly.
-- Picker UI behavior — untouched.
-- Wizard routing — untouched.
-- PDF / Word / text / paste paths — untouched.
-- Pattern parsers (4b/4c), mapping redesign (4d), Pattern D dead-end (4e) — still deferred.
+### Files touched
 
-## Self-test before handoff
-
-Upload `8 - RHT DRAFT_State_Reporting_Template.xlsx` with note "skip use of funds" on a fresh session and confirm:
-
-1. Console shows the classifier invoke firing at file-accept time, not after picker confirm.
-2. Picker renders the "Analyzing workbook structure…" state immediately, then transitions to the success view within ~30s.
-3. Sheets are grouped by pattern, with the 3 plan-content sheets pre-checked and the 3 `not_plan_content` sheets unchecked.
-4. The "Suggestions from your notes" panel surfaces with `Use of Funds` listed under "Sheets you asked to skip", default = Ignore.
-5. Admin Layout Classification panel shows exactly one classifier run for that session (no duplicate).
-
-Report back with a screenshot of the picker rendering the success state for re-validation.
-
-## Files touched
-
-- `src/components/steps/FileUploadStep.tsx` — add upstream classifier invoke at file-accept.
-- `src/components/steps/SpreadsheetImportStep.tsx` — remove duplicate invoke block.
+- `src/components/steps/SheetPickerStep.tsx` — one-line constant bump.
+- `supabase/functions/classify-spreadsheet-layout/index.ts` — prompt tightening for `exclude_sheets`.

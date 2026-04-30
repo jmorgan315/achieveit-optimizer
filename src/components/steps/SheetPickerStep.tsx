@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 
 const POLL_INTERVAL_MS = 1500;
-const POLL_TIMEOUT_MS = 60_000;
+const POLL_TIMEOUT_MS = 120_000;
 
 type SheetPattern = 'A' | 'B' | 'C' | 'D' | 'not_plan_content' | 'empty' | 'unknown';
 
