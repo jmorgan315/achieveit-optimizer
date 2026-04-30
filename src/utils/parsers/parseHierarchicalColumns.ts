@@ -441,6 +441,29 @@ export function parseHierarchicalColumns(
 
   const parentsCreated = parentByKey.size;
   const leafItems = items.length - parentsCreated;
+
+  // ── DIAGNOSTIC (temporary) ──────────────────────────────────────────────
+  console.log(
+    '[ssphase4b] row-scan summary:',
+    JSON.stringify({
+      sheet: sheet.name,
+      rowsScanned: diagRowsScanned,
+      rowsAllEmpty: diagRowsAllEmpty,
+      rowsSkippedNoLeaf: diagRowsSkippedNoLeaf,
+      rowsParsed: diagRowsParsed,
+    }),
+  );
+  console.log(
+    '[ssphase4b] row-scan skipped-samples:',
+    JSON.stringify({ sheet: sheet.name, samples: diagSkippedSamples }),
+  );
+  console.log(
+    '[ssphase4b] root-summary:',
+    JSON.stringify({
+      sheet: sheet.name,
+      roots: Array.from(diagPerRoot.entries()).map(([root, s]) => ({ root, ...s })),
+    }),
+  );
   console.log(
     '[ssphase4b] parsed:',
     JSON.stringify({
