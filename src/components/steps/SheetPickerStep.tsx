@@ -222,6 +222,20 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
       (directives.exclude_row_predicates && directives.exclude_row_predicates.length > 0) ||
       directives.include_only_recent === true);
 
+  // Count selected sheets that fall under plan-content patterns (A/B/C/D/unknown).
+  // Drives the "duplicates will be merged" helper.
+  const selectedPlanSheetCount = useMemo(() => {
+    if (!classification?.sheets) return 0;
+    let n = 0;
+    for (const s of classification.sheets) {
+      const idx = sheetIndexByName.get(s.sheet_name);
+      if (idx == null) continue;
+      const isPlan = PLAN_PATTERNS.includes(s.pattern) || s.pattern === 'unknown';
+      if (isPlan && selected.has(idx)) n += 1;
+    }
+    return n;
+  }, [classification, sheetIndexByName, selected]);
+
   // ---- Render ----
 
   if (parseError) {
