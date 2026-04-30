@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { parseSpreadsheetFile, ParsedSheet } from '@/utils/spreadsheet-parser';
+import { parseSpreadsheetFile, detectStructure, ParsedSheet, SheetDetection } from '@/utils/spreadsheet-parser';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
