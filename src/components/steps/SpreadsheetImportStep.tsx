@@ -117,6 +117,7 @@ export function SpreadsheetImportStep({
           }
         }
 
+        console.log('[ssphase4b] useEffect post-detect: preselectedSheetIndices=', preselectedSheetIndices, 'validPreselected=', validPreselected, 'sheetCount=', det.sheets.length);
         // === Phase 4b.1 dispatch ===
         // If picker pre-selected sheets AND every selected sheet routes to the
         // hierarchical parser, run it end-to-end and skip the mapping screen.
