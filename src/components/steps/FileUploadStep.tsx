@@ -95,6 +95,8 @@ export function FileUploadStep({
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [spreadsheetFile, setSpreadsheetFile] = useState<File | null>(null);
+  const [sheetPickerConfirmed, setSheetPickerConfirmed] = useState(false);
+  const [preselectedSheetIndices, setPreselectedSheetIndices] = useState<number[] | undefined>(undefined);
   const [isExtracting, setIsExtracting] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [visionError, setVisionError] = useState<string | null>(null);
