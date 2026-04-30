@@ -175,8 +175,10 @@ export function parseHierarchicalColumns(
   sheet: ParsedSheet,
   sheetClassification: SheetClassification,
   userLevels?: string[],
+  sessionId?: string | null,
 ): ParseHierarchicalResult {
   console.log('[ssphase4b] ENTERED parseHierarchicalColumns for sheet:', sheet?.name);
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'entry', { sheetName: sheet?.name }, sheet?.name);
   const structure = sheetClassification.structure || ({} as SheetClassificationStructure);
   const headerRowIndex = structure.header_row_index ?? SHEET_DEFAULT_HEADER_ROW;
   const dataStartRow = structure.data_starts_at_row ?? SHEET_DEFAULT_DATA_ROW;
