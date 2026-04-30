@@ -106,6 +106,9 @@ export function FileUploadStep({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const hasAutoStarted = useRef(false);
   const isUploadInFlight = useRef(false);
+  // Track which sessionIds have already had the layout classifier invoked, so
+  // strict-mode double-invokes / accidental double-uploads don't double-bill.
+  const classifierInvokedFor = useRef<Set<string>>(new Set());
 
   const [progressState, setProgressState] = useState<ProgressState>(INITIAL_PROGRESS);
 
@@ -886,8 +889,51 @@ export function FileUploadStep({
         return;
         
       } else if (isExcel || fileName.endsWith('.csv')) {
-        // Route to spreadsheet import path
+        // Route to spreadsheet import path.
+        // Fire the AI layout classifier NOW (before the picker mounts) so its
+        // result is available in processing_sessions.layout_classification by
+        // the time SheetPickerStep starts polling. The picker is the consumer;
+        // this is the single producer.
         setIsProcessing(false);
+
+        if (sessionId && !classifierInvokedFor.current.has(sessionId)) {
+          classifierInvokedFor.current.add(sessionId);
+          (async () => {
+            try {
+              const { parseSpreadsheetFile } = await import('@/utils/spreadsheet-parser');
+              const sheets = await parseSpreadsheetFile(file);
+              const PREVIEW_MAX_ROWS = 30;
+              const PREVIEW_MAX_COLS = 12;
+              const workbookPreview = sheets.map(s => ({
+                sheetName: s.name,
+                rows: (s.rows || []).slice(0, PREVIEW_MAX_ROWS).map(r => (r || []).slice(0, PREVIEW_MAX_COLS)),
+              }));
+              console.log('[FileUpload] Firing classify-spreadsheet-layout', {
+                sessionId,
+                sheetCount: sheets.length,
+                hasHints: !!orgProfile?.documentHints,
+              });
+              supabase.functions
+                .invoke('classify-spreadsheet-layout', {
+                  body: {
+                    sessionId,
+                    orgName: orgProfile?.organizationName,
+                    documentHints: orgProfile?.documentHints,
+                    workbookPreview,
+                  },
+                })
+                .then(({ error }) => {
+                  if (error) console.warn('[classify-layout] invoke error:', error);
+                })
+                .catch(err => console.warn('[classify-layout] invoke threw:', err));
+            } catch (clsErr) {
+              // Non-fatal — picker will fall back to its "AI analysis unavailable" path.
+              console.warn('[classify-layout] preview build failed:', clsErr);
+              classifierInvokedFor.current.delete(sessionId);
+            }
+          })();
+        }
+
         setSpreadsheetFile(file);
         return;
       } else if (isWord) {
