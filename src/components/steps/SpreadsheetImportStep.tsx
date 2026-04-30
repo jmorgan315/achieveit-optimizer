@@ -250,7 +250,7 @@ export function SpreadsheetImportStep({
       if (s.decision.lowConfidence) {
         console.warn('[ssphase4b] low-confidence dispatch:', s.sheet.name, 'pattern=', s.cls.pattern, 'confidence=', s.cls.confidence);
       }
-      const result = parseHierarchicalColumns(s.sheet, s.cls, undefined);
+      const result = parseHierarchicalColumns(s.sheet, s.cls, undefined, args.sessionId);
       // Collect canonical level name ordering across sheets (first wins).
       result.resolvedLevels.forEach(name => {
         if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
