@@ -123,7 +123,7 @@ export function SpreadsheetImportStep({
           preselectedSheetIndices: preselectedSheetIndices ?? null,
           validPreselected: validPreselected ?? null,
           sheetCount: det.sheets.length,
-          sheetNames: det.sheets.map(s => s.name),
+          sheetNames: sheets.map(s => s.name),
         });
         // === Phase 4b.1 dispatch ===
         // If picker pre-selected sheets AND every selected sheet routes to the
