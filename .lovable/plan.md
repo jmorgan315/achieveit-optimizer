@@ -1,85 +1,58 @@
-# Phase 4a: AI Classifier Schema Extension + Sheet Picker
+# Phase 4a fix: producer/consumer wiring for the sheet picker
 
-Ship the classifier schema additions and a new wizard step that lets users confirm which sheets to import, driven by the AI classifier's output. Stop after this sub-phase for user validation in the admin Layout Classification panel before starting 4b.
+## Root cause (confirmed)
 
-## What ships
+The picker is the *consumer* of `processing_sessions.layout_classification`, but the *producer* (the `classify-spreadsheet-layout` invoke) currently lives in `SpreadsheetImportStep.tsx`, which only mounts after the user clicks Continue past the picker. So when the picker mounts and polls, no classifier call has been made for the session — the column stays null until the picker's 60s timeout fires "AI analysis unavailable". The classifier only runs once the user clicks through, which is why the admin Layout Classification panel later shows perfect JSON for the same session.
 
-### 1. Classifier schema extension (`supabase/functions/classify-spreadsheet-layout/index.ts`)
+## sessionId availability check (the question you asked)
 
-Add to `workbook_summary`:
-- `clarification_type`: enum `time_versioning | scope_variation | ambiguous_pattern | mixed_patterns | other` — only set when `needs_user_clarification: true`.
+Verified in `src/pages/Index.tsx`: `sessionId` is created upstream by `ensureSessionId` and passed into `FileUploadStep` as a prop before the upload screen mounts. The existing render guard for the picker — `if (spreadsheetFile && sessionId && onSpreadsheetComplete)` at `FileUploadStep.tsx:1022` — already proves `sessionId` is populated by the time we set `spreadsheetFile`. So **resolution #1 applies**: fire the invoke right at `setSpreadsheetFile(file)`. No need to chain off `ensureSessionId`.
 
-Add new top-level field `parser_directives` — **derived strictly from `documentHints`, never from sheet structure**. If `documentHints` is empty or contains no exclusion/scope language, all fields are empty/false.
-- `exclude_sheets`: string[] — sheet names the user's notes explicitly say to skip (e.g., "skip the budget tab"). Independent of structural pattern; a sheet can be plan-content structurally and still appear here.
-- `exclude_row_predicates`: string[] — human-readable row filters from the user's notes (e.g., "rows where status = Archived").
-- `include_only_recent`: boolean — true only when notes explicitly say so ("just the latest version", "current year only"). The classifier may still flag time-versioning structurally via `clarification_type: time_versioning` without setting this.
+## Changes
 
-System prompt update makes the separation explicit:
-- Structural classification (per-sheet `pattern`, including `not_plan_content`) is what the AI sees in the data.
-- `parser_directives` is what the user told us in prose, parsed into structured form. No directives without hints.
+### 1. `src/components/steps/FileUploadStep.tsx`
 
-### 2. Multi-chunk merge logic (same file)
+In the spreadsheet branch around line 888–892 (`else if (isExcel || fileName.endsWith('.csv'))`), before `setSpreadsheetFile(file)`:
 
-When merging summaries across chunks:
-- `clarification_type`: pick first non-null; if chunks disagree, fall back to `mixed_patterns`.
-- `parser_directives.exclude_sheets`: union across chunks (dedup).
-- `parser_directives.exclude_row_predicates`: union across chunks (dedup).
-- `parser_directives.include_only_recent`: OR across chunks.
-- Preserve existing `primary_pattern` voting and `needs_user_clarification` OR logic.
+- Parse the workbook locally with `parseSpreadsheetFile(file)`.
+- Build the same `workbookPreview` payload the importer uses today: `{ sheetName, rows: rows.slice(0, 30).map(r => r.slice(0, 12)) }` per sheet (constants `PREVIEW_MAX_ROWS = 30`, `PREVIEW_MAX_COLS = 12`).
+- Fire-and-forget `supabase.functions.invoke('classify-spreadsheet-layout', { body: { sessionId, orgName: orgProfile?.organizationName, documentHints: orgProfile?.documentHints, workbookPreview } })`. No await. Log warnings on `error` / `.catch` exactly like today.
+- Guard with a `useRef<Set<string>>` keyed by `sessionId` so it only fires once per session even if React strict-mode double-invokes.
+- Wrap in try/catch so any parse failure here does not block setting `spreadsheetFile` — the picker's existing fallback ("AI analysis unavailable", select-all) will still apply.
 
-### 3. New wizard step: `src/components/steps/SheetPickerStep.tsx`
+Then call `setSpreadsheetFile(file)` as today.
 
-Inserted between `FileUploadStep` and `SpreadsheetImportStep` for spreadsheet uploads only.
+### 2. `src/components/steps/SpreadsheetImportStep.tsx`
 
-Behavior:
-- Mounts with "Analyzing workbook structure…" visible immediately (no delay, no blank frame).
-- Polls `processing_sessions.layout_classification` every 1.5s until populated or 60s timeout.
-- Renders sheets grouped by pattern (A / B / C / D / not_plan_content / empty / unknown) with the AI's per-sheet reasoning visible.
-- Pre-checks all sheets whose pattern is A/B/C/D; leaves not_plan_content / empty / unknown unchecked. User can override.
-- Shows `parser_directives` as a collapsible "From your notes" panel when any directive is non-empty. Default action = **Ignore**. User must explicitly click "Apply" per directive. No silent filtering. Panel hidden entirely when all directives are empty.
-- If `needs_user_clarification` is true, surfaces `clarification_type` + reason as a top info banner.
-- If classifier failed (sentinel error in JSON), falls back to existing detection-only flow with a warning banner.
-- Continue button passes selected sheet indices forward.
+Remove the entire fire-and-forget invoke block at lines 55–72 (the `try { … invoke('classify-spreadsheet-layout', …) … } catch (clsErr) { … }` section). Keep everything else — `parseSpreadsheetFile`, `detectStructure`, `getDefaultSheetSelection`, the `preselectedSheetIndices` handling, and the phase transition — unchanged.
 
-### 4. Wizard wiring
+This makes the upstream invoke in `FileUploadStep` the single producer. No double-billing.
 
-- `FileUploadStep.tsx` already forwards `orgName` and `documentHints`. Route spreadsheet files through `SheetPickerStep` before `SpreadsheetImportStep`.
-- `SpreadsheetImportStep.tsx` accepts an optional `preselectedSheetIndices` prop. When provided, skips its own default selection and goes straight to mapping using those sheets. Existing fire-and-forget classifier call stays as a safety net.
+### 3. Picker (`SheetPickerStep.tsx`) — no changes
 
-### 5. Self-test before handoff
+Polling logic, "Analyzing workbook structure…" mount-time state, 60s timeout, fallback UI, pre-selection logic, directives panel — all stay as written. With the producer moved upstream, the column will populate within ~10–30s of picker mount on a typical workbook (well inside the 60s window).
 
-Upload one multi-sheet workbook with explicit notes ("skip the budget tab") and verify in the admin Layout Classification panel:
-- `workbook_summary.clarification_type` appears (or is correctly absent when `needs_user_clarification: false`).
-- `parser_directives.exclude_sheets` reflects the note, NOT structural classification.
-- A second upload of the same workbook with empty notes produces empty `parser_directives` even if a sheet is structurally `not_plan_content`.
-- Multi-chunk workbooks (>5 sheets) show merged directives, not just the last chunk's.
+## Out of scope
 
-## Out of scope for 4a
+- Classifier edge function (schema, prompt, merge) — untouched, working correctly.
+- Picker UI behavior — untouched.
+- Wizard routing — untouched.
+- PDF / Word / text / paste paths — untouched.
+- Pattern parsers (4b/4c), mapping redesign (4d), Pattern D dead-end (4e) — still deferred.
 
-- Pattern-specific parsers (4b/4c).
-- Mapping UI redesign (4d).
-- Pattern D dead-end UI (4e).
-- Honoring `parser_directives` in the parser — for now they're display-only suggestions.
+## Self-test before handoff
+
+Upload `8 - RHT DRAFT_State_Reporting_Template.xlsx` with note "skip use of funds" on a fresh session and confirm:
+
+1. Console shows the classifier invoke firing at file-accept time, not after picker confirm.
+2. Picker renders the "Analyzing workbook structure…" state immediately, then transitions to the success view within ~30s.
+3. Sheets are grouped by pattern, with the 3 plan-content sheets pre-checked and the 3 `not_plan_content` sheets unchecked.
+4. The "Suggestions from your notes" panel surfaces with `Use of Funds` listed under "Sheets you asked to skip", default = Ignore.
+5. Admin Layout Classification panel shows exactly one classifier run for that session (no duplicate).
+
+Report back with a screenshot of the picker rendering the success state for re-validation.
 
 ## Files touched
 
-- `supabase/functions/classify-spreadsheet-layout/index.ts` — schema, prompt, merge logic.
-- `src/components/steps/SheetPickerStep.tsx` — new file.
-- `src/components/steps/FileUploadStep.tsx` — route spreadsheets through picker.
-- `src/components/steps/SpreadsheetImportStep.tsx` — accept preselected indices.
-- Wizard router — insert new step in spreadsheet path.
-
-## Sanity check
-
-No hardcoded sheet names, column header strings, or filenames from the Phase 3 validation set will appear in the diff. Logic is pattern- and notes-driven only.
-
-## Validation scenarios for the user to test after 4a ships
-
-1. Single-sheet workbook, no notes → picker shows one sheet pre-checked; no clarification banner; no directives panel.
-2. Multi-sheet workbook with one structural lookup tab, no notes → lookup unchecked under "not_plan_content"; `exclude_sheets` is empty (structural ≠ directive).
-3. Same workbook + note "skip the budget tab" → `exclude_sheets: ["Budget"]` shown in directives panel as Ignore-by-default suggestion.
-4. Time-versioned workbook, no notes → `clarification_type: time_versioning`, banner visible, `include_only_recent: false`.
-5. Same workbook + note "just the latest version" → `include_only_recent: true`.
-6. Mixed-pattern workbook (OGSM-style) → `clarification_type: mixed_patterns`, sheets grouped by their distinct patterns.
-7. Workbook >5 sheets with notes → merged directives in admin panel reflect all chunks.
-8. Classifier failure → picker shows warning + falls back gracefully.
+- `src/components/steps/FileUploadStep.tsx` — add upstream classifier invoke at file-accept.
+- `src/components/steps/SpreadsheetImportStep.tsx` — remove duplicate invoke block.

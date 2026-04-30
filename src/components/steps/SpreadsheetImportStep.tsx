@@ -52,24 +52,10 @@ export function SpreadsheetImportStep({ file, sessionId, orgName, documentHints,
         const det = detectStructure(sheets);
         setDetection(det);
 
-        // Fire-and-forget AI layout classifier (non-blocking)
-        try {
-          const workbookPreview = sheets.map(s => ({
-            sheetName: s.name,
-            rows: (s.rows || []).slice(0, PREVIEW_MAX_ROWS).map(r => (r || []).slice(0, PREVIEW_MAX_COLS)),
-          }));
-          // Don't await — classifier runs in background
-          supabase.functions
-            .invoke('classify-spreadsheet-layout', {
-              body: { sessionId, orgName, documentHints, workbookPreview },
-            })
-            .then(({ error }) => {
-              if (error) console.warn('[classify-layout] invoke error:', error);
-            })
-            .catch(err => console.warn('[classify-layout] invoke threw:', err));
-        } catch (clsErr) {
-          console.warn('[classify-layout] preview build failed:', clsErr);
-        }
+        // NOTE: classify-spreadsheet-layout is now invoked upstream in
+        // FileUploadStep at file-accept time, so the SheetPickerStep can
+        // consume the result. Do not invoke it here — that would double-bill.
+
 
         // Default sheet selection
         // Honor preselected indices from SheetPickerStep when provided.
