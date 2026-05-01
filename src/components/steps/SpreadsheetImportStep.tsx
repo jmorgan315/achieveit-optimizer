@@ -396,9 +396,13 @@ export function SpreadsheetImportStep({
       }
     }
 
+    const clsRecord: Record<string, SheetClassification> = {};
+    clsBySheetName.forEach((v, k) => { clsRecord[k] = v; });
+    const directives: ParserDirectivesShape | null = cls.parser_directives ?? null;
+
     if (conflicts.length > 0) {
       // Caller will stash perSheet/sheetNames and switch phase.
-      return { kind: 'conflicts', conflicts, perSheet, sheetNames };
+      return { kind: 'conflicts', conflicts, perSheet, sheetNames, clsBySheetName: clsRecord, parserDirectives: directives };
     }
 
     const allItems: PlanItem[] = sheetNames.flatMap(n => perSheet[n]?.items ?? []);
@@ -416,6 +420,10 @@ export function SpreadsheetImportStep({
     return {
       kind: 'completed',
       payload: { items: allItems, personMappings, levels: resolvedLevels, sheetNames },
+      perSheet,
+      sheetNames,
+      clsBySheetName: clsRecord,
+      parserDirectives: directives,
     };
   }
 
