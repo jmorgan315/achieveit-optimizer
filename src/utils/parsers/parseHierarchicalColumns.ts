@@ -157,7 +157,7 @@ function resolveHierarchyColumns(
   const usedColumnIndices = new Set<number>();
 
   provided.forEach((levelName, levelIdx) => {
-    const headerMatch = headerIndexByName.get(normalize(levelName));
+    const headerMatch = headerIndexByName.get(stemKey(levelName));
     if (headerMatch != null && !usedColumnIndices.has(headerMatch)) {
       resolvedColumnIndices.push(headerMatch);
       usedColumnIndices.add(headerMatch);
