@@ -230,8 +230,22 @@ export function SpreadsheetImportStep({
 
   type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
   type DispatchResult =
-    | { kind: 'completed'; payload: { items: PlanItem[]; personMappings: PersonMapping[]; levels: PlanLevel[]; sheetNames: string[] } }
-    | { kind: 'conflicts'; conflicts: PendingConflict[]; perSheet: HierPerSheet; sheetNames: string[] }
+    | {
+        kind: 'completed';
+        payload: { items: PlanItem[]; personMappings: PersonMapping[]; levels: PlanLevel[]; sheetNames: string[] };
+        perSheet: HierPerSheet;
+        sheetNames: string[];
+        clsBySheetName: Record<string, SheetClassification>;
+        parserDirectives: ParserDirectivesShape | null;
+      }
+    | {
+        kind: 'conflicts';
+        conflicts: PendingConflict[];
+        perSheet: HierPerSheet;
+        sheetNames: string[];
+        clsBySheetName: Record<string, SheetClassification>;
+        parserDirectives: ParserDirectivesShape | null;
+      }
     | { kind: 'fallback'; reason: string };
 
   /**
