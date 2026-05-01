@@ -59,6 +59,7 @@ interface FileUploadStepProps {
   useVisionAI: boolean; setUseVisionAI: (v: boolean) => void;
   dedupResults: DedupRemovedDetail[]; setDedupResults: (v: DedupRemovedDetail[]) => void;
   pageImages?: string[] | null; setPageImages?: (v: string[] | null) => void;
+  userLevels?: string[];
 }
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -91,6 +92,7 @@ export function FileUploadStep({
   useVisionAI, setUseVisionAI,
   dedupResults, setDedupResults,
   pageImages, setPageImages,
+  userLevels,
 }: FileUploadStepProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1072,6 +1074,7 @@ export function FileUploadStep({
           <SheetPickerStep
             file={spreadsheetFile}
             sessionId={sessionId}
+            userLevels={userLevels}
             onContinue={(indices) => {
               setPreselectedSheetIndices(indices);
               setSheetPickerConfirmed(true);
@@ -1088,6 +1091,7 @@ export function FileUploadStep({
           orgName={orgProfile?.organizationName}
           documentHints={orgProfile?.documentHints}
           preselectedSheetIndices={preselectedSheetIndices}
+          userLevels={userLevels}
           onComplete={onSpreadsheetComplete}
         />
       </div>
