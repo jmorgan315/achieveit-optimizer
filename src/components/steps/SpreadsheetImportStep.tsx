@@ -273,28 +273,83 @@ export function SpreadsheetImportStep({
     }
 
     // Run the parser per sheet, accumulate results.
-    const allItems: PlanItem[] = [];
     const personSet = new Set<string>();
     const levelNamesUnion: string[] = [];
     const sheetNames: string[] = [];
+    const perSheet: Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }> = {};
+    const conflicts: PendingConflict[] = [];
 
     for (const s of selected) {
       if (s.decision.kind !== 'hierarchical' || !s.cls) continue;
       if (s.decision.lowConfidence) {
         console.warn('[ssphase4b] low-confidence dispatch:', s.sheet.name, 'pattern=', s.cls.pattern, 'confidence=', s.cls.confidence);
       }
-      const result = parseHierarchicalColumns(s.sheet, s.cls, undefined, args.sessionId);
-      // Collect canonical level name ordering across sheets (first wins).
+
+      const implied = s.cls.structure?.implied_levels ?? [];
+      const hasUser = !!(userLevels && userLevels.length > 0);
+      const effective = hasUser ? userLevels! : implied;
+
+      void logParserDiagnostic(args.sessionId, 'parseHierarchicalColumns', 'levels-source', {
+        sheet: s.sheet.name,
+        source: hasUser ? 'user' : 'classifier',
+        levels: effective,
+        classifierLevels: implied,
+      }, s.sheet.name);
+
+      const equivalent = hasUser && implied.length > 0
+        ? levelsEquivalent(userLevels, implied)
+        : true; // no comparison possible → no conflict
+      const detected = hasUser && implied.length > 0 && !equivalent;
+      const reason = !hasUser || implied.length === 0
+        ? 'none'
+        : equivalent
+          ? 'none'
+          : userLevels!.length !== implied.length
+            ? 'length-mismatch'
+            : 'name-mismatch';
+      void logParserDiagnostic(args.sessionId, 'parseHierarchicalColumns', 'level-conflict', {
+        sheet: s.sheet.name,
+        detected,
+        reason,
+        userLevels: userLevels ?? [],
+        classifierLevels: implied,
+      }, s.sheet.name);
+
+      const result = parseHierarchicalColumns(s.sheet, s.cls, hasUser ? userLevels : undefined, args.sessionId);
+      perSheet[s.sheet.name] = {
+        items: result.items,
+        personMappings: result.personMappings,
+        resolvedLevels: result.resolvedLevels,
+      };
       result.resolvedLevels.forEach(name => {
         if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
       });
-      // Items keep their parentId references intact within this sheet's batch.
-      allItems.push(...result.items);
       result.personMappings.forEach(p => personSet.add(p.foundName));
       sheetNames.push(s.sheet.name);
+
+      if (detected) {
+        conflicts.push({
+          sheetName: s.sheet.name,
+          userLevels: userLevels!,
+          classifierLevels: implied,
+          sheetClassification: s.cls,
+          parsedSheet: s.sheet,
+          initialItemCount: result.items.length,
+        });
+      }
     }
 
-    // Build PlanLevel[] from union (in order).
+    // Stash per-sheet snapshots so the conflict UI can swap one sheet's results.
+    setHierResultsBySheet(perSheet);
+    setHierSheetOrder(sheetNames);
+
+    if (conflicts.length > 0) {
+      setPendingConflicts(conflicts);
+      // Defer completion until the user resolves each conflict.
+      return null;
+    }
+
+    const allItems: PlanItem[] = sheetNames.flatMap(n => perSheet[n]?.items ?? []);
     const resolvedLevels: PlanLevel[] = levelNamesUnion.length > 0
       ? levelNamesUnion.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
       : DEFAULT_LEVELS.slice(0, 3);
