@@ -22,11 +22,18 @@ import {
 } from '@/utils/parsers/parseHierarchicalColumns';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface, LevelConflictBlock, LevelChoice } from '@/components/spreadsheet/MappingInterface';
+import { MappingConfirmation, SheetSummary, DirectivesSummary, AttributeMapping } from '@/components/spreadsheet/MappingConfirmation';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
-type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict';
+type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict' | 'mapping-confirmation';
+
+interface ParserDirectivesShape {
+  exclude_sheets?: string[];
+  exclude_row_predicates?: string[];
+  include_only_recent?: boolean;
+}
 
 interface LayoutClassification {
   sheets?: SheetClassification[];
