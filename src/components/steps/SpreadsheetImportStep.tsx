@@ -121,6 +121,12 @@ export function SpreadsheetImportStep({
   >({});
   const [hierSheetOrder, setHierSheetOrder] = useState<string[]>([]);
 
+  // Phase 4d.1 — classifier metadata cached for the confirmation screen so we
+  // don't re-fetch layout_classification on render.
+  const [clsBySheetName, setClsBySheetName] = useState<Record<string, SheetClassification>>({});
+  const [parserDirectives, setParserDirectives] = useState<ParserDirectivesShape | null>(null);
+  const [dismissedPredicates, setDismissedPredicates] = useState<Set<string>>(new Set());
+
   // Parse on mount
   useEffect(() => {
     (async () => {
