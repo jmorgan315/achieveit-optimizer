@@ -158,29 +158,28 @@ export function SpreadsheetImportStep({
           sheetCount: det.sheets.length,
           sheetNames: sheets.map(s => s.name),
         });
-        // === Phase 4b.1 dispatch ===
-        // If picker pre-selected sheets AND every selected sheet routes to the
-        // hierarchical parser, run it end-to-end and skip the mapping screen.
-        // Otherwise (mixed or A/D/unknown), fall through to existing flow.
+        // === Phase 4b.1/4b.2 dispatch ===
+        // Pure synchronous switch on a discriminated-union result, so the
+        // conflict path can never race past `setPhase('level-conflict')`.
         if (validPreselected && validPreselected.length > 0) {
-          const dispatched = await tryDispatchHierarchical({
+          const result = await tryDispatchHierarchical({
             sessionId,
             file,
             parsedSheets: sheets,
             selectedIndices: validPreselected,
           });
-          if (dispatched) {
-            await persistAndComplete(dispatched);
+          if (result.kind === 'completed') {
+            await persistAndComplete(result.payload);
             return;
           }
-          // tryDispatchHierarchical may have stashed pending conflicts.
-          // Use a functional read via setState to avoid stale-closure issues.
-          let hasConflicts = false;
-          setPendingConflicts(prev => { hasConflicts = prev.length > 0; return prev; });
-          if (hasConflicts) {
+          if (result.kind === 'conflicts') {
+            setHierResultsBySheet(result.perSheet);
+            setHierSheetOrder(result.sheetNames);
+            setPendingConflicts(result.conflicts);
             setPhase('level-conflict');
             return;
           }
+          // result.kind === 'fallback' → fall through to existing mapping flow
         }
 
         // If user already picked sheets in SheetPickerStep, jump past detection.
@@ -193,23 +192,35 @@ export function SpreadsheetImportStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
+  // Phase 4b.2 belt-and-braces guard: if any code path ever populates
+  // pendingConflicts without switching phase, force the conflict screen
+  // rather than silently rendering the legacy mapping UI.
+  useEffect(() => {
+    if (pendingConflicts.length > 0 && phase !== 'level-conflict' && phase !== 'generating') {
+      console.warn('[ssphase4b] guard: pendingConflicts present but phase=', phase, '— forcing level-conflict');
+      setPhase('level-conflict');
+    }
+  }, [pendingConflicts, phase]);
+
   // ── Hierarchical dispatch helpers ────────────────────────────────────────
 
+  type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
+  type DispatchResult =
+    | { kind: 'completed'; payload: { items: PlanItem[]; personMappings: PersonMapping[]; levels: PlanLevel[]; sheetNames: string[] } }
+    | { kind: 'conflicts'; conflicts: PendingConflict[]; perSheet: HierPerSheet; sheetNames: string[] }
+    | { kind: 'fallback'; reason: string };
+
   /**
-   * Returns parsed items+mappings if and only if every selected sheet routes
-   * to the hierarchical parser. Returns null otherwise (caller falls back).
+   * Pure decision producer: parses + logs, then returns a discriminated union.
+   * Does NOT mutate React state. Caller is responsible for setState based on
+   * the returned `kind`.
    */
   async function tryDispatchHierarchical(args: {
     sessionId: string;
     file: File;
     parsedSheets: import('@/utils/spreadsheet-parser').ParsedSheet[];
     selectedIndices: number[];
-  }): Promise<null | {
-    items: PlanItem[];
-    personMappings: PersonMapping[];
-    levels: PlanLevel[];
-    sheetNames: string[];
-  }> {
+  }): Promise<DispatchResult> {
     console.log('[ssphase4b] ENTERED tryDispatchHierarchical, selectedIndices:', args.selectedIndices, 'sheetCount:', args.parsedSheets.length);
     void logParserDiagnostic(args.sessionId, 'dispatcher', 'entry', {
       selectedIndices: args.selectedIndices,
@@ -229,7 +240,7 @@ export function SpreadsheetImportStep({
         reason: 'no layout_classification',
         error: error?.message ?? null,
       });
-      return null;
+      return { kind: 'fallback', reason: 'no layout_classification' };
     }
 
     const cls = data.layout_classification as unknown as LayoutClassification;
@@ -240,7 +251,7 @@ export function SpreadsheetImportStep({
         reason: 'layout_classification empty/error',
         clsError: cls.error ?? null,
       });
-      return null;
+      return { kind: 'fallback', reason: 'layout_classification empty/error' };
     }
 
     const clsBySheetName = new Map<string, SheetClassification>();
@@ -277,14 +288,14 @@ export function SpreadsheetImportStep({
         reason: 'mixed routing',
         perSheet: selected.map(s => ({ sheet: s.sheet.name, kind: s.decision.kind })),
       });
-      return null;
+      return { kind: 'fallback', reason: 'mixed routing' };
     }
 
     // Run the parser per sheet, accumulate results.
     const personSet = new Set<string>();
     const levelNamesUnion: string[] = [];
     const sheetNames: string[] = [];
-    const perSheet: Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }> = {};
+    const perSheet: HierPerSheet = {};
     const conflicts: PendingConflict[] = [];
 
     for (const s of selected) {
@@ -347,14 +358,9 @@ export function SpreadsheetImportStep({
       }
     }
 
-    // Stash per-sheet snapshots so the conflict UI can swap one sheet's results.
-    setHierResultsBySheet(perSheet);
-    setHierSheetOrder(sheetNames);
-
     if (conflicts.length > 0) {
-      setPendingConflicts(conflicts);
-      // Defer completion until the user resolves each conflict.
-      return null;
+      // Caller will stash perSheet/sheetNames and switch phase.
+      return { kind: 'conflicts', conflicts, perSheet, sheetNames };
     }
 
     const allItems: PlanItem[] = sheetNames.flatMap(n => perSheet[n]?.items ?? []);
@@ -369,7 +375,10 @@ export function SpreadsheetImportStep({
       isResolved: false,
     }));
 
-    return { items: allItems, personMappings, levels: resolvedLevels, sheetNames };
+    return {
+      kind: 'completed',
+      payload: { items: allItems, personMappings, levels: resolvedLevels, sheetNames },
+    };
   }
 
   async function persistAndComplete(payload: {
