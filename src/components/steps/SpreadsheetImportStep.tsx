@@ -220,9 +220,14 @@ export function SpreadsheetImportStep({
   // pendingConflicts without switching phase, force the conflict screen
   // rather than silently rendering the legacy mapping UI.
   useEffect(() => {
-    if (pendingConflicts.length > 0 && phase !== 'level-conflict' && phase !== 'generating') {
-      console.warn('[ssphase4b] guard: pendingConflicts present but phase=', phase, '— forcing level-conflict');
-      setPhase('level-conflict');
+    if (
+      pendingConflicts.length > 0 &&
+      phase !== 'level-conflict' &&
+      phase !== 'mapping-confirmation' &&
+      phase !== 'generating'
+    ) {
+      console.warn('[ssphase4b] guard: pendingConflicts present but phase=', phase, '— forcing mapping-confirmation');
+      setPhase('mapping-confirmation');
     }
   }, [pendingConflicts, phase]);
 
