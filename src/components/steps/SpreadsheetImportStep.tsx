@@ -720,5 +720,101 @@ export function SpreadsheetImportStep({
     );
   }
 
+  if (phase === 'mapping-confirmation') {
+    const sheetSummaries: SheetSummary[] = hierSheetOrder.map(name => {
+      const cls = clsBySheetName[name];
+      const hier = hierResultsBySheet[name];
+      const conflict = pendingConflicts.find(c => c.sheetName === name);
+      const headerRowIdx = cls?.structure?.header_row_index ?? 0;
+      const nameColIdx = cls?.structure?.name_column_index ?? null;
+      // Parsed sheet for header row lookup. Pull lazily from conflict snapshot
+      // or fall back to null — both Continue & adjust paths still work.
+      const parsedSheet = conflict?.parsedSheet;
+      let nameSourceColumn: string | null = null;
+      let attributeMappings: AttributeMapping[] = [];
+      if (parsedSheet) {
+        const headerRow = parsedSheet.rows?.[headerRowIdx];
+        if (Array.isArray(headerRow)) {
+          if (nameColIdx != null && nameColIdx >= 0 && nameColIdx < headerRow.length) {
+            const v = headerRow[nameColIdx];
+            nameSourceColumn = v == null ? null : String(v).trim() || null;
+          }
+          // Build attribute list from non-hierarchy headers
+          const resolvedLevelsLower = new Set((hier?.resolvedLevels ?? []).map(s => s.toLowerCase()));
+          headerRow.forEach((cell, idx) => {
+            const header = cell == null ? '' : String(cell).trim();
+            if (!header) return;
+            if (idx === nameColIdx) return;
+            if (resolvedLevelsLower.has(header.toLowerCase())) return;
+            const role = getDefaultColumnRole(header);
+            attributeMappings.push({ header, role, included: role !== 'skip' });
+          });
+        }
+      }
+      // Fall back: derive nameSourceColumn from deepest level if header lookup failed
+      if (!nameSourceColumn && hier?.resolvedLevels?.length) {
+        nameSourceColumn = hier.resolvedLevels[hier.resolvedLevels.length - 1];
+      }
+      return {
+        sheetName: name,
+        pattern: cls?.pattern ?? '?',
+        confidence: typeof cls?.confidence === 'number' ? cls.confidence : null,
+        resolvedLevels: hier?.resolvedLevels ?? [],
+        itemCount: hier?.items.length ?? 0,
+        nameSourceColumn,
+        attributeMappings,
+        conflict: conflict
+          ? { userLevels: conflict.userLevels, classifierLevels: conflict.classifierLevels }
+          : undefined,
+      };
+    });
+
+    const directivesSummary: DirectivesSummary | undefined = parserDirectives?.exclude_row_predicates?.length
+      ? { excludePredicates: parserDirectives.exclude_row_predicates }
+      : undefined;
+
+    return (
+      <MappingConfirmation
+        sheetSummaries={sheetSummaries}
+        directives={directivesSummary}
+        dismissedPredicates={dismissedPredicates}
+        conflictBusy={conflictApplyBusy}
+        onAccept={() => {
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
+            sheets: sheetSummaries.map(s => ({ sheet: s.sheetName, items: s.itemCount })),
+            totalItems: sheetSummaries.reduce((n, s) => n + s.itemCount, 0),
+          });
+          finalizeFromHierSnapshots();
+        }}
+        onAdjust={(sheetName) => {
+          const cls = clsBySheetName[sheetName];
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'adjust-clicked', {
+            sheet: sheetName,
+            pattern: cls?.pattern ?? 'unknown',
+            target: 'mapping-interface',
+          });
+          // Drop any pending conflicts so legacy mapping isn't blocked.
+          setPendingConflicts([]);
+          setPhase('mapping');
+        }}
+        onApplyConflict={(sheetName, choice) => {
+          const c = pendingConflicts.find(pc => pc.sheetName === sheetName);
+          if (c) handleApplyLevelChoice(c, choice);
+        }}
+        onIgnoreDirective={(predicate) => {
+          setDismissedPredicates(prev => {
+            const next = new Set(prev);
+            next.add(predicate);
+            return next;
+          });
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'directive-ignored', { predicate });
+        }}
+        onAttemptApplyDirective={(predicate) => {
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'directive-apply-attempted-disabled', { predicate });
+        }}
+      />
+    );
+  }
+
   return null;
 }
