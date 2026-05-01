@@ -37,6 +37,7 @@ interface ParserDirectivesShape {
 
 interface LayoutClassification {
   sheets?: SheetClassification[];
+  parser_directives?: ParserDirectivesShape;
   error?: string;
   [k: string]: unknown;
 }
