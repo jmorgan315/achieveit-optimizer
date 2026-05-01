@@ -333,6 +333,18 @@ export function SheetPickerStep({ file, sessionId, userLevels, onContinue }: She
             </Alert>
           )}
 
+          {userLevels && userLevels.length > 0 && (
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertTitle>
+                You said this plan uses {userLevels.length} level{userLevels.length === 1 ? '' : 's'}
+              </AlertTitle>
+              <AlertDescription>
+                {userLevels.join(' → ')}. We'll match these against detected structures.
+              </AlertDescription>
+            </Alert>
+          )}
+
           {hasAnyDirective && (
             <Collapsible defaultOpen>
               <Card className="border-dashed">
