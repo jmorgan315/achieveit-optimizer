@@ -182,15 +182,25 @@ export function SpreadsheetImportStep({
             parsedSheets: sheets,
             selectedIndices: validPreselected,
           });
-          if (result.kind === 'completed') {
-            await persistAndComplete(result.payload);
-            return;
-          }
-          if (result.kind === 'conflicts') {
+          if (result.kind === 'completed' || result.kind === 'conflicts') {
+            // Stash classifier metadata for the confirmation screen.
+            setClsBySheetName(result.clsBySheetName);
+            setParserDirectives(result.parserDirectives ?? null);
             setHierResultsBySheet(result.perSheet);
             setHierSheetOrder(result.sheetNames);
-            setPendingConflicts(result.conflicts);
-            setPhase('level-conflict');
+            if (result.kind === 'conflicts') {
+              setPendingConflicts(result.conflicts);
+            }
+            setPhase('mapping-confirmation');
+            void logParserDiagnostic(sessionId, 'ssphase4d', 'mapping-confirmation-shown', {
+              sheets: result.sheetNames.map(n => ({
+                sheet: n,
+                pattern: result.clsBySheetName[n]?.pattern ?? 'unknown',
+                confidence: result.clsBySheetName[n]?.confidence ?? null,
+              })),
+              hasConflict: result.kind === 'conflicts',
+              hasDirectives: !!(result.parserDirectives?.exclude_row_predicates?.length),
+            });
             return;
           }
           // result.kind === 'fallback' → fall through to existing mapping flow
