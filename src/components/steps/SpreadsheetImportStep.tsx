@@ -192,6 +192,16 @@ export function SpreadsheetImportStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
+  // Phase 4b.2 belt-and-braces guard: if any code path ever populates
+  // pendingConflicts without switching phase, force the conflict screen
+  // rather than silently rendering the legacy mapping UI.
+  useEffect(() => {
+    if (pendingConflicts.length > 0 && phase !== 'level-conflict' && phase !== 'generating') {
+      console.warn('[ssphase4b] guard: pendingConflicts present but phase=', phase, '— forcing level-conflict');
+      setPhase('level-conflict');
+    }
+  }, [pendingConflicts, phase]);
+
   // ── Hierarchical dispatch helpers ────────────────────────────────────────
 
   type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
