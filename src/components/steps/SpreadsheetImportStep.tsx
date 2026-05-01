@@ -620,6 +620,26 @@ export function SpreadsheetImportStep({
     );
   }
 
+  if (phase === 'level-conflict' && pendingConflicts.length > 0) {
+    const current = pendingConflicts[0];
+    return (
+      <div className="w-full max-w-4xl mx-auto space-y-4">
+        {pendingConflicts.length > 1 && (
+          <p className="text-xs text-muted-foreground">
+            Resolving level conflicts ({pendingConflicts.length} sheet{pendingConflicts.length === 1 ? '' : 's'} remaining)
+          </p>
+        )}
+        <LevelConflictBlock
+          sheetName={current.sheetName}
+          userLevels={current.userLevels}
+          classifierLevels={current.classifierLevels}
+          busy={conflictApplyBusy}
+          onApply={(choice) => handleApplyLevelChoice(current, choice)}
+        />
+      </div>
+    );
+  }
+
   if (phase === 'detection' && detection) {
     return (
       <DetectionSummary
