@@ -67,7 +67,7 @@ function normalize(s: string): string {
  * Storage of resolved level names always keeps the original input — this
  * key is used purely for matcher equality.
  */
-function stemKey(s: string): string {
+export function stemKey(s: string): string {
   const n = String(s || '').trim().toLowerCase();
   if (n.length > 3 && n.endsWith('s')) return n.slice(0, -1);
   return n;

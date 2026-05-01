@@ -59,6 +59,7 @@ interface LayoutClassification {
 interface SheetPickerStepProps {
   file: File;
   sessionId: string;
+  userLevels?: string[];
   onContinue: (preselectedSheetIndices: number[] | undefined) => void;
 }
 
@@ -92,7 +93,7 @@ const CLARIFICATION_LABEL: Record<string, string> = {
   other: 'Needs your input',
 };
 
-export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStepProps) {
+export function SheetPickerStep({ file, sessionId, userLevels, onContinue }: SheetPickerStepProps) {
   const [sheets, setSheets] = useState<ParsedSheet[] | null>(null);
   const [classification, setClassification] = useState<LayoutClassification | null>(null);
   const [classifierFailed, setClassifierFailed] = useState(false);
@@ -328,6 +329,18 @@ export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStep
               <AlertDescription>
                 {classification.workbook_summary.clarification_reason ||
                   'This workbook needs your input on which sheets to import.'}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {userLevels && userLevels.length > 0 && (
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertTitle>
+                You said this plan uses {userLevels.length} level{userLevels.length === 1 ? '' : 's'}
+              </AlertTitle>
+              <AlertDescription>
+                {userLevels.join(' → ')}. We'll match these against detected structures.
               </AlertDescription>
             </Alert>
           )}

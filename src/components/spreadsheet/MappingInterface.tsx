@@ -3,7 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { CheckCircle2, Info } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { CheckCircle2, Info, Sparkles, AlertTriangle } from 'lucide-react';
 import {
   SheetDetection,
   ColumnRole,
@@ -13,6 +16,89 @@ import {
   generatePlanItems,
 } from '@/utils/spreadsheet-parser';
 import { PlanLevel } from '@/types/plan';
+
+export type LevelChoice = 'user' | 'classifier' | 'reconfigure';
+
+interface LevelConflictBlockProps {
+  sheetName?: string;
+  userLevels: string[];
+  classifierLevels: string[];
+  onApply: (choice: LevelChoice) => void;
+  busy?: boolean;
+}
+
+export function LevelConflictBlock({
+  sheetName,
+  userLevels,
+  classifierLevels,
+  onApply,
+  busy,
+}: LevelConflictBlockProps) {
+  const [choice, setChoice] = useState<LevelChoice>('user');
+  return (
+    <Card className="border-primary/40">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-primary" />
+          AI Analysis
+          {sheetName && (
+            <Badge variant="outline" className="font-normal ml-1">{sheetName}</Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="text-sm">
+          <div className="font-medium mb-1">
+            You said this plan uses {userLevels.length} level{userLevels.length === 1 ? '' : 's'}:
+          </div>
+          <div className="text-muted-foreground pl-2">{userLevels.join(' → ')}</div>
+        </div>
+        <div className="text-sm">
+          <div className="font-medium mb-1">
+            The AI detected {classifierLevels.length} level{classifierLevels.length === 1 ? '' : 's'} in this sheet:
+          </div>
+          <div className="text-muted-foreground pl-2">{classifierLevels.join(' → ')}</div>
+        </div>
+        <Alert>
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Mismatch detected. Which is correct?</AlertTitle>
+          <AlertDescription>
+            <RadioGroup
+              value={choice}
+              onValueChange={(v) => setChoice(v as LevelChoice)}
+              className="mt-3 space-y-2"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="user" id="lvl-user" />
+                <Label htmlFor="lvl-user" className="cursor-pointer font-normal">
+                  Use my {userLevels.length} levels (default)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="classifier" id="lvl-cls" />
+                <Label htmlFor="lvl-cls" className="cursor-pointer font-normal">
+                  Use AI's {classifierLevels.length} levels
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="reconfigure" id="lvl-rec" />
+                <Label htmlFor="lvl-rec" className="cursor-pointer font-normal">
+                  Let me reconfigure
+                </Label>
+              </div>
+            </RadioGroup>
+          </AlertDescription>
+        </Alert>
+        <div className="flex justify-end">
+          <Button onClick={() => onApply(choice)} disabled={busy}>
+            {busy ? 'Applying…' : 'Apply'}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 
 interface MappingInterfaceProps {
   sheetDetection: SheetDetection;

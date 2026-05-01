@@ -821,6 +821,7 @@ const Index = () => {
               useVisionAI={useVisionAI} setUseVisionAI={setUseVisionAI}
               dedupResults={dedupResults} setDedupResults={setDedupResults}
               pageImages={pageImages} setPageImages={setPageImages}
+              userLevels={processingConfig?.planLevels && processingConfig.planLevels.length > 0 ? processingConfig.planLevels : undefined}
             />
           )}
 

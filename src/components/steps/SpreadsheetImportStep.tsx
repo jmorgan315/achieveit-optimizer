@@ -18,14 +18,15 @@ import {
 import {
   parseHierarchicalColumns,
   SheetClassification,
+  stemKey,
 } from '@/utils/parsers/parseHierarchicalColumns';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
-import { MappingInterface } from '@/components/spreadsheet/MappingInterface';
+import { MappingInterface, LevelConflictBlock, LevelChoice } from '@/components/spreadsheet/MappingInterface';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
-type Phase = 'parsing' | 'detection' | 'mapping' | 'generating';
+type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict';
 
 interface LayoutClassification {
   sheets?: SheetClassification[];
@@ -39,12 +40,23 @@ interface SpreadsheetImportStepProps {
   orgName?: string;
   documentHints?: string;
   preselectedSheetIndices?: number[];
+  userLevels?: string[];
   onComplete: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
 }
 
 const PREVIEW_MAX_ROWS = 30;
 const PREVIEW_MAX_COLS = 12;
 const DISPATCH_CONFIDENCE_THRESHOLD = 80;
+
+/** True iff two level arrays are equivalent under stem-fold normalization. */
+function levelsEquivalent(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (stemKey(a[i]) !== stemKey(b[i])) return false;
+  }
+  return true;
+}
 
 // Decide which parser handles a given sheet, based on classifier output.
 // Pure function — no test-file-specific heuristics. Pattern + confidence only.
@@ -69,6 +81,7 @@ export function SpreadsheetImportStep({
   orgName,
   documentHints,
   preselectedSheetIndices,
+  userLevels,
   onComplete,
 }: SpreadsheetImportStepProps) {
   const [phase, setPhase] = useState<Phase>('parsing');
@@ -79,6 +92,26 @@ export function SpreadsheetImportStep({
   const [columnMappings, setColumnMappings] = useState<Record<string, ColumnRole>>({});
   const [sectionMapping, setSectionMapping] = useState<ElementRole>({ type: 'level', depth: 1 });
   const [levels, setLevels] = useState<PlanLevel[]>(DEFAULT_LEVELS.slice(0, 3));
+
+  // Phase 4b.2: per-sheet conflict tracking + effective level overrides.
+  // `pendingConflicts` is a queue of sheets the user must resolve before completion.
+  // `effectiveLevelsBySheet` records the user's choice (or auto-applied levels) per sheet.
+  interface PendingConflict {
+    sheetName: string;
+    userLevels: string[];
+    classifierLevels: string[];
+    sheetClassification: SheetClassification;
+    parsedSheet: import('@/utils/spreadsheet-parser').ParsedSheet;
+    initialItemCount: number;
+  }
+  const [pendingConflicts, setPendingConflicts] = useState<PendingConflict[]>([]);
+  const [conflictApplyBusy, setConflictApplyBusy] = useState(false);
+  // Snapshot of the in-progress hierarchical results, keyed by sheet name, so
+  // we can swap one sheet's items after a re-parse without rerunning others.
+  const [hierResultsBySheet, setHierResultsBySheet] = useState<
+    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>
+  >({});
+  const [hierSheetOrder, setHierSheetOrder] = useState<string[]>([]);
 
   // Parse on mount
   useEffect(() => {
@@ -138,6 +171,14 @@ export function SpreadsheetImportStep({
           });
           if (dispatched) {
             await persistAndComplete(dispatched);
+            return;
+          }
+          // tryDispatchHierarchical may have stashed pending conflicts.
+          // Use a functional read via setState to avoid stale-closure issues.
+          let hasConflicts = false;
+          setPendingConflicts(prev => { hasConflicts = prev.length > 0; return prev; });
+          if (hasConflicts) {
+            setPhase('level-conflict');
             return;
           }
         }
@@ -240,28 +281,83 @@ export function SpreadsheetImportStep({
     }
 
     // Run the parser per sheet, accumulate results.
-    const allItems: PlanItem[] = [];
     const personSet = new Set<string>();
     const levelNamesUnion: string[] = [];
     const sheetNames: string[] = [];
+    const perSheet: Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }> = {};
+    const conflicts: PendingConflict[] = [];
 
     for (const s of selected) {
       if (s.decision.kind !== 'hierarchical' || !s.cls) continue;
       if (s.decision.lowConfidence) {
         console.warn('[ssphase4b] low-confidence dispatch:', s.sheet.name, 'pattern=', s.cls.pattern, 'confidence=', s.cls.confidence);
       }
-      const result = parseHierarchicalColumns(s.sheet, s.cls, undefined, args.sessionId);
-      // Collect canonical level name ordering across sheets (first wins).
+
+      const implied = s.cls.structure?.implied_levels ?? [];
+      const hasUser = !!(userLevels && userLevels.length > 0);
+      const effective = hasUser ? userLevels! : implied;
+
+      void logParserDiagnostic(args.sessionId, 'parseHierarchicalColumns', 'levels-source', {
+        sheet: s.sheet.name,
+        source: hasUser ? 'user' : 'classifier',
+        levels: effective,
+        classifierLevels: implied,
+      }, s.sheet.name);
+
+      const equivalent = hasUser && implied.length > 0
+        ? levelsEquivalent(userLevels, implied)
+        : true; // no comparison possible → no conflict
+      const detected = hasUser && implied.length > 0 && !equivalent;
+      const reason = !hasUser || implied.length === 0
+        ? 'none'
+        : equivalent
+          ? 'none'
+          : userLevels!.length !== implied.length
+            ? 'length-mismatch'
+            : 'name-mismatch';
+      void logParserDiagnostic(args.sessionId, 'parseHierarchicalColumns', 'level-conflict', {
+        sheet: s.sheet.name,
+        detected,
+        reason,
+        userLevels: userLevels ?? [],
+        classifierLevels: implied,
+      }, s.sheet.name);
+
+      const result = parseHierarchicalColumns(s.sheet, s.cls, hasUser ? userLevels : undefined, args.sessionId);
+      perSheet[s.sheet.name] = {
+        items: result.items,
+        personMappings: result.personMappings,
+        resolvedLevels: result.resolvedLevels,
+      };
       result.resolvedLevels.forEach(name => {
         if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
       });
-      // Items keep their parentId references intact within this sheet's batch.
-      allItems.push(...result.items);
       result.personMappings.forEach(p => personSet.add(p.foundName));
       sheetNames.push(s.sheet.name);
+
+      if (detected) {
+        conflicts.push({
+          sheetName: s.sheet.name,
+          userLevels: userLevels!,
+          classifierLevels: implied,
+          sheetClassification: s.cls,
+          parsedSheet: s.sheet,
+          initialItemCount: result.items.length,
+        });
+      }
     }
 
-    // Build PlanLevel[] from union (in order).
+    // Stash per-sheet snapshots so the conflict UI can swap one sheet's results.
+    setHierResultsBySheet(perSheet);
+    setHierSheetOrder(sheetNames);
+
+    if (conflicts.length > 0) {
+      setPendingConflicts(conflicts);
+      // Defer completion until the user resolves each conflict.
+      return null;
+    }
+
+    const allItems: PlanItem[] = sheetNames.flatMap(n => perSheet[n]?.items ?? []);
     const resolvedLevels: PlanLevel[] = levelNamesUnion.length > 0
       ? levelNamesUnion.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
       : DEFAULT_LEVELS.slice(0, 3);
@@ -421,6 +517,91 @@ export function SpreadsheetImportStep({
     onComplete(items, personMappings, levels);
   };
 
+  // ── Phase 4b.2: conflict resolution apply ───────────────────────────────
+  const handleApplyLevelChoice = async (
+    conflict: { sheetName: string; userLevels: string[]; classifierLevels: string[]; sheetClassification: SheetClassification; parsedSheet: import('@/utils/spreadsheet-parser').ParsedSheet; initialItemCount: number },
+    choice: LevelChoice,
+  ) => {
+    if (choice === 'reconfigure') {
+      // Drop the queue entirely and fall through to the existing toggle UI.
+      setPendingConflicts([]);
+      setPhase('mapping');
+      return;
+    }
+
+    setConflictApplyBusy(true);
+    try {
+      const newLevels = choice === 'user' ? conflict.userLevels : conflict.classifierLevels;
+      const itemsBefore = hierResultsBySheet[conflict.sheetName]?.items.length ?? conflict.initialItemCount;
+      const result = parseHierarchicalColumns(conflict.parsedSheet, conflict.sheetClassification, newLevels, sessionId);
+      const itemsAfter = result.items.length;
+
+      void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'reparsed', {
+        sheet: conflict.sheetName,
+        trigger: 'user-apply',
+        choice,
+        newLevels,
+        itemsBefore,
+        itemsAfter,
+      }, conflict.sheetName);
+
+      setHierResultsBySheet(prev => ({
+        ...prev,
+        [conflict.sheetName]: {
+          items: result.items,
+          personMappings: result.personMappings,
+          resolvedLevels: result.resolvedLevels,
+        },
+      }));
+
+      // Pop this conflict; if more remain, stay on the screen.
+      setPendingConflicts(prev => {
+        const next = prev.filter(c => c.sheetName !== conflict.sheetName);
+        if (next.length === 0) {
+          // All conflicts resolved — finalize using current snapshots.
+          // Defer using a microtask so the state update lands first.
+          queueMicrotask(() => finalizeFromHierSnapshots());
+        }
+        return next;
+      });
+    } finally {
+      setConflictApplyBusy(false);
+    }
+  };
+
+  const finalizeFromHierSnapshots = async () => {
+    // Read latest snapshot via state setter pattern to avoid stale closure.
+    let snapshots: typeof hierResultsBySheet = {};
+    let order: string[] = [];
+    setHierResultsBySheet(prev => { snapshots = prev; return prev; });
+    setHierSheetOrder(prev => { order = prev; return prev; });
+
+    const allItems: PlanItem[] = order.flatMap(n => snapshots[n]?.items ?? []);
+    const personSet = new Set<string>();
+    const levelNamesUnion: string[] = [];
+    for (const n of order) {
+      const r = snapshots[n];
+      if (!r) continue;
+      r.personMappings.forEach(p => personSet.add(p.foundName));
+      r.resolvedLevels.forEach(name => {
+        if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
+      });
+    }
+    const resolvedLevels: PlanLevel[] = levelNamesUnion.length > 0
+      ? levelNamesUnion.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
+      : DEFAULT_LEVELS.slice(0, 3);
+    const personMappings: PersonMapping[] = Array.from(personSet).map((name, i) => ({
+      id: String(i + 1), foundName: name, email: '', isResolved: false,
+    }));
+
+    await persistAndComplete({
+      items: allItems,
+      personMappings,
+      levels: resolvedLevels,
+      sheetNames: order,
+    });
+  };
+
   if (phase === 'parsing') {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
@@ -435,6 +616,26 @@ export function SpreadsheetImportStep({
       <div className="flex flex-col items-center justify-center py-16 gap-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="text-sm text-muted-foreground">Generating plan items…</p>
+      </div>
+    );
+  }
+
+  if (phase === 'level-conflict' && pendingConflicts.length > 0) {
+    const current = pendingConflicts[0];
+    return (
+      <div className="w-full max-w-4xl mx-auto space-y-4">
+        {pendingConflicts.length > 1 && (
+          <p className="text-xs text-muted-foreground">
+            Resolving level conflicts ({pendingConflicts.length} sheet{pendingConflicts.length === 1 ? '' : 's'} remaining)
+          </p>
+        )}
+        <LevelConflictBlock
+          sheetName={current.sheetName}
+          userLevels={current.userLevels}
+          classifierLevels={current.classifierLevels}
+          busy={conflictApplyBusy}
+          onApply={(choice) => handleApplyLevelChoice(current, choice)}
+        />
       </div>
     );
   }

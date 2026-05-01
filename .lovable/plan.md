@@ -1,55 +1,118 @@
-## Diagnose row 6 cell layout for Tulane file
+## Phase 4b.2 — Wire user-stated levels into hierarchical parser + add conflict UI
 
-### What we know now (no fix yet)
+### Goal
+Forward `processingConfig.planLevels` (already collected on Screen 2) down to `parseHierarchicalColumns` for Pattern B/C dispatches, surface an informational block on the picker when user levels exist, and add a conflict-resolution block on the mapping screen when user levels disagree with classifier `implied_levels`. No classifier or dispatcher changes.
 
-- `parseSpreadsheetFile` (`src/utils/spreadsheet-parser.ts:75-90`) is the **single source** for `sheet.rows`. Both the classifier preview and the hierarchical parser consume the exact same array — there is no second read of the file.
-- It calls `XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false })`. With `defval: null` empty cells *should* become `null` rather than be skipped, but the SheetJS library's row-array length is determined per-row by the rightmost defined cell — and merged-cell handling, phantom format-only cells, and shared-strings quirks can shift indices.
-- Your external openpyxl read says: `0=Goals, 1=Objectives, 2=Strategies, 3=None, 4=Tactics`. If our SheetJS read agrees, the classifier is being fed the wrong column layout and is correctly classifying what it sees — meaning the bug is in **how we read the sheet**, not in the parser/classifier downstream.
-- If our SheetJS read DISAGREES with openpyxl (e.g. shows `Tactics` at index 3), then the bug is downstream — possibly in `parseHierarchicalColumns` resolving the wrong column index because `implied_levels` from the classifier maps to a header-row position that differs from the data-row position.
+### Files & changes
 
-The two libraries can disagree on column indexing because the Tulane file has merged cells (A1:U1, A2:C2, … A5:C5) above the header row. SheetJS's `!ref` bound and openpyxl's iteration handle merged-cell index drift differently.
+**1. `src/pages/Index.tsx`**
+- At the existing `<FileUploadStep ... />` mount (~line 799), add prop:
+  `userLevels={processingConfig?.planLevels && processingConfig.planLevels.length > 0 ? processingConfig.planLevels : undefined}`
 
-### Diagnostic patch (server-side logging only)
+**2. `src/components/steps/FileUploadStep.tsx`**
+- Add `userLevels?: string[]` to `FileUploadStepProps` and destructure.
+- Forward to `<SheetPickerStep userLevels={userLevels} ... />` and `<SpreadsheetImportStep userLevels={userLevels} ... />` at the existing mount sites (~lines 1072 and 1085).
 
-Add one new `log_type: 'raw-row-snapshot'` to `parser_diagnostics` from inside `parseHierarchicalColumns` BEFORE any other logic runs. For the configured `header_row_index` and the next 2 data rows, log:
+**3. `src/components/steps/SheetPickerStep.tsx`**
+- Add `userLevels?: string[]` to props.
+- Render an informational block in the `<CardContent>` block, **above** the directives `Collapsible` (around line 335) and **below** the `needs_user_clarification` alert. Render only when `userLevels?.length > 0`.
+- Use the existing `Alert` + `Info` icon styling (matches scope-variation banner aesthetic):
+  ```
+  ℹ️ You said this plan uses {N} levels: {Level1} → {Level2} → ... → {LevelN}.
+     We'll match these against detected structures.
+  ```
+- Purely informational. No interaction.
 
-```
-{
-  sheetName,
-  headerRowIndex,
-  dataStartRow,
-  totalColumnsInSheet: sheet.columnCount,
-  rows: [
-    {
-      rowIndex,
-      length: row.length,
-      cells: [
-        { idx: 0, raw: <value>, type: typeof, isNull: row[i]===null, hex: <hex of String(v)> },
-        ... up to idx 15
-      ]
-    },
-    ...
-  ]
-}
-```
+**4. `src/components/steps/SpreadsheetImportStep.tsx`**
+- Add `userLevels?: string[]` to `SpreadsheetImportStepProps` and destructure.
+- Add per-sheet `effectiveLevelsBySheet` state: `Record<string /*sheetName*/, string[]>`. Initialize lazily — when a sheet first parses, set `effectiveLevelsBySheet[sheet.name] = userLevels?.length ? userLevels : (cls.structure?.implied_levels ?? [])`.
+- In the `tryDispatchHierarchical` loop where `parseHierarchicalColumns(s.sheet, s.cls, undefined, args.sessionId)` is called (line 253), change the third arg to pass effective levels for that sheet, defaulting to `userLevels` when set.
+- Add a `levels-source` diagnostic log per sheet right before invoking the parser:
+  ```ts
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'levels-source', {
+    sheet: s.sheet.name,
+    source: userLevels?.length ? 'user' : 'classifier',
+    levels: effectiveLevels,
+    classifierLevels: s.cls?.structure?.implied_levels ?? [],
+  }, s.sheet.name);
+  ```
+- Add a `level-conflict` diagnostic per sheet using a `levelsEquivalent(a, b)` helper that compares lengths and `stemKey`-normalized values pairwise (duplicate the `stemKey` helper locally to avoid an import dependency, or export it from `parseHierarchicalColumns.ts`):
+  ```ts
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'level-conflict', {
+    sheet: s.sheet.name,
+    detected: !equivalent,
+    reason: equivalent ? 'none' : (lenDiff ? 'length-mismatch' : 'name-mismatch'),
+    userLevels, classifierLevels: implied,
+  }, s.sheet.name);
+  ```
+- Track conflicts in state: `conflictsBySheet: Record<string, { userLevels: string[]; classifierLevels: string[] }>` populated only for sheets with both arrays non-empty AND not equivalent.
+- For the mapping flow (the `phase === 'mapping'` branch at line 453), pass `conflictsBySheet`, `effectiveLevelsBySheet`, and an `onApplyLevelChoice(sheetName, choice)` callback into `<MappingInterface ... />`.
+- `onApplyLevelChoice` updates `effectiveLevelsBySheet[sheetName]`, re-runs `parseHierarchicalColumns` for that sheet, updates the displayed item count + sections, and logs:
+  ```ts
+  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'reparsed', {
+    sheet, trigger: 'user-apply', newLevels, itemsBefore, itemsAfter,
+  }, sheet);
+  ```
 
-Why this is enough to settle the question:
-- If `headerRow` has `Tactics` at idx 3 and `Resp. Office` at idx 4 → SheetJS agrees with Excel UI; openpyxl is wrong; the downstream parser is at fault.
-- If `headerRow` has `null` (or `""`) at idx 3 and `Tactics` at idx 4 → SheetJS agrees with openpyxl; the read itself is the bug. Then we know to either (a) switch SheetJS options (`raw`, `range`, expand merged cells) or (b) post-process row arrays to re-align by the header row's real positions.
-- The data-row snapshot tells us whether the **leaf cells in column D** (`1.1.1.1 Provide an annual…`) land at idx 3 or idx 4 in our parsed rows. That's what determines whether the resolved hierarchy column index actually points at the right data.
+**5. `src/components/spreadsheet/MappingInterface.tsx`**
+- Add optional props: `userLevels?: string[]`, `classifierLevels?: string[]`, `onApplyLevelChoice?: (choice: 'user' | 'classifier' | 'reconfigure') => void`. (Conflict context is per-active-sheet — passed in from the parent.)
+- Render a conflict block at the top of the mapping screen, **before** the existing column-mapping `Card`, only when both `userLevels?.length` and `classifierLevels?.length` are present and non-equivalent (parent gates this — child renders if props supplied).
+- Use the existing `Alert` (or matching `Card`) styling. Layout:
+  ```
+  ✨ AI Analysis
 
-### Files to touch
+  You said this plan uses {N} levels:
+    {Level1} → ... → {LevelN}
 
-- `src/utils/parsers/parseHierarchicalColumns.ts` — emit the new `raw-row-snapshot` log near the existing `entry` log; no behavior changes.
-- `src/components/admin/ParserDiagnosticsCard.tsx` — render the new `raw-row-snapshot` payload (existing card already pretty-prints unknown payloads as JSON, so this may need only a label tweak).
+  The AI detected {M} levels in this sheet:
+    {ClassifierLevel1} → ... → {ClassifierLevelM}
 
-No parser logic changes. No classifier changes. No fix proposals until the user re-uploads Tulane and shares the snapshot from the admin Parser Diagnostics panel.
+  ⚠️ Mismatch detected. Which is correct?
+  (•) Use my {N} levels   (default)
+  ( ) Use AI's {M} levels
+  ( ) Let me reconfigure
+        [ Apply ]
+  ```
+- Use `RadioGroup`/`RadioGroupItem` (already in the project at `src/components/ui/radio-group.tsx`).
+- "Apply" calls `onApplyLevelChoice(choice)`. "Let me reconfigure" falls through to the existing toggle UI (no new UI in 4b.2).
 
-### After data comes back
+**6. `src/utils/parsers/parseHierarchicalColumns.ts`**
+- No code change. Optional: export `stemKey` so the equivalence helper in `SpreadsheetImportStep` can reuse it (preferred over duplication).
 
-Two possible follow-up paths, decided by what the snapshot shows:
+### Equivalence rules
+Two level arrays are equivalent iff:
+1. Same length, AND
+2. For every index i, `stemKey(a[i]) === stemKey(b[i])`
 
-1. **SheetJS-read drift (idx 3 = null, idx 4 = Tactics).** Fix `parseSpreadsheetFile` — likely by reading with `range: ws['!ref']` explicitly normalized and/or padding each row to `columnCount` so cells stay column-aligned. May also need to expand merged cells via `XLSX.utils.decode_range` + `!merges` handling.
-2. **Downstream resolution drift (header agrees with Excel UI but data rows misalign).** Fix is in `resolveHierarchyColumns` / how `implied_levels` map to indices when the classifier and the data rows have differently-shaped arrays.
+Length-mismatch → `reason: 'length-mismatch'`. Same length, position differs → `reason: 'name-mismatch'`.
 
-We pick the right fix only after seeing the row 6 snapshot.
+### Resolution priority (already implemented in 4b.1)
+1. `userLevels` (when non-empty)
+2. `structure.implied_levels`
+3. Ordinal column position fallback
+
+When userLevels are passed, they replace `implied_levels` for column resolution. Stem-fold matching from 4b.1 still applies.
+
+### Out of scope (deferred)
+- Pattern A enhancements (4c)
+- Mapping UI redesign beyond the conflict block (4d)
+- Pattern D (4e)
+- Persisting overrides across sessions
+- Tulane 8.3.1.2 triple-duplication
+
+### Validation scenarios to test
+1. No user levels, Pattern C file → no conflict UI, no info block, parser uses classifier (current behavior).
+2. User levels exactly matching classifier → info block on picker, no conflict UI, parser uses userLevels (same result).
+3. User levels stem-fold equivalent (Goal vs Goals) → info block, no conflict UI.
+4. User states 5 levels, classifier returned 4 → conflict UI on mapping, default = user, can switch.
+5. User states different names (Pillar/Goal/Objective/Action vs Goal/Objective/Strategy/Tactic) → conflict UI, both visible, user picks.
+6. Apply "Use my levels" → re-parse runs, item count updates, `reparsed` log fires.
+7. Apply "Use AI's levels" → re-parse with classifier levels.
+8. "Let me reconfigure" → falls through to existing toggle mapping UI.
+
+### Report-back after ship
+- Files changed list
+- What's in 4b.2 vs deferred
+- Diagnostic log examples (`levels-source`, `level-conflict`, `reparsed`) from one test upload
+- Confirm zero test-file-specific hardcoding
+- Validation scenario results
