@@ -61,6 +61,19 @@ function normalize(s: string): string {
 }
 
 /**
+ * Stem-fold match key: lowercase + trim + strip a single trailing 's' for
+ * plural tolerance ("Tactic" ↔ "Tactics", "Goal" ↔ "Goals"). Only stems
+ * tokens longer than 3 chars to avoid clobbering short headers like "S".
+ * Storage of resolved level names always keeps the original input — this
+ * key is used purely for matcher equality.
+ */
+function stemKey(s: string): string {
+  const n = String(s || '').trim().toLowerCase();
+  if (n.length > 3 && n.endsWith('s')) return n.slice(0, -1);
+  return n;
+}
+
+/**
  * Whitespace-only normalization for parent-dedupe comparisons.
  * Trims leading/trailing whitespace AND collapses internal whitespace runs to
  * a single space. Does NOT change case or strip punctuation — purely cosmetic.
