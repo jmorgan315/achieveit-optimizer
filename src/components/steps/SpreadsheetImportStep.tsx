@@ -173,6 +173,14 @@ export function SpreadsheetImportStep({
             await persistAndComplete(dispatched);
             return;
           }
+          // tryDispatchHierarchical may have stashed pending conflicts.
+          // Use a functional read via setState to avoid stale-closure issues.
+          let hasConflicts = false;
+          setPendingConflicts(prev => { hasConflicts = prev.length > 0; return prev; });
+          if (hasConflicts) {
+            setPhase('level-conflict');
+            return;
+          }
         }
 
         // If user already picked sheets in SheetPickerStep, jump past detection.
