@@ -1,118 +1,78 @@
-## Phase 4b.2 — Wire user-stated levels into hierarchical parser + add conflict UI
+## Phase 4b.2 fix — Conflict UI bypass
 
-### Goal
-Forward `processingConfig.planLevels` (already collected on Screen 2) down to `parseHierarchicalColumns` for Pattern B/C dispatches, surface an informational block on the picker when user levels exist, and add a conflict-resolution block on the mapping screen when user levels disagree with classifier `implied_levels`. No classifier or dispatcher changes.
+### Problem
+`tryDispatchHierarchical` returns `null` for both "fallback to legacy mapping" and "conflicts pending". The mount `useEffect` then tries to read `pendingConflicts` via a `setPendingConflicts(prev => …)` round-trip immediately after dispatch returns. Even though that pattern reads the latest state, control flow has already raced past in some paths, and more importantly the design conflates two semantically different null cases. When the bypass occurs, the screen lands on `mapping`, `MappingInterface` initializes with `DEFAULT_LEVELS.slice(0,3)` ("Strategic Priority" / "Objective" / "Goal"), the legacy generator runs, and the 171 hierarchical items in `hierResultsBySheet` are discarded.
 
-### Files & changes
+### Fix shape
+Replace the `null` return with a discriminated union so the caller can branch synchronously without touching React state mid-decision. Then add a small belt-and-braces `useEffect` that catches the case if a future code path ever populates `pendingConflicts` while `phase !== 'level-conflict'`.
 
-**1. `src/pages/Index.tsx`**
-- At the existing `<FileUploadStep ... />` mount (~line 799), add prop:
-  `userLevels={processingConfig?.planLevels && processingConfig.planLevels.length > 0 ? processingConfig.planLevels : undefined}`
+### Changes
 
-**2. `src/components/steps/FileUploadStep.tsx`**
-- Add `userLevels?: string[]` to `FileUploadStepProps` and destructure.
-- Forward to `<SheetPickerStep userLevels={userLevels} ... />` and `<SpreadsheetImportStep userLevels={userLevels} ... />` at the existing mount sites (~lines 1072 and 1085).
+**1. `src/components/steps/SpreadsheetImportStep.tsx` — `tryDispatchHierarchical` return type**
 
-**3. `src/components/steps/SheetPickerStep.tsx`**
-- Add `userLevels?: string[]` to props.
-- Render an informational block in the `<CardContent>` block, **above** the directives `Collapsible` (around line 335) and **below** the `needs_user_clarification` alert. Render only when `userLevels?.length > 0`.
-- Use the existing `Alert` + `Info` icon styling (matches scope-variation banner aesthetic):
-  ```
-  ℹ️ You said this plan uses {N} levels: {Level1} → {Level2} → ... → {LevelN}.
-     We'll match these against detected structures.
-  ```
-- Purely informational. No interaction.
+New return contract:
+```ts
+type DispatchResult =
+  | { kind: 'completed'; payload: { items: PlanItem[]; personMappings: PersonMapping[]; levels: PlanLevel[]; sheetNames: string[] } }
+  | { kind: 'conflicts'; conflicts: PendingConflict[]; perSheet: Record<string, {...}>; sheetNames: string[] }
+  | { kind: 'fallback'; reason: string };
+```
 
-**4. `src/components/steps/SpreadsheetImportStep.tsx`**
-- Add `userLevels?: string[]` to `SpreadsheetImportStepProps` and destructure.
-- Add per-sheet `effectiveLevelsBySheet` state: `Record<string /*sheetName*/, string[]>`. Initialize lazily — when a sheet first parses, set `effectiveLevelsBySheet[sheet.name] = userLevels?.length ? userLevels : (cls.structure?.implied_levels ?? [])`.
-- In the `tryDispatchHierarchical` loop where `parseHierarchicalColumns(s.sheet, s.cls, undefined, args.sessionId)` is called (line 253), change the third arg to pass effective levels for that sheet, defaulting to `userLevels` when set.
-- Add a `levels-source` diagnostic log per sheet right before invoking the parser:
-  ```ts
-  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'levels-source', {
-    sheet: s.sheet.name,
-    source: userLevels?.length ? 'user' : 'classifier',
-    levels: effectiveLevels,
-    classifierLevels: s.cls?.structure?.implied_levels ?? [],
-  }, s.sheet.name);
-  ```
-- Add a `level-conflict` diagnostic per sheet using a `levelsEquivalent(a, b)` helper that compares lengths and `stemKey`-normalized values pairwise (duplicate the `stemKey` helper locally to avoid an import dependency, or export it from `parseHierarchicalColumns.ts`):
-  ```ts
-  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'level-conflict', {
-    sheet: s.sheet.name,
-    detected: !equivalent,
-    reason: equivalent ? 'none' : (lenDiff ? 'length-mismatch' : 'name-mismatch'),
-    userLevels, classifierLevels: implied,
-  }, s.sheet.name);
-  ```
-- Track conflicts in state: `conflictsBySheet: Record<string, { userLevels: string[]; classifierLevels: string[] }>` populated only for sheets with both arrays non-empty AND not equivalent.
-- For the mapping flow (the `phase === 'mapping'` branch at line 453), pass `conflictsBySheet`, `effectiveLevelsBySheet`, and an `onApplyLevelChoice(sheetName, choice)` callback into `<MappingInterface ... />`.
-- `onApplyLevelChoice` updates `effectiveLevelsBySheet[sheetName]`, re-runs `parseHierarchicalColumns` for that sheet, updates the displayed item count + sections, and logs:
-  ```ts
-  void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'reparsed', {
-    sheet, trigger: 'user-apply', newLevels, itemsBefore, itemsAfter,
-  }, sheet);
-  ```
+- Remove all `setHierResultsBySheet` / `setHierSheetOrder` / `setPendingConflicts` calls from inside `tryDispatchHierarchical`. The function becomes a pure decision producer (still does its parsing + diagnostic logging).
+- Return `{ kind: 'fallback', reason }` for: missing `layout_classification`, empty/error classification, mixed routing.
+- Return `{ kind: 'conflicts', conflicts, perSheet, sheetNames }` when `conflicts.length > 0`.
+- Return `{ kind: 'completed', payload }` when fully resolved.
 
-**5. `src/components/spreadsheet/MappingInterface.tsx`**
-- Add optional props: `userLevels?: string[]`, `classifierLevels?: string[]`, `onApplyLevelChoice?: (choice: 'user' | 'classifier' | 'reconfigure') => void`. (Conflict context is per-active-sheet — passed in from the parent.)
-- Render a conflict block at the top of the mapping screen, **before** the existing column-mapping `Card`, only when both `userLevels?.length` and `classifierLevels?.length` are present and non-equivalent (parent gates this — child renders if props supplied).
-- Use the existing `Alert` (or matching `Card`) styling. Layout:
-  ```
-  ✨ AI Analysis
+**2. `src/components/steps/SpreadsheetImportStep.tsx` — mount `useEffect` caller (lines 165–187)**
 
-  You said this plan uses {N} levels:
-    {Level1} → ... → {LevelN}
+Replace the `if (dispatched)` / `setPendingConflicts(prev => …)` block with a synchronous switch on `result.kind`:
+```ts
+const result = await tryDispatchHierarchical({...});
+switch (result.kind) {
+  case 'completed':
+    await persistAndComplete(result.payload);
+    return;
+  case 'conflicts':
+    setHierResultsBySheet(result.perSheet);
+    setHierSheetOrder(result.sheetNames);
+    setPendingConflicts(result.conflicts);
+    setPhase('level-conflict');
+    return;
+  case 'fallback':
+    // fall through to existing mapping/detection branch below
+    break;
+}
+```
+This guarantees `setPhase('level-conflict')` is the unconditional, synchronous next call when conflicts exist — no state-read race possible.
 
-  The AI detected {M} levels in this sheet:
-    {ClassifierLevel1} → ... → {ClassifierLevelM}
+**3. `src/components/steps/SpreadsheetImportStep.tsx` — defensive guard `useEffect`**
 
-  ⚠️ Mismatch detected. Which is correct?
-  (•) Use my {N} levels   (default)
-  ( ) Use AI's {M} levels
-  ( ) Let me reconfigure
-        [ Apply ]
-  ```
-- Use `RadioGroup`/`RadioGroupItem` (already in the project at `src/components/ui/radio-group.tsx`).
-- "Apply" calls `onApplyLevelChoice(choice)`. "Let me reconfigure" falls through to the existing toggle UI (no new UI in 4b.2).
+Add a small effect (cheap, ~5 lines) that runs whenever `pendingConflicts` or `phase` changes:
+```ts
+useEffect(() => {
+  if (pendingConflicts.length > 0 && phase !== 'level-conflict' && phase !== 'generating') {
+    console.warn('[ssphase4b] guard: pendingConflicts present but phase=', phase, '— forcing level-conflict');
+    setPhase('level-conflict');
+  }
+}, [pendingConflicts, phase]);
+```
+Protects against any future code path that might populate conflicts without setting phase.
 
-**6. `src/utils/parsers/parseHierarchicalColumns.ts`**
-- No code change. Optional: export `stemKey` so the equivalence helper in `SpreadsheetImportStep` can reuse it (preferred over duplication).
+**4. No changes to** `MappingInterface`, `LevelConflictBlock`, `parseHierarchicalColumns`, `SheetPickerStep`, `FileUploadStep`, or `Index.tsx`. Phase 4b.2 wiring elsewhere is correct and validated.
 
-### Equivalence rules
-Two level arrays are equivalent iff:
-1. Same length, AND
-2. For every index i, `stemKey(a[i]) === stemKey(b[i])`
+### Why this fixes all three reported bugs
+- **Bug 1 (conflict UI bypassed):** Synchronous switch on the discriminated union makes the conflict path unmissable. No state round-trip, no race.
+- **Bugs 2 & 3 ("Strategic Priority"/"Objective"/"Goal" leakage):** Those labels appeared only because the bypass dropped users into `mapping` with `DEFAULT_LEVELS.slice(0, 3)`. Once the conflict screen renders correctly, the hierarchical path completes via `finalizeFromHierSnapshots → persistAndComplete` and the legacy mapping default levels never enter the picture. If the user explicitly chooses "Let me reconfigure", they intentionally enter the legacy mapping flow — that's still correct behavior per spec.
 
-Length-mismatch → `reason: 'length-mismatch'`. Same length, position differs → `reason: 'name-mismatch'`.
+### Validation after deploy (Tulane, 5 user levels: Pillar/Goal/Objective/Strategy/Tactic)
+1. Conflict UI appears after sheet picker; default radio = "Use my 5 levels"; "Use AI's 4 levels" and "Let me reconfigure" both selectable.
+2. "Use my 5 levels" → Apply → `reparsed` log fires; item count visible; final import uses 5-level hierarchy with user names.
+3. "Use AI's 4 levels" → Apply → `reparsed` log fires; item count = 171 (matches non-user-level baseline); final import uses classifier levels.
+4. "Let me reconfigure" → Apply → existing toggle mapping UI appears (intentional fall-through).
+5. No "Strategic Priority" / "Objective" / "Goal" labels in the final imported items on any hierarchical path (1, 2, 3).
+6. Diagnostic confirmation: every conflict-path session has `level-conflict { detected: true }` followed by `reparsed { trigger: 'user-apply', choice }` for the user's selection.
 
-### Resolution priority (already implemented in 4b.1)
-1. `userLevels` (when non-empty)
-2. `structure.implied_levels`
-3. Ordinal column position fallback
-
-When userLevels are passed, they replace `implied_levels` for column resolution. Stem-fold matching from 4b.1 still applies.
-
-### Out of scope (deferred)
+### Out of scope
 - Pattern A enhancements (4c)
-- Mapping UI redesign beyond the conflict block (4d)
-- Pattern D (4e)
+- Multi-sheet conflict queueing edge cases beyond what already works
 - Persisting overrides across sessions
-- Tulane 8.3.1.2 triple-duplication
-
-### Validation scenarios to test
-1. No user levels, Pattern C file → no conflict UI, no info block, parser uses classifier (current behavior).
-2. User levels exactly matching classifier → info block on picker, no conflict UI, parser uses userLevels (same result).
-3. User levels stem-fold equivalent (Goal vs Goals) → info block, no conflict UI.
-4. User states 5 levels, classifier returned 4 → conflict UI on mapping, default = user, can switch.
-5. User states different names (Pillar/Goal/Objective/Action vs Goal/Objective/Strategy/Tactic) → conflict UI, both visible, user picks.
-6. Apply "Use my levels" → re-parse runs, item count updates, `reparsed` log fires.
-7. Apply "Use AI's levels" → re-parse with classifier levels.
-8. "Let me reconfigure" → falls through to existing toggle mapping UI.
-
-### Report-back after ship
-- Files changed list
-- What's in 4b.2 vs deferred
-- Diagnostic log examples (`levels-source`, `level-conflict`, `reparsed`) from one test upload
-- Confirm zero test-file-specific hardcoding
-- Validation scenario results

@@ -158,29 +158,28 @@ export function SpreadsheetImportStep({
           sheetCount: det.sheets.length,
           sheetNames: sheets.map(s => s.name),
         });
-        // === Phase 4b.1 dispatch ===
-        // If picker pre-selected sheets AND every selected sheet routes to the
-        // hierarchical parser, run it end-to-end and skip the mapping screen.
-        // Otherwise (mixed or A/D/unknown), fall through to existing flow.
+        // === Phase 4b.1/4b.2 dispatch ===
+        // Pure synchronous switch on a discriminated-union result, so the
+        // conflict path can never race past `setPhase('level-conflict')`.
         if (validPreselected && validPreselected.length > 0) {
-          const dispatched = await tryDispatchHierarchical({
+          const result = await tryDispatchHierarchical({
             sessionId,
             file,
             parsedSheets: sheets,
             selectedIndices: validPreselected,
           });
-          if (dispatched) {
-            await persistAndComplete(dispatched);
+          if (result.kind === 'completed') {
+            await persistAndComplete(result.payload);
             return;
           }
-          // tryDispatchHierarchical may have stashed pending conflicts.
-          // Use a functional read via setState to avoid stale-closure issues.
-          let hasConflicts = false;
-          setPendingConflicts(prev => { hasConflicts = prev.length > 0; return prev; });
-          if (hasConflicts) {
+          if (result.kind === 'conflicts') {
+            setHierResultsBySheet(result.perSheet);
+            setHierSheetOrder(result.sheetNames);
+            setPendingConflicts(result.conflicts);
             setPhase('level-conflict');
             return;
           }
+          // result.kind === 'fallback' → fall through to existing mapping flow
         }
 
         // If user already picked sheets in SheetPickerStep, jump past detection.
