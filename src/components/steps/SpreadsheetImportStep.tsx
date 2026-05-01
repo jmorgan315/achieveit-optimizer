@@ -727,9 +727,11 @@ export function SpreadsheetImportStep({
       const conflict = pendingConflicts.find(c => c.sheetName === name);
       const headerRowIdx = cls?.structure?.header_row_index ?? 0;
       const nameColIdx = cls?.structure?.name_column_index ?? null;
-      // Parsed sheet for header row lookup. Pull lazily from conflict snapshot
-      // or fall back to null — both Continue & adjust paths still work.
-      const parsedSheet = conflict?.parsedSheet;
+      // Parsed sheet for header row lookup. Prefer the conflict snapshot when
+      // present; otherwise fall back to the detection-built ParsedSheet so the
+      // happy path (no conflicts) still gets a populated attribute list.
+      const detSheet = detection?.sheets.find(s => s.sheet.name === name)?.sheet;
+      const parsedSheet = conflict?.parsedSheet ?? detSheet;
       let nameSourceColumn: string | null = null;
       let attributeMappings: AttributeMapping[] = [];
       if (parsedSheet) {
