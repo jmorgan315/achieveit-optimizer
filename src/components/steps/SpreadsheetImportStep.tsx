@@ -614,16 +614,9 @@ export function SpreadsheetImportStep({
         },
       }));
 
-      // Pop this conflict; if more remain, stay on the screen.
-      setPendingConflicts(prev => {
-        const next = prev.filter(c => c.sheetName !== conflict.sheetName);
-        if (next.length === 0) {
-          // All conflicts resolved — finalize using current snapshots.
-          // Defer using a microtask so the state update lands first.
-          queueMicrotask(() => finalizeFromHierSnapshots());
-        }
-        return next;
-      });
+      // Phase 4d.1: pop the conflict but stay on the confirmation screen.
+      // The user must click "Looks good — Continue" to finalize.
+      setPendingConflicts(prev => prev.filter(c => c.sheetName !== conflict.sheetName));
     } finally {
       setConflictApplyBusy(false);
     }
