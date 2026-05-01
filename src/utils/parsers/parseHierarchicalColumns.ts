@@ -61,6 +61,19 @@ function normalize(s: string): string {
 }
 
 /**
+ * Stem-fold match key: lowercase + trim + strip a single trailing 's' for
+ * plural tolerance ("Tactic" ↔ "Tactics", "Goal" ↔ "Goals"). Only stems
+ * tokens longer than 3 chars to avoid clobbering short headers like "S".
+ * Storage of resolved level names always keeps the original input — this
+ * key is used purely for matcher equality.
+ */
+function stemKey(s: string): string {
+  const n = String(s || '').trim().toLowerCase();
+  if (n.length > 3 && n.endsWith('s')) return n.slice(0, -1);
+  return n;
+}
+
+/**
  * Whitespace-only normalization for parent-dedupe comparisons.
  * Trims leading/trailing whitespace AND collapses internal whitespace runs to
  * a single space. Does NOT change case or strip punctuation — purely cosmetic.
@@ -134,8 +147,8 @@ function resolveHierarchyColumns(
 
   const headerIndexByName = new Map<string, number>();
   headerRow.forEach((h, i) => {
-    if (h && !headerIndexByName.has(normalize(h))) {
-      headerIndexByName.set(normalize(h), i);
+    if (h && !headerIndexByName.has(stemKey(h))) {
+      headerIndexByName.set(stemKey(h), i);
     }
   });
 
@@ -144,7 +157,7 @@ function resolveHierarchyColumns(
   const usedColumnIndices = new Set<number>();
 
   provided.forEach((levelName, levelIdx) => {
-    const headerMatch = headerIndexByName.get(normalize(levelName));
+    const headerMatch = headerIndexByName.get(stemKey(levelName));
     if (headerMatch != null && !usedColumnIndices.has(headerMatch)) {
       resolvedColumnIndices.push(headerMatch);
       usedColumnIndices.add(headerMatch);
@@ -287,6 +300,62 @@ export function parseHierarchicalColumns(
   }
 
   const hierarchyColSet = new Set(resolution.resolvedColumnIndices.filter(i => i >= 0));
+
+  // ── BACKSTOP: deepest-level fill-ratio warning ────────────────────────
+  // If the deepest configured hierarchy level resolved to a column that's
+  // mostly empty across data rows, the resolution is almost certainly wrong
+  // (e.g. a spacer column got picked via ordinal fallback). Surface a
+  // diagnostic so we catch this without needing another raw-row-snapshot.
+  try {
+    const deepestLevelIdx = resolution.resolvedColumnIndices.length - 1;
+    const deepestColIdx = resolution.resolvedColumnIndices[deepestLevelIdx];
+    if (deepestColIdx != null && deepestColIdx >= 0) {
+      let nonEmpty = 0;
+      let total = 0;
+      for (let r = dataStartRow; r < sheet.rows.length; r++) {
+        const row = sheet.rows[r];
+        if (!Array.isArray(row)) continue;
+        const anyFilled = row.some(c => c != null && String(c).trim() !== '');
+        if (!anyFilled) continue; // skip fully-empty rows from denominator
+        total++;
+        const v = row[deepestColIdx];
+        if (v != null && String(v).trim() !== '') nonEmpty++;
+      }
+      const fillRatio = total > 0 ? nonEmpty / total : 0;
+      if (total > 0 && fillRatio < 0.5) {
+        const adjacent: Record<string, string | null> = {};
+        for (const offset of [-1, 1]) {
+          const adj = deepestColIdx + offset;
+          if (adj >= 0 && adj < headerRow.length) {
+            adjacent[String(adj)] = headerRow[adj] || null;
+          }
+        }
+        const warningPayload = {
+          sheet: sheet.name,
+          levelName: resolution.resolvedLevels[deepestLevelIdx],
+          levelIdx: deepestLevelIdx,
+          columnIndex: deepestColIdx,
+          headerAtColumn: headerRow[deepestColIdx] ?? null,
+          headerAtAdjacentColumns: adjacent,
+          nonEmptyCount: nonEmpty,
+          totalDataRows: total,
+          fillRatio: Number(fillRatio.toFixed(3)),
+          message: 'Deepest hierarchy level resolved to a mostly-empty column; resolution may be incorrect.',
+        };
+        console.warn('[ssphase4b] resolution-warning:', JSON.stringify(warningPayload));
+        void logParserDiagnostic(
+          sessionId,
+          'parseHierarchicalColumns',
+          'resolution-warning',
+          warningPayload,
+          sheet.name,
+        );
+      }
+    }
+  } catch (warnErr) {
+    // eslint-disable-next-line no-console
+    console.error('[ssphase4b] resolution-warning failed:', warnErr);
+  }
 
   // Map non-hierarchy columns → role from existing helper.
   const nonHierarchyColumns: Array<{ index: number; header: string; role: ColumnRole }> = [];
