@@ -147,8 +147,8 @@ function resolveHierarchyColumns(
 
   const headerIndexByName = new Map<string, number>();
   headerRow.forEach((h, i) => {
-    if (h && !headerIndexByName.has(normalize(h))) {
-      headerIndexByName.set(normalize(h), i);
+    if (h && !headerIndexByName.has(stemKey(h))) {
+      headerIndexByName.set(stemKey(h), i);
     }
   });
 
