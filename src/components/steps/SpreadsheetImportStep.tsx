@@ -22,14 +22,22 @@ import {
 } from '@/utils/parsers/parseHierarchicalColumns';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface, LevelConflictBlock, LevelChoice } from '@/components/spreadsheet/MappingInterface';
+import { MappingConfirmation, SheetSummary, DirectivesSummary, AttributeMapping } from '@/components/spreadsheet/MappingConfirmation';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
-type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict';
+type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict' | 'mapping-confirmation';
+
+interface ParserDirectivesShape {
+  exclude_sheets?: string[];
+  exclude_row_predicates?: string[];
+  include_only_recent?: boolean;
+}
 
 interface LayoutClassification {
   sheets?: SheetClassification[];
+  parser_directives?: ParserDirectivesShape;
   error?: string;
   [k: string]: unknown;
 }
@@ -113,6 +121,12 @@ export function SpreadsheetImportStep({
   >({});
   const [hierSheetOrder, setHierSheetOrder] = useState<string[]>([]);
 
+  // Phase 4d.1 — classifier metadata cached for the confirmation screen so we
+  // don't re-fetch layout_classification on render.
+  const [clsBySheetName, setClsBySheetName] = useState<Record<string, SheetClassification>>({});
+  const [parserDirectives, setParserDirectives] = useState<ParserDirectivesShape | null>(null);
+  const [dismissedPredicates, setDismissedPredicates] = useState<Set<string>>(new Set());
+
   // Parse on mount
   useEffect(() => {
     (async () => {
@@ -168,15 +182,25 @@ export function SpreadsheetImportStep({
             parsedSheets: sheets,
             selectedIndices: validPreselected,
           });
-          if (result.kind === 'completed') {
-            await persistAndComplete(result.payload);
-            return;
-          }
-          if (result.kind === 'conflicts') {
+          if (result.kind === 'completed' || result.kind === 'conflicts') {
+            // Stash classifier metadata for the confirmation screen.
+            setClsBySheetName(result.clsBySheetName);
+            setParserDirectives(result.parserDirectives ?? null);
             setHierResultsBySheet(result.perSheet);
             setHierSheetOrder(result.sheetNames);
-            setPendingConflicts(result.conflicts);
-            setPhase('level-conflict');
+            if (result.kind === 'conflicts') {
+              setPendingConflicts(result.conflicts);
+            }
+            setPhase('mapping-confirmation');
+            void logParserDiagnostic(sessionId, 'ssphase4d', 'mapping-confirmation-shown', {
+              sheets: result.sheetNames.map(n => ({
+                sheet: n,
+                pattern: result.clsBySheetName[n]?.pattern ?? 'unknown',
+                confidence: result.clsBySheetName[n]?.confidence ?? null,
+              })),
+              hasConflict: result.kind === 'conflicts',
+              hasDirectives: !!(result.parserDirectives?.exclude_row_predicates?.length),
+            });
             return;
           }
           // result.kind === 'fallback' → fall through to existing mapping flow
@@ -196,9 +220,14 @@ export function SpreadsheetImportStep({
   // pendingConflicts without switching phase, force the conflict screen
   // rather than silently rendering the legacy mapping UI.
   useEffect(() => {
-    if (pendingConflicts.length > 0 && phase !== 'level-conflict' && phase !== 'generating') {
-      console.warn('[ssphase4b] guard: pendingConflicts present but phase=', phase, '— forcing level-conflict');
-      setPhase('level-conflict');
+    if (
+      pendingConflicts.length > 0 &&
+      phase !== 'level-conflict' &&
+      phase !== 'mapping-confirmation' &&
+      phase !== 'generating'
+    ) {
+      console.warn('[ssphase4b] guard: pendingConflicts present but phase=', phase, '— forcing mapping-confirmation');
+      setPhase('mapping-confirmation');
     }
   }, [pendingConflicts, phase]);
 
@@ -206,8 +235,22 @@ export function SpreadsheetImportStep({
 
   type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
   type DispatchResult =
-    | { kind: 'completed'; payload: { items: PlanItem[]; personMappings: PersonMapping[]; levels: PlanLevel[]; sheetNames: string[] } }
-    | { kind: 'conflicts'; conflicts: PendingConflict[]; perSheet: HierPerSheet; sheetNames: string[] }
+    | {
+        kind: 'completed';
+        payload: { items: PlanItem[]; personMappings: PersonMapping[]; levels: PlanLevel[]; sheetNames: string[] };
+        perSheet: HierPerSheet;
+        sheetNames: string[];
+        clsBySheetName: Record<string, SheetClassification>;
+        parserDirectives: ParserDirectivesShape | null;
+      }
+    | {
+        kind: 'conflicts';
+        conflicts: PendingConflict[];
+        perSheet: HierPerSheet;
+        sheetNames: string[];
+        clsBySheetName: Record<string, SheetClassification>;
+        parserDirectives: ParserDirectivesShape | null;
+      }
     | { kind: 'fallback'; reason: string };
 
   /**
@@ -358,9 +401,13 @@ export function SpreadsheetImportStep({
       }
     }
 
+    const clsRecord: Record<string, SheetClassification> = {};
+    clsBySheetName.forEach((v, k) => { clsRecord[k] = v; });
+    const directives: ParserDirectivesShape | null = cls.parser_directives ?? null;
+
     if (conflicts.length > 0) {
       // Caller will stash perSheet/sheetNames and switch phase.
-      return { kind: 'conflicts', conflicts, perSheet, sheetNames };
+      return { kind: 'conflicts', conflicts, perSheet, sheetNames, clsBySheetName: clsRecord, parserDirectives: directives };
     }
 
     const allItems: PlanItem[] = sheetNames.flatMap(n => perSheet[n]?.items ?? []);
@@ -378,6 +425,10 @@ export function SpreadsheetImportStep({
     return {
       kind: 'completed',
       payload: { items: allItems, personMappings, levels: resolvedLevels, sheetNames },
+      perSheet,
+      sheetNames,
+      clsBySheetName: clsRecord,
+      parserDirectives: directives,
     };
   }
 
@@ -563,16 +614,9 @@ export function SpreadsheetImportStep({
         },
       }));
 
-      // Pop this conflict; if more remain, stay on the screen.
-      setPendingConflicts(prev => {
-        const next = prev.filter(c => c.sheetName !== conflict.sheetName);
-        if (next.length === 0) {
-          // All conflicts resolved — finalize using current snapshots.
-          // Defer using a microtask so the state update lands first.
-          queueMicrotask(() => finalizeFromHierSnapshots());
-        }
-        return next;
-      });
+      // Phase 4d.1: pop the conflict but stay on the confirmation screen.
+      // The user must click "Looks good — Continue" to finalize.
+      setPendingConflicts(prev => prev.filter(c => c.sheetName !== conflict.sheetName));
     } finally {
       setConflictApplyBusy(false);
     }
@@ -672,6 +716,104 @@ export function SpreadsheetImportStep({
         setColumnMappings={setColumnMappings}
         sectionMapping={sectionMapping}
         setSectionMapping={setSectionMapping}
+      />
+    );
+  }
+
+  if (phase === 'mapping-confirmation') {
+    const sheetSummaries: SheetSummary[] = hierSheetOrder.map(name => {
+      const cls = clsBySheetName[name];
+      const hier = hierResultsBySheet[name];
+      const conflict = pendingConflicts.find(c => c.sheetName === name);
+      const headerRowIdx = cls?.structure?.header_row_index ?? 0;
+      const nameColIdx = cls?.structure?.name_column_index ?? null;
+      // Parsed sheet for header row lookup. Prefer the conflict snapshot when
+      // present; otherwise fall back to the detection-built ParsedSheet so the
+      // happy path (no conflicts) still gets a populated attribute list.
+      const detSheet = detection?.sheets.find(s => s.sheet.name === name)?.sheet;
+      const parsedSheet = conflict?.parsedSheet ?? detSheet;
+      let nameSourceColumn: string | null = null;
+      let attributeMappings: AttributeMapping[] = [];
+      if (parsedSheet) {
+        const headerRow = parsedSheet.rows?.[headerRowIdx];
+        if (Array.isArray(headerRow)) {
+          if (nameColIdx != null && nameColIdx >= 0 && nameColIdx < headerRow.length) {
+            const v = headerRow[nameColIdx];
+            nameSourceColumn = v == null ? null : String(v).trim() || null;
+          }
+          // Build attribute list from non-hierarchy headers
+          const resolvedLevelsLower = new Set((hier?.resolvedLevels ?? []).map(s => s.toLowerCase()));
+          headerRow.forEach((cell, idx) => {
+            const header = cell == null ? '' : String(cell).trim();
+            if (!header) return;
+            if (idx === nameColIdx) return;
+            if (resolvedLevelsLower.has(header.toLowerCase())) return;
+            const role = getDefaultColumnRole(header);
+            attributeMappings.push({ header, role, included: role !== 'skip' });
+          });
+        }
+      }
+      // Fall back: derive nameSourceColumn from deepest level if header lookup failed
+      if (!nameSourceColumn && hier?.resolvedLevels?.length) {
+        nameSourceColumn = hier.resolvedLevels[hier.resolvedLevels.length - 1];
+      }
+      return {
+        sheetName: name,
+        pattern: cls?.pattern ?? '?',
+        confidence: typeof cls?.confidence === 'number' ? cls.confidence : null,
+        resolvedLevels: hier?.resolvedLevels ?? [],
+        itemCount: hier?.items.length ?? 0,
+        nameSourceColumn,
+        attributeMappings,
+        conflict: conflict
+          ? { userLevels: conflict.userLevels, classifierLevels: conflict.classifierLevels }
+          : undefined,
+      };
+    });
+
+    const directivesSummary: DirectivesSummary | undefined = parserDirectives?.exclude_row_predicates?.length
+      ? { excludePredicates: parserDirectives.exclude_row_predicates }
+      : undefined;
+
+    return (
+      <MappingConfirmation
+        sheetSummaries={sheetSummaries}
+        directives={directivesSummary}
+        dismissedPredicates={dismissedPredicates}
+        conflictBusy={conflictApplyBusy}
+        onAccept={() => {
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
+            sheets: sheetSummaries.map(s => ({ sheet: s.sheetName, items: s.itemCount })),
+            totalItems: sheetSummaries.reduce((n, s) => n + s.itemCount, 0),
+          });
+          finalizeFromHierSnapshots();
+        }}
+        onAdjust={(sheetName) => {
+          const cls = clsBySheetName[sheetName];
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'adjust-clicked', {
+            sheet: sheetName,
+            pattern: cls?.pattern ?? 'unknown',
+            target: 'mapping-interface',
+          });
+          // Drop any pending conflicts so legacy mapping isn't blocked.
+          setPendingConflicts([]);
+          setPhase('mapping');
+        }}
+        onApplyConflict={(sheetName, choice) => {
+          const c = pendingConflicts.find(pc => pc.sheetName === sheetName);
+          if (c) handleApplyLevelChoice(c, choice);
+        }}
+        onIgnoreDirective={(predicate) => {
+          setDismissedPredicates(prev => {
+            const next = new Set(prev);
+            next.add(predicate);
+            return next;
+          });
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'directive-ignored', { predicate });
+        }}
+        onAttemptApplyDirective={(predicate) => {
+          void logParserDiagnostic(sessionId, 'ssphase4d', 'directive-apply-attempted-disabled', { predicate });
+        }}
       />
     );
   }
