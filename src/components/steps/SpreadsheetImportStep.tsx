@@ -18,14 +18,15 @@ import {
 import {
   parseHierarchicalColumns,
   SheetClassification,
+  stemKey,
 } from '@/utils/parsers/parseHierarchicalColumns';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
-import { MappingInterface } from '@/components/spreadsheet/MappingInterface';
+import { MappingInterface, LevelConflictBlock, LevelChoice } from '@/components/spreadsheet/MappingInterface';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
-type Phase = 'parsing' | 'detection' | 'mapping' | 'generating';
+type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict';
 
 interface LayoutClassification {
   sheets?: SheetClassification[];
@@ -39,12 +40,23 @@ interface SpreadsheetImportStepProps {
   orgName?: string;
   documentHints?: string;
   preselectedSheetIndices?: number[];
+  userLevels?: string[];
   onComplete: (items: PlanItem[], personMappings: PersonMapping[], levels: PlanLevel[]) => void;
 }
 
 const PREVIEW_MAX_ROWS = 30;
 const PREVIEW_MAX_COLS = 12;
 const DISPATCH_CONFIDENCE_THRESHOLD = 80;
+
+/** True iff two level arrays are equivalent under stem-fold normalization. */
+function levelsEquivalent(a: string[] | undefined, b: string[] | undefined): boolean {
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (stemKey(a[i]) !== stemKey(b[i])) return false;
+  }
+  return true;
+}
 
 // Decide which parser handles a given sheet, based on classifier output.
 // Pure function — no test-file-specific heuristics. Pattern + confidence only.
