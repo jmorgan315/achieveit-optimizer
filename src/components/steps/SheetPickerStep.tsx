@@ -59,6 +59,7 @@ interface LayoutClassification {
 interface SheetPickerStepProps {
   file: File;
   sessionId: string;
+  userLevels?: string[];
   onContinue: (preselectedSheetIndices: number[] | undefined) => void;
 }
 
@@ -92,7 +93,7 @@ const CLARIFICATION_LABEL: Record<string, string> = {
   other: 'Needs your input',
 };
 
-export function SheetPickerStep({ file, sessionId, onContinue }: SheetPickerStepProps) {
+export function SheetPickerStep({ file, sessionId, userLevels, onContinue }: SheetPickerStepProps) {
   const [sheets, setSheets] = useState<ParsedSheet[] | null>(null);
   const [classification, setClassification] = useState<LayoutClassification | null>(null);
   const [classifierFailed, setClassifierFailed] = useState(false);
