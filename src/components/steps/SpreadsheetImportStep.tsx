@@ -517,6 +517,91 @@ export function SpreadsheetImportStep({
     onComplete(items, personMappings, levels);
   };
 
+  // ── Phase 4b.2: conflict resolution apply ───────────────────────────────
+  const handleApplyLevelChoice = async (
+    conflict: { sheetName: string; userLevels: string[]; classifierLevels: string[]; sheetClassification: SheetClassification; parsedSheet: import('@/utils/spreadsheet-parser').ParsedSheet; initialItemCount: number },
+    choice: LevelChoice,
+  ) => {
+    if (choice === 'reconfigure') {
+      // Drop the queue entirely and fall through to the existing toggle UI.
+      setPendingConflicts([]);
+      setPhase('mapping');
+      return;
+    }
+
+    setConflictApplyBusy(true);
+    try {
+      const newLevels = choice === 'user' ? conflict.userLevels : conflict.classifierLevels;
+      const itemsBefore = hierResultsBySheet[conflict.sheetName]?.items.length ?? conflict.initialItemCount;
+      const result = parseHierarchicalColumns(conflict.parsedSheet, conflict.sheetClassification, newLevels, sessionId);
+      const itemsAfter = result.items.length;
+
+      void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'reparsed', {
+        sheet: conflict.sheetName,
+        trigger: 'user-apply',
+        choice,
+        newLevels,
+        itemsBefore,
+        itemsAfter,
+      }, conflict.sheetName);
+
+      setHierResultsBySheet(prev => ({
+        ...prev,
+        [conflict.sheetName]: {
+          items: result.items,
+          personMappings: result.personMappings,
+          resolvedLevels: result.resolvedLevels,
+        },
+      }));
+
+      // Pop this conflict; if more remain, stay on the screen.
+      setPendingConflicts(prev => {
+        const next = prev.filter(c => c.sheetName !== conflict.sheetName);
+        if (next.length === 0) {
+          // All conflicts resolved — finalize using current snapshots.
+          // Defer using a microtask so the state update lands first.
+          queueMicrotask(() => finalizeFromHierSnapshots());
+        }
+        return next;
+      });
+    } finally {
+      setConflictApplyBusy(false);
+    }
+  };
+
+  const finalizeFromHierSnapshots = async () => {
+    // Read latest snapshot via state setter pattern to avoid stale closure.
+    let snapshots: typeof hierResultsBySheet = {};
+    let order: string[] = [];
+    setHierResultsBySheet(prev => { snapshots = prev; return prev; });
+    setHierSheetOrder(prev => { order = prev; return prev; });
+
+    const allItems: PlanItem[] = order.flatMap(n => snapshots[n]?.items ?? []);
+    const personSet = new Set<string>();
+    const levelNamesUnion: string[] = [];
+    for (const n of order) {
+      const r = snapshots[n];
+      if (!r) continue;
+      r.personMappings.forEach(p => personSet.add(p.foundName));
+      r.resolvedLevels.forEach(name => {
+        if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
+      });
+    }
+    const resolvedLevels: PlanLevel[] = levelNamesUnion.length > 0
+      ? levelNamesUnion.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
+      : DEFAULT_LEVELS.slice(0, 3);
+    const personMappings: PersonMapping[] = Array.from(personSet).map((name, i) => ({
+      id: String(i + 1), foundName: name, email: '', isResolved: false,
+    }));
+
+    await persistAndComplete({
+      items: allItems,
+      personMappings,
+      levels: resolvedLevels,
+      sheetNames: order,
+    });
+  };
+
   if (phase === 'parsing') {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
