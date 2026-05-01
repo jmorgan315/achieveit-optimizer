@@ -81,6 +81,7 @@ export function SpreadsheetImportStep({
   orgName,
   documentHints,
   preselectedSheetIndices,
+  userLevels,
   onComplete,
 }: SpreadsheetImportStepProps) {
   const [phase, setPhase] = useState<Phase>('parsing');
@@ -91,6 +92,26 @@ export function SpreadsheetImportStep({
   const [columnMappings, setColumnMappings] = useState<Record<string, ColumnRole>>({});
   const [sectionMapping, setSectionMapping] = useState<ElementRole>({ type: 'level', depth: 1 });
   const [levels, setLevels] = useState<PlanLevel[]>(DEFAULT_LEVELS.slice(0, 3));
+
+  // Phase 4b.2: per-sheet conflict tracking + effective level overrides.
+  // `pendingConflicts` is a queue of sheets the user must resolve before completion.
+  // `effectiveLevelsBySheet` records the user's choice (or auto-applied levels) per sheet.
+  interface PendingConflict {
+    sheetName: string;
+    userLevels: string[];
+    classifierLevels: string[];
+    sheetClassification: SheetClassification;
+    parsedSheet: import('@/utils/spreadsheet-parser').ParsedSheet;
+    initialItemCount: number;
+  }
+  const [pendingConflicts, setPendingConflicts] = useState<PendingConflict[]>([]);
+  const [conflictApplyBusy, setConflictApplyBusy] = useState(false);
+  // Snapshot of the in-progress hierarchical results, keyed by sheet name, so
+  // we can swap one sheet's items after a re-parse without rerunning others.
+  const [hierResultsBySheet, setHierResultsBySheet] = useState<
+    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>
+  >({});
+  const [hierSheetOrder, setHierSheetOrder] = useState<string[]>([]);
 
   // Parse on mount
   useEffect(() => {
