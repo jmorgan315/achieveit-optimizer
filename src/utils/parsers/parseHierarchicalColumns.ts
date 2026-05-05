@@ -196,6 +196,14 @@ function resolveHierarchyColumns(
 }
 
 /**
+ * Cell-level transformation rule applied to hierarchy column values before
+ * the parser builds path keys. See Phase 4d.2.c.
+ */
+export type CellTransformation =
+  | { rule: 'take-first-delimited'; level?: string; delimiter?: string }
+  | { rule: 'resolve-numeric-reference'; level?: string };
+
+/**
  * Parse one sheet using the unified Pattern B/C algorithm.
  */
 export function parseHierarchicalColumns(
@@ -203,6 +211,8 @@ export function parseHierarchicalColumns(
   sheetClassification: SheetClassification,
   userLevels?: string[],
   sessionId?: string | null,
+  userLevelColumnIndices?: number[],
+  cellTransformations?: CellTransformation[],
 ): ParseHierarchicalResult {
   console.log('[ssphase4b] ENTERED parseHierarchicalColumns for sheet:', sheet?.name);
   void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'entry', { sheetName: sheet?.name }, sheet?.name);
