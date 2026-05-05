@@ -862,13 +862,13 @@ export function SpreadsheetImportStep({
       const conflict = pendingConflicts.find(c => c.sheetName === name);
       const headerRowIdx = cls?.structure?.header_row_index ?? 0;
       const nameColIdx = cls?.structure?.name_column_index ?? null;
-      // Parsed sheet for header row lookup. Prefer the conflict snapshot when
-      // present; otherwise fall back to the detection-built ParsedSheet so the
-      // happy path (no conflicts) still gets a populated attribute list.
       const detSheet = detection?.sheets.find(s => s.sheet.name === name)?.sheet;
       const parsedSheet = conflict?.parsedSheet ?? detSheet;
       let nameSourceColumn: string | null = null;
       let attributeMappings: AttributeMapping[] = [];
+      // Resolved levels: hierarchical run wins; otherwise classifier implied_levels (Pattern A).
+      const resolvedLevels: string[] = hier?.resolvedLevels
+        ?? (cls?.structure?.implied_levels ?? []);
       if (parsedSheet) {
         const headerRow = parsedSheet.rows?.[headerRowIdx];
         if (Array.isArray(headerRow)) {
@@ -876,8 +876,7 @@ export function SpreadsheetImportStep({
             const v = headerRow[nameColIdx];
             nameSourceColumn = v == null ? null : String(v).trim() || null;
           }
-          // Build attribute list from non-hierarchy headers
-          const resolvedLevelsLower = new Set((hier?.resolvedLevels ?? []).map(s => s.toLowerCase()));
+          const resolvedLevelsLower = new Set(resolvedLevels.map(s => s.toLowerCase()));
           headerRow.forEach((cell, idx) => {
             const header = cell == null ? '' : String(cell).trim();
             if (!header) return;
@@ -888,16 +887,19 @@ export function SpreadsheetImportStep({
           });
         }
       }
-      // Fall back: derive nameSourceColumn from deepest level if header lookup failed
-      if (!nameSourceColumn && hier?.resolvedLevels?.length) {
-        nameSourceColumn = hier.resolvedLevels[hier.resolvedLevels.length - 1];
+      if (!nameSourceColumn && resolvedLevels.length) {
+        nameSourceColumn = resolvedLevels[resolvedLevels.length - 1];
       }
+      // Item count: hierarchical run wins; else generic preview bucket.
+      const itemCount = hier?.items.length
+        ?? genericPreview?.itemsBySheet[name]?.length
+        ?? 0;
       return {
         sheetName: name,
         pattern: cls?.pattern ?? '?',
         confidence: typeof cls?.confidence === 'number' ? cls.confidence : null,
-        resolvedLevels: hier?.resolvedLevels ?? [],
-        itemCount: hier?.items.length ?? 0,
+        resolvedLevels,
+        itemCount,
         nameSourceColumn,
         attributeMappings,
         conflict: conflict
@@ -910,6 +912,8 @@ export function SpreadsheetImportStep({
       ? { excludePredicates: parserDirectives.exclude_row_predicates }
       : undefined;
 
+    const isGeneric = !!genericPreview;
+
     return (
       <MappingConfirmation
         sheetSummaries={sheetSummaries}
@@ -918,10 +922,15 @@ export function SpreadsheetImportStep({
         conflictBusy={conflictApplyBusy}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
+            source: isGeneric ? 'generic' : 'hierarchical',
             sheets: sheetSummaries.map(s => ({ sheet: s.sheetName, items: s.itemCount })),
             totalItems: sheetSummaries.reduce((n, s) => n + s.itemCount, 0),
           });
-          finalizeFromHierSnapshots();
+          if (isGeneric) {
+            finalizeFromGenericPreview();
+          } else {
+            finalizeFromHierSnapshots();
+          }
         }}
         onAdjust={(sheetName) => {
           const cls = clsBySheetName[sheetName];
@@ -929,6 +938,7 @@ export function SpreadsheetImportStep({
             sheet: sheetName,
             pattern: cls?.pattern ?? 'unknown',
             target: 'mapping-interface',
+            levelsSeededFrom: isGeneric ? 'classifier' : 'defaults',
           });
           // Drop any pending conflicts so legacy mapping isn't blocked.
           setPendingConflicts([]);
