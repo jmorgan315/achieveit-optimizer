@@ -51,6 +51,7 @@ export interface ParseHierarchicalResult {
   unresolvedLevels?: string[];
   resolvedLevels: string[];
   resolvedColumnIndices: number[];
+  cellsTransformed?: number;
 }
 
 const SHEET_DEFAULT_HEADER_ROW = 0;
