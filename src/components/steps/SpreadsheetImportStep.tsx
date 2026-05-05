@@ -127,6 +127,18 @@ export function SpreadsheetImportStep({
   const [parserDirectives, setParserDirectives] = useState<ParserDirectivesShape | null>(null);
   const [dismissedPredicates, setDismissedPredicates] = useState<Set<string>>(new Set());
 
+  // Phase 4d.1.1 — Pattern A preview computed up front so MappingConfirmation
+  // can render the same AI Analysis surface for generic-routed sheets.
+  interface GenericPreview {
+    itemsBySheet: Record<string, PlanItem[]>;
+    personMappings: PersonMapping[];
+    levels: PlanLevel[];
+    columnMappings: Record<string, ColumnRole>;
+    sectionMapping: ElementRole;
+    measurementMode: MeasurementMode;
+  }
+  const [genericPreview, setGenericPreview] = useState<GenericPreview | null>(null);
+
   // Parse on mount
   useEffect(() => {
     (async () => {
@@ -181,18 +193,34 @@ export function SpreadsheetImportStep({
             file,
             parsedSheets: sheets,
             selectedIndices: validPreselected,
+            detection: det,
           });
-          if (result.kind === 'completed' || result.kind === 'conflicts') {
+          if (result.kind === 'completed' || result.kind === 'conflicts' || result.kind === 'generic-confirm') {
             // Stash classifier metadata for the confirmation screen.
             setClsBySheetName(result.clsBySheetName);
             setParserDirectives(result.parserDirectives ?? null);
-            setHierResultsBySheet(result.perSheet);
             setHierSheetOrder(result.sheetNames);
-            if (result.kind === 'conflicts') {
-              setPendingConflicts(result.conflicts);
+            if (result.kind === 'completed' || result.kind === 'conflicts') {
+              setHierResultsBySheet(result.perSheet);
+              if (result.kind === 'conflicts') setPendingConflicts(result.conflicts);
+            } else {
+              // generic-confirm — Pattern A preview
+              setGenericPreview({
+                itemsBySheet: result.preview.itemsBySheet,
+                personMappings: result.preview.personMappings,
+                levels: result.preview.levels,
+                columnMappings: result.preview.columnMappings,
+                sectionMapping: result.preview.sectionMapping,
+                measurementMode: result.preview.measurementMode,
+              });
+              // Seed legacy mapping state so "Let me adjust" opens with classifier-derived defaults.
+              setColumnMappings(result.preview.columnMappings);
+              setSectionMapping(result.preview.sectionMapping);
+              setLevels(result.preview.levels);
             }
             setPhase('mapping-confirmation');
             void logParserDiagnostic(sessionId, 'ssphase4d', 'mapping-confirmation-shown', {
+              source: result.kind === 'generic-confirm' ? 'generic' : 'hierarchical',
               sheets: result.sheetNames.map(n => ({
                 sheet: n,
                 pattern: result.clsBySheetName[n]?.pattern ?? 'unknown',
@@ -234,6 +262,14 @@ export function SpreadsheetImportStep({
   // ── Hierarchical dispatch helpers ────────────────────────────────────────
 
   type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
+  type GenericConfirmPreview = {
+    itemsBySheet: Record<string, PlanItem[]>;
+    personMappings: PersonMapping[];
+    levels: PlanLevel[];
+    columnMappings: Record<string, ColumnRole>;
+    sectionMapping: ElementRole;
+    measurementMode: MeasurementMode;
+  };
   type DispatchResult =
     | {
         kind: 'completed';
@@ -251,6 +287,13 @@ export function SpreadsheetImportStep({
         clsBySheetName: Record<string, SheetClassification>;
         parserDirectives: ParserDirectivesShape | null;
       }
+    | {
+        kind: 'generic-confirm';
+        sheetNames: string[];
+        clsBySheetName: Record<string, SheetClassification>;
+        parserDirectives: ParserDirectivesShape | null;
+        preview: GenericConfirmPreview;
+      }
     | { kind: 'fallback'; reason: string };
 
   /**
@@ -263,6 +306,7 @@ export function SpreadsheetImportStep({
     file: File;
     parsedSheets: import('@/utils/spreadsheet-parser').ParsedSheet[];
     selectedIndices: number[];
+    detection: StructureDetection;
   }): Promise<DispatchResult> {
     console.log('[ssphase4b] ENTERED tryDispatchHierarchical, selectedIndices:', args.selectedIndices, 'sheetCount:', args.parsedSheets.length);
     void logParserDiagnostic(args.sessionId, 'dispatcher', 'entry', {
@@ -322,9 +366,88 @@ export function SpreadsheetImportStep({
       return { sheet, cls, decision };
     });
 
-    // 4b.1: only short-circuit when every selected sheet is hierarchical.
+    // Phase 4d.1.1: when every selected sheet is generic AND we have classifier
+    // output, run Pattern A (legacy generic) up front so MappingConfirmation can
+    // render a preview. Truly mixed selections still fall back.
     const allHierarchical = selected.every(s => s.decision.kind === 'hierarchical');
+    const allGeneric = selected.every(s => s.decision.kind === 'generic');
     if (!allHierarchical) {
+      if (allGeneric) {
+        const clsRecord: Record<string, SheetClassification> = {};
+        clsBySheetName.forEach((v, k) => { clsRecord[k] = v; });
+        const directives: ParserDirectivesShape | null = cls.parser_directives ?? null;
+
+        // Build defaults from the first selected sheet (mirrors post-detect block).
+        const selectedDetections = args.selectedIndices
+          .map(i => args.detection.sheets[i])
+          .filter(Boolean);
+        const merged = mergeSheetDetections(selectedDetections);
+        const firstSheet = selectedDetections[0];
+        const columnMappingsDefault: Record<string, ColumnRole> = {};
+        firstSheet?.allColumnHeaders.forEach(col => {
+          columnMappingsDefault[col] = getDefaultColumnRole(col);
+        });
+        const sectionMappingDefault: ElementRole = args.detection.hasStrategyPattern
+          ? { type: 'level', depth: 1 }
+          : (firstSheet?.sections.some(s => s.headerText) ? { type: 'level', depth: 1 } : { type: 'skip' });
+
+        // Prefer classifier-derived levels per first selected sheet, else strategy/default.
+        const firstName = firstSheet?.sheet.name;
+        const firstCls = firstName ? clsBySheetName.get(firstName) : undefined;
+        const impliedFirst = firstCls?.structure?.implied_levels ?? [];
+        const previewLevels: PlanLevel[] = impliedFirst.length > 0
+          ? impliedFirst.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
+          : (args.detection.hasStrategyPattern ? STRATEGY_LEVELS : DEFAULT_LEVELS.slice(0, 3));
+
+        const measurementMode: MeasurementMode = 'level4';
+        const { items, personMappings } = generatePlanItems(merged, {
+          selectedSheetIndices: args.selectedIndices,
+          sectionMapping: sectionMappingDefault,
+          columnMappings: columnMappingsDefault,
+          levels: previewLevels,
+          measurementMode,
+        });
+
+        // Bucket items by sheet for per-card counts.
+        const itemsBySheet: Record<string, PlanItem[]> = {};
+        const sheetNamesPreview: string[] = selectedDetections.map(s => s.sheet.name);
+        sheetNamesPreview.forEach(n => { itemsBySheet[n] = []; });
+        for (const it of items) {
+          const sn = (it as any).sheetName;
+          if (sn && itemsBySheet[sn]) itemsBySheet[sn].push(it);
+          else if (sheetNamesPreview[0]) itemsBySheet[sheetNamesPreview[0]].push(it);
+        }
+
+        console.log('[ssphase4d] dispatch: generic-confirm preview', {
+          sheets: sheetNamesPreview,
+          totalItems: items.length,
+        });
+        void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
+          outcome: 'generic-confirm',
+          perSheet: selected.map(s => ({
+            sheet: s.sheet.name,
+            pattern: s.cls?.pattern ?? 'unknown',
+            confidence: s.cls?.confidence ?? null,
+            itemCount: itemsBySheet[s.sheet.name]?.length ?? 0,
+          })),
+        });
+
+        return {
+          kind: 'generic-confirm',
+          sheetNames: sheetNamesPreview,
+          clsBySheetName: clsRecord,
+          parserDirectives: directives,
+          preview: {
+            itemsBySheet,
+            personMappings,
+            levels: previewLevels,
+            columnMappings: columnMappingsDefault,
+            sectionMapping: sectionMappingDefault,
+            measurementMode,
+          },
+        };
+      }
+
       console.log('[ssphase4b] dispatch: mixed routing → falling back to existing mapping flow');
       void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
         outcome: 'fallback',
@@ -655,6 +778,18 @@ export function SpreadsheetImportStep({
     });
   };
 
+  // Phase 4d.1.1 — finalize the Pattern A preview without re-parsing.
+  const finalizeFromGenericPreview = async () => {
+    if (!genericPreview) return;
+    const allItems = hierSheetOrder.flatMap(n => genericPreview.itemsBySheet[n] ?? []);
+    await persistAndComplete({
+      items: allItems,
+      personMappings: genericPreview.personMappings,
+      levels: genericPreview.levels,
+      sheetNames: hierSheetOrder,
+    });
+  };
+
   if (phase === 'parsing') {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
@@ -727,13 +862,13 @@ export function SpreadsheetImportStep({
       const conflict = pendingConflicts.find(c => c.sheetName === name);
       const headerRowIdx = cls?.structure?.header_row_index ?? 0;
       const nameColIdx = cls?.structure?.name_column_index ?? null;
-      // Parsed sheet for header row lookup. Prefer the conflict snapshot when
-      // present; otherwise fall back to the detection-built ParsedSheet so the
-      // happy path (no conflicts) still gets a populated attribute list.
       const detSheet = detection?.sheets.find(s => s.sheet.name === name)?.sheet;
       const parsedSheet = conflict?.parsedSheet ?? detSheet;
       let nameSourceColumn: string | null = null;
       let attributeMappings: AttributeMapping[] = [];
+      // Resolved levels: hierarchical run wins; otherwise classifier implied_levels (Pattern A).
+      const resolvedLevels: string[] = hier?.resolvedLevels
+        ?? (cls?.structure?.implied_levels ?? []);
       if (parsedSheet) {
         const headerRow = parsedSheet.rows?.[headerRowIdx];
         if (Array.isArray(headerRow)) {
@@ -741,8 +876,7 @@ export function SpreadsheetImportStep({
             const v = headerRow[nameColIdx];
             nameSourceColumn = v == null ? null : String(v).trim() || null;
           }
-          // Build attribute list from non-hierarchy headers
-          const resolvedLevelsLower = new Set((hier?.resolvedLevels ?? []).map(s => s.toLowerCase()));
+          const resolvedLevelsLower = new Set(resolvedLevels.map(s => s.toLowerCase()));
           headerRow.forEach((cell, idx) => {
             const header = cell == null ? '' : String(cell).trim();
             if (!header) return;
@@ -753,16 +887,19 @@ export function SpreadsheetImportStep({
           });
         }
       }
-      // Fall back: derive nameSourceColumn from deepest level if header lookup failed
-      if (!nameSourceColumn && hier?.resolvedLevels?.length) {
-        nameSourceColumn = hier.resolvedLevels[hier.resolvedLevels.length - 1];
+      if (!nameSourceColumn && resolvedLevels.length) {
+        nameSourceColumn = resolvedLevels[resolvedLevels.length - 1];
       }
+      // Item count: hierarchical run wins; else generic preview bucket.
+      const itemCount = hier?.items.length
+        ?? genericPreview?.itemsBySheet[name]?.length
+        ?? 0;
       return {
         sheetName: name,
         pattern: cls?.pattern ?? '?',
         confidence: typeof cls?.confidence === 'number' ? cls.confidence : null,
-        resolvedLevels: hier?.resolvedLevels ?? [],
-        itemCount: hier?.items.length ?? 0,
+        resolvedLevels,
+        itemCount,
         nameSourceColumn,
         attributeMappings,
         conflict: conflict
@@ -775,6 +912,8 @@ export function SpreadsheetImportStep({
       ? { excludePredicates: parserDirectives.exclude_row_predicates }
       : undefined;
 
+    const isGeneric = !!genericPreview;
+
     return (
       <MappingConfirmation
         sheetSummaries={sheetSummaries}
@@ -783,10 +922,15 @@ export function SpreadsheetImportStep({
         conflictBusy={conflictApplyBusy}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
+            source: isGeneric ? 'generic' : 'hierarchical',
             sheets: sheetSummaries.map(s => ({ sheet: s.sheetName, items: s.itemCount })),
             totalItems: sheetSummaries.reduce((n, s) => n + s.itemCount, 0),
           });
-          finalizeFromHierSnapshots();
+          if (isGeneric) {
+            finalizeFromGenericPreview();
+          } else {
+            finalizeFromHierSnapshots();
+          }
         }}
         onAdjust={(sheetName) => {
           const cls = clsBySheetName[sheetName];
@@ -794,6 +938,7 @@ export function SpreadsheetImportStep({
             sheet: sheetName,
             pattern: cls?.pattern ?? 'unknown',
             target: 'mapping-interface',
+            levelsSeededFrom: isGeneric ? 'classifier' : 'defaults',
           });
           // Drop any pending conflicts so legacy mapping isn't blocked.
           setPendingConflicts([]);
