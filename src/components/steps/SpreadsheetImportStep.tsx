@@ -298,7 +298,7 @@ export function SpreadsheetImportStep({
 
   // ── Hierarchical dispatch helpers ────────────────────────────────────────
 
-  type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
+  type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[]; parsedSheet?: import('@/utils/spreadsheet-parser').ParsedSheet; classification?: SheetClassification }>;
   type GenericConfirmPreview = {
     itemsBySheet: Record<string, PlanItem[]>;
     personMappings: PersonMapping[];
