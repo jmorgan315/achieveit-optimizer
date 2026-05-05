@@ -833,6 +833,160 @@ export function SpreadsheetImportStep({
     });
   };
 
+  // ── Phase 4d.2 helpers ──────────────────────────────────────────────────
+
+  /** Re-parse a sheet with current overrides + active cell transformations,
+   *  then re-fold the active row predicates on top. Updates hierResultsBySheet
+   *  and the predicate baseline for that sheet. */
+  function reparseAndRefold(
+    sheetName: string,
+    nextCellTx: CellTransformation[],
+    nextPredicates: string[],
+    nextColumnIndices?: number[],
+  ) {
+    const hier = hierResultsBySheet[sheetName];
+    if (!hier?.parsedSheet || !hier?.classification) return;
+    const userLevelsForSheet = hier.resolvedLevels;
+    const colIndices = nextColumnIndices ?? hier.resolvedColumnIndices;
+    const result = parseHierarchicalColumns(
+      hier.parsedSheet,
+      hier.classification,
+      userLevelsForSheet,
+      sessionId,
+      colIndices,
+      nextCellTx,
+    );
+    // Apply active predicates over the fresh parse output.
+    const headers = (() => {
+      const hdrIdx = hier.classification.structure?.header_row_index ?? 0;
+      const row = hier.parsedSheet.rows?.[hdrIdx];
+      return Array.isArray(row) ? row.map(c => (c == null ? '' : String(c).trim())) : [];
+    })();
+    let foldedItems = result.items;
+    for (const p of nextPredicates) {
+      const parsed: ParsedPredicate = parsePredicate(p, headers);
+      foldedItems = applyPredicate(foldedItems, parsed, headers);
+    }
+    setHierResultsBySheet(prev => ({
+      ...prev,
+      [sheetName]: {
+        ...hier,
+        items: foldedItems,
+        personMappings: result.personMappings,
+        resolvedLevels: result.resolvedLevels,
+        resolvedColumnIndices: result.resolvedColumnIndices,
+      },
+    }));
+    // Refresh predicate baseline to the post-cell-tx parse output.
+    setPredicateBaselineBySheet(prev => ({ ...prev, [sheetName]: result.items }));
+    return { itemsAfter: foldedItems.length, cellsTransformed: result.cellsTransformed ?? 0 };
+  }
+
+  // 4d.2.a — apply column-to-level mapping from LevelMappingInterface.
+  const handleApplyLevelMapping = (userLevels: string[], userLevelColumnIndices: number[]) => {
+    const target = levelMappingTarget;
+    if (!target) return;
+    const sheetName = target.sheetName;
+    const itemsBefore = hierResultsBySheet[sheetName]?.items.length ?? 0;
+    const activeTx = activeCellTxBySheet[sheetName] ?? [];
+    const activePreds = activePredicatesBySheet[sheetName] ?? [];
+    // Update resolvedLevels then re-parse with new column indices.
+    setHierResultsBySheet(prev => ({
+      ...prev,
+      [sheetName]: { ...prev[sheetName], resolvedLevels: userLevels, resolvedColumnIndices: userLevelColumnIndices },
+    }));
+    const r = reparseAndRefold(sheetName, activeTx, activePreds, userLevelColumnIndices);
+    void logParserDiagnostic(sessionId, 'ssphase4d2a', 'level-mapping-applied', {
+      sheet: sheetName,
+      userLevels,
+      userLevelColumnIndices,
+      itemsBefore,
+      itemsAfter: r?.itemsAfter ?? 0,
+    }, sheetName);
+    setLevelMappingTarget(null);
+    setPhase('mapping-confirmation');
+  };
+
+  // 4d.2.b — apply / undo a row predicate.
+  const handleApplyPredicate = (predicate: string) => {
+    // Apply across all hierarchical sheets that have a parsed sheet/classification.
+    for (const sheetName of hierSheetOrder) {
+      const hier = hierResultsBySheet[sheetName];
+      if (!hier?.parsedSheet || !hier?.classification) continue;
+      // Capture predicate baseline if first apply on this sheet.
+      if (!predicateBaselineBySheet[sheetName]) {
+        setPredicateBaselineBySheet(prev => ({ ...prev, [sheetName]: hier.items }));
+      }
+      const nextPreds = [...(activePredicatesBySheet[sheetName] ?? []), predicate];
+      setActivePredicatesBySheet(prev => ({ ...prev, [sheetName]: nextPreds }));
+      const activeTx = activeCellTxBySheet[sheetName] ?? [];
+      const itemsBefore = hier.items.length;
+      const r = reparseAndRefold(sheetName, activeTx, nextPreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-applied', {
+        sheet: sheetName, predicate, itemsBefore, itemsAfter: r?.itemsAfter ?? 0,
+        removedCount: itemsBefore - (r?.itemsAfter ?? itemsBefore), activeCount: nextPreds.length,
+      }, sheetName);
+    }
+  };
+  const handleUndoPredicate = (predicate: string) => {
+    for (const sheetName of hierSheetOrder) {
+      const cur = activePredicatesBySheet[sheetName] ?? [];
+      if (!cur.includes(predicate)) continue;
+      const nextPreds = cur.filter(p => p !== predicate);
+      setActivePredicatesBySheet(prev => ({ ...prev, [sheetName]: nextPreds }));
+      const activeTx = activeCellTxBySheet[sheetName] ?? [];
+      reparseAndRefold(sheetName, activeTx, nextPreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-undone', {
+        sheet: sheetName, predicate, activeCount: nextPreds.length,
+      }, sheetName);
+    }
+  };
+
+  // 4d.2.c — apply / undo a cell transformation rule (by key).
+  const allCellRules: CellTransformation[] = parserDirectives?.cell_transformations ?? [];
+  const handleApplyCellRule = (key: string) => {
+    const rule = allCellRules.find(r => cellRuleKey(r) === key);
+    if (!rule) return;
+    for (const sheetName of hierSheetOrder) {
+      const hier = hierResultsBySheet[sheetName];
+      if (!hier?.parsedSheet || !hier?.classification) continue;
+      if (!cellTxBaselineBySheet[sheetName]) {
+        setCellTxBaselineBySheet(prev => ({
+          ...prev,
+          [sheetName]: {
+            items: hier.items, personMappings: hier.personMappings,
+            resolvedLevels: hier.resolvedLevels, resolvedColumnIndices: hier.resolvedColumnIndices,
+          },
+        }));
+      }
+      const cur = activeCellTxBySheet[sheetName] ?? [];
+      const nextTx = [...cur, rule];
+      setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
+      const activePreds = activePredicatesBySheet[sheetName] ?? [];
+      const itemsBefore = hier.items.length;
+      const r = reparseAndRefold(sheetName, nextTx, activePreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-applied', {
+        sheet: sheetName, rule: rule.rule, level: rule.level ?? null,
+        itemsBefore, itemsAfter: r?.itemsAfter ?? 0, cellsTransformed: r?.cellsTransformed ?? 0,
+        activeCount: nextTx.length,
+      }, sheetName);
+    }
+  };
+  const handleUndoCellRule = (key: string) => {
+    for (const sheetName of hierSheetOrder) {
+      const cur = activeCellTxBySheet[sheetName] ?? [];
+      const nextTx = cur.filter(r => cellRuleKey(r) !== key);
+      if (nextTx.length === cur.length) continue;
+      setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
+      const activePreds = activePredicatesBySheet[sheetName] ?? [];
+      reparseAndRefold(sheetName, nextTx, activePreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-undone', {
+        sheet: sheetName, key, activeCount: nextTx.length,
+      }, sheetName);
+    }
+  };
+
+
   if (phase === 'parsing') {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
