@@ -127,6 +127,18 @@ export function SpreadsheetImportStep({
   const [parserDirectives, setParserDirectives] = useState<ParserDirectivesShape | null>(null);
   const [dismissedPredicates, setDismissedPredicates] = useState<Set<string>>(new Set());
 
+  // Phase 4d.1.1 — Pattern A preview computed up front so MappingConfirmation
+  // can render the same AI Analysis surface for generic-routed sheets.
+  interface GenericPreview {
+    itemsBySheet: Record<string, PlanItem[]>;
+    personMappings: PersonMapping[];
+    levels: PlanLevel[];
+    columnMappings: Record<string, ColumnRole>;
+    sectionMapping: ElementRole;
+    measurementMode: MeasurementMode;
+  }
+  const [genericPreview, setGenericPreview] = useState<GenericPreview | null>(null);
+
   // Parse on mount
   useEffect(() => {
     (async () => {
