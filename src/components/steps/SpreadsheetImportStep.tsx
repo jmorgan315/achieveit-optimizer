@@ -366,9 +366,88 @@ export function SpreadsheetImportStep({
       return { sheet, cls, decision };
     });
 
-    // 4b.1: only short-circuit when every selected sheet is hierarchical.
+    // Phase 4d.1.1: when every selected sheet is generic AND we have classifier
+    // output, run Pattern A (legacy generic) up front so MappingConfirmation can
+    // render a preview. Truly mixed selections still fall back.
     const allHierarchical = selected.every(s => s.decision.kind === 'hierarchical');
+    const allGeneric = selected.every(s => s.decision.kind === 'generic');
     if (!allHierarchical) {
+      if (allGeneric) {
+        const clsRecord: Record<string, SheetClassification> = {};
+        clsBySheetName.forEach((v, k) => { clsRecord[k] = v; });
+        const directives: ParserDirectivesShape | null = cls.parser_directives ?? null;
+
+        // Build defaults from the first selected sheet (mirrors post-detect block).
+        const selectedDetections = args.selectedIndices
+          .map(i => args.detection.sheets[i])
+          .filter(Boolean);
+        const merged = mergeSheetDetections(selectedDetections);
+        const firstSheet = selectedDetections[0];
+        const columnMappingsDefault: Record<string, ColumnRole> = {};
+        firstSheet?.allColumnHeaders.forEach(col => {
+          columnMappingsDefault[col] = getDefaultColumnRole(col);
+        });
+        const sectionMappingDefault: ElementRole = args.detection.hasStrategyPattern
+          ? { type: 'level', depth: 1 }
+          : (firstSheet?.sections.some(s => s.headerText) ? { type: 'level', depth: 1 } : { type: 'skip' });
+
+        // Prefer classifier-derived levels per first selected sheet, else strategy/default.
+        const firstName = firstSheet?.sheet.name;
+        const firstCls = firstName ? clsBySheetName.get(firstName) : undefined;
+        const impliedFirst = firstCls?.structure?.implied_levels ?? [];
+        const previewLevels: PlanLevel[] = impliedFirst.length > 0
+          ? impliedFirst.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
+          : (args.detection.hasStrategyPattern ? STRATEGY_LEVELS : DEFAULT_LEVELS.slice(0, 3));
+
+        const measurementMode: MeasurementMode = 'level4';
+        const { items, personMappings } = generatePlanItems(merged, {
+          selectedSheetIndices: args.selectedIndices,
+          sectionMapping: sectionMappingDefault,
+          columnMappings: columnMappingsDefault,
+          levels: previewLevels,
+          measurementMode,
+        });
+
+        // Bucket items by sheet for per-card counts.
+        const itemsBySheet: Record<string, PlanItem[]> = {};
+        const sheetNamesPreview: string[] = selectedDetections.map(s => s.sheet.name);
+        sheetNamesPreview.forEach(n => { itemsBySheet[n] = []; });
+        for (const it of items) {
+          const sn = (it as any).sheetName;
+          if (sn && itemsBySheet[sn]) itemsBySheet[sn].push(it);
+          else if (sheetNamesPreview[0]) itemsBySheet[sheetNamesPreview[0]].push(it);
+        }
+
+        console.log('[ssphase4d] dispatch: generic-confirm preview', {
+          sheets: sheetNamesPreview,
+          totalItems: items.length,
+        });
+        void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
+          outcome: 'generic-confirm',
+          perSheet: selected.map(s => ({
+            sheet: s.sheet.name,
+            pattern: s.cls?.pattern ?? 'unknown',
+            confidence: s.cls?.confidence ?? null,
+            itemCount: itemsBySheet[s.sheet.name]?.length ?? 0,
+          })),
+        });
+
+        return {
+          kind: 'generic-confirm',
+          sheetNames: sheetNamesPreview,
+          clsBySheetName: clsRecord,
+          parserDirectives: directives,
+          preview: {
+            itemsBySheet,
+            personMappings,
+            levels: previewLevels,
+            columnMappings: columnMappingsDefault,
+            sectionMapping: sectionMappingDefault,
+            measurementMode,
+          },
+        };
+      }
+
       console.log('[ssphase4b] dispatch: mixed routing → falling back to existing mapping flow');
       void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
         outcome: 'fallback',
