@@ -542,6 +542,9 @@ export function SpreadsheetImportStep({
         items: result.items,
         personMappings: result.personMappings,
         resolvedLevels: result.resolvedLevels,
+        resolvedColumnIndices: result.resolvedColumnIndices,
+        parsedSheet: s.sheet,
+        classification: s.cls,
       };
       result.resolvedLevels.forEach(name => {
         if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
