@@ -19,20 +19,32 @@ import {
   parseHierarchicalColumns,
   SheetClassification,
   stemKey,
+  CellTransformation,
 } from '@/utils/parsers/parseHierarchicalColumns';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface, LevelConflictBlock, LevelChoice } from '@/components/spreadsheet/MappingInterface';
-import { MappingConfirmation, SheetSummary, DirectivesSummary, AttributeMapping } from '@/components/spreadsheet/MappingConfirmation';
+import { LevelMappingInterface } from '@/components/spreadsheet/LevelMappingInterface';
+import {
+  MappingConfirmation,
+  SheetSummary,
+  DirectivesSummary,
+  AttributeMapping,
+  PredicateRow,
+  CellRuleRow,
+  cellRuleKey,
+} from '@/components/spreadsheet/MappingConfirmation';
+import { parsePredicate, applyPredicate, ParsedPredicate } from '@/utils/parsers/applyRowPredicate';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
-type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict' | 'mapping-confirmation';
+type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict' | 'mapping-confirmation' | 'level-mapping';
 
 interface ParserDirectivesShape {
   exclude_sheets?: string[];
   exclude_row_predicates?: string[];
   include_only_recent?: boolean;
+  cell_transformations?: CellTransformation[];
 }
 
 interface LayoutClassification {
