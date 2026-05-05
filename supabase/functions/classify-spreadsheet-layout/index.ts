@@ -95,6 +95,18 @@ const layoutToolSchema = {
         exclude_sheets: { type: "array", items: { type: "string" } },
         exclude_row_predicates: { type: "array", items: { type: "string" } },
         include_only_recent: { type: "boolean" },
+        cell_transformations: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              rule: { type: "string", enum: ["take-first-delimited", "resolve-numeric-reference"] },
+              level: { type: "string" },
+              delimiter: { type: "string" },
+            },
+            required: ["rule"],
+          },
+        },
       },
       required: ["exclude_sheets", "exclude_row_predicates", "include_only_recent"],
     },
