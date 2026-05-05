@@ -1,113 +1,138 @@
+## Phase 4d.2 — LevelMappingInterface + Directive Apply
 
-# Phase 4d.1.1 — Pattern A confirmation routing (regression fix)
+Three independently shippable chunks. Pause for validation between each. No filename / sheet-name / column-string heuristics; all decisions flow from `layout_classification`, runtime cell content, or user input.
 
-## Diagnosis (confirmed)
+---
 
-The dispatcher only checks `kind`, not `pattern`. Routing in `SpreadsheetImportStep.tsx`:
+### 4d.2.a — Column-to-Level mapping UI (Pattern B/C)
 
-- `decideDispatch()` (line 75) returns `{ kind: 'generic' }` for Pattern A by design — only B/C are hierarchical.
-- `tryDispatchHierarchical()` rejects any sheet set that isn't 100% hierarchical (line 326–334) → returns `{ kind: 'fallback', reason: 'mixed routing' }` (or `pattern-a` per-sheet).
-- The caller (line 206) treats `fallback` uniformly: `setPhase('mapping')` — bypassing `MappingConfirmation` entirely.
+**New file:** `src/components/spreadsheet/LevelMappingInterface.tsx`
 
-So Pattern A with valid classifier output (≥80% confidence) lands directly in the legacy toggle UI. The "Strategic Priority / Objective / Goal" leak is `DEFAULT_LEVELS.slice(0,3)` (line 102) being persisted as-is when the user clicks Apply on the legacy screen, never having seen the AI's detected section markers.
+Two-column layout:
+- **Left** — one row per level (from `userLevels` if set, else `structure.implied_levels`). Each row shows `Level N: <name>` plus a `<Select>` listing every parsed column with label `"<header or (no header)> — Column <A1-letter> (idx N) — XX% filled"`. Defaults to the current `resolvedColumnIndices[i]` from the prior parse. Below: collapsible "Other columns" (attribute-role selects mirroring legacy `MappingInterface`) and "Skipped columns".
+- **Right** — `Live Preview` card: re-runs `parseHierarchicalColumns` (memoized) against the current selection and renders the first ~10 items (level chain + leaf name, indented).
 
-This contradicts the master plan: when `layout_classification` is present, `MappingConfirmation` should render first regardless of pattern.
+Validation feedback:
+- Two levels share the same column index → red Alert, **Apply disabled**.
+- A level mapped to a column with 0% fill → yellow Alert (Apply allowed).
 
-## Proposed architecture
+Footer: `[Cancel — Back to Confirmation]` and `[Apply Mapping]`.
 
-### Dispatch result: add a third success branch
+**Parser extension** (`src/utils/parsers/parseHierarchicalColumns.ts`):
 
-Extend `DispatchResult` with a `'generic-confirm'` branch carrying the Pattern A preview:
+Add optional 4th arg `userLevelColumnIndices?: number[]`. When supplied and `length === userLevels.length`, the resolver bypasses header-stem matching and uses the supplied indices directly; `resolvedColumnIndices` mirrors the override and `resolvedLevels` mirrors `userLevels`. Existing header-match + ordinal fallback is unchanged when the param is absent.
 
-```text
-DispatchResult =
-  | { kind: 'completed';       perSheet, sheetNames, clsBySheetName, parserDirectives, payload }   // B/C happy path
-  | { kind: 'conflicts';       perSheet, sheetNames, clsBySheetName, parserDirectives, conflicts } // B/C with conflict
-  | { kind: 'generic-confirm'; sheetNames, clsBySheetName, parserDirectives,                       // NEW — Pattern A
-                               genericPreview: { itemsBySheet: Record<string, PlanItem[]>,
-                                                 personMappingsBySheet: Record<string, PersonMapping[]>,
-                                                 mergedDetection, columnMappings, sectionMapping, levels } }
-  | { kind: 'fallback'; reason }                                                                    // truly no classification
+**SpreadsheetImportStep wiring:**
+
+- New phase `'level-mapping'` plus state `levelMappingTarget: { sheetName, classification, parsedSheet, currentResolvedIndices, currentLevels } | null`.
+- `MappingConfirmation.onAdjust(sheetName)` branches on `clsBySheetName[sheetName].pattern`:
+  - Pattern A → existing legacy `MappingInterface` route (unchanged from 4d.1.1).
+  - Pattern B/C → set `levelMappingTarget` and `phase = 'level-mapping'`.
+- On Apply: re-call `parseHierarchicalColumns(parsedSheet, classification, userLevels, userLevelColumnIndices)`, splice into `hierResultsBySheet[sheetName]`, clear target, return to `'mapping-confirmation'`.
+
+**Diagnostic logs (`ssphase4d2a`):** `level-mapping-shown`, `level-mapping-applied` (itemsBefore/After), `level-mapping-cancelled`.
+
+---
+
+### 4d.2.b — Row-level directive Apply
+
+**New file:** `src/utils/parsers/applyRowPredicate.ts`
+
+```ts
+type ParsedPredicate =
+  | { kind: 'column-equals'; columnHeader: string; value: string }
+  | { kind: 'column-contains'; columnHeader: string; text: string }
+  | { kind: 'starts-with'; text: string }
+  | { kind: 'too-complex' };
+
+export function parsePredicate(predicate: string, headers: string[]): ParsedPredicate;
+export function applyPredicate(items: PlanItem[], parsed: ParsedPredicate, headers: string[]): PlanItem[];
 ```
 
-`tryDispatchHierarchical` mixed/generic branch becomes:
+Three regex patterns, case-insensitive. Header match is stem-folded against `headers`. Anything else returns `'too-complex'`. `applyPredicate` filters `PlanItem[]` and also drops orphaned descendants (parent removed → children removed) to keep the tree consistent.
 
-1. If every selected sheet's `decision.kind === 'generic'` AND a usable classifier output exists for at least one selected sheet → run the existing Pattern A pipeline upfront:
-   - Build `merged = mergeSheetDetections(selectedDetections)` (same as legacy `handleApplyMapping`).
-   - Compute default `columnMappings` / `sectionMapping` / `levels` exactly as the post-detect block does today (lines 154–166 / 102).
-   - Call `generatePlanItems(merged, { columnMappings, sectionMapping, measurementMode: default, levels })` to produce the preview items + person mappings.
-   - Return `kind: 'generic-confirm'` with the preview payload and the same `clsBySheetName` / `parserDirectives` map already fetched.
-2. If sheets are a true mix of hierarchical + generic, keep returning `fallback` (rare; current behavior).
-3. If no classifier data at all → `fallback` (unchanged).
+**MappingConfirmation update:**
 
-### Caller wiring
+For each predicate in `directives.excludePredicates`, run `parsePredicate` at render and:
+- `too-complex` → `[Apply this filter]` disabled with tooltip "This rule is too complex to apply automatically."
+- otherwise → `[Apply this filter]` active. On click: parent re-derives items with `applyPredicate`, updates the per-sheet snapshot, badge changes to `"✓ Applied — removed N rows"` with `[Undo]`.
 
-In the `if (validPreselected …)` block:
+**Parent state — accumulated active set (per sheet):**
 
-- `kind: 'completed' | 'conflicts'` → unchanged, stash `hierResultsBySheet` etc., `setPhase('mapping-confirmation')`.
-- `kind: 'generic-confirm'` (new) → stash `clsBySheetName`, `parserDirectives`, the generic preview into a new ref/state `genericPreview`, set `hierSheetOrder` from `result.sheetNames`, leave `hierResultsBySheet` empty, `setPhase('mapping-confirmation')`. Log `mapping-confirmation-shown` with `pattern: 'A'`.
-- `kind: 'fallback'` → unchanged (legacy detection/mapping flow).
+```ts
+appliedPredicatesBySheet: Record<string, Set<string>>   // active predicates currently filtering
+predicateBaselineBySheet: Record<string, PlanItem[]>     // pre-any-predicate snapshot, captured on first Apply
+```
 
-### MappingConfirmation render
+Apply / Undo flow:
+- On first Apply for a sheet, capture the current `hierResultsBySheet[sheet].items` into `predicateBaselineBySheet[sheet]`.
+- Add/remove the predicate string in the active set.
+- Recompute: start from baseline, fold every active predicate through `applyPredicate` in stable insertion order, write the result back into `hierResultsBySheet`.
+- When the active set empties, drop the baseline entry.
+- This guarantees applying B then A then undoing B leaves A still active with no ordering bugs.
 
-The render block at line 723 builds `sheetSummaries` from `hierResultsBySheet`. Update it to also read from `genericPreview`:
+**Diagnostic logs (`ssphase4d2b`):** `predicate-parsed` (per render, batched once per predicate), `predicate-applied` (kind, itemsBefore/After, removedCount, activeCount), `predicate-undone` (activeCount), `predicate-ignored`.
 
-For each `name` in `hierSheetOrder`:
-- If `hierResultsBySheet[name]` exists → use it (B/C path, unchanged).
-- Else if `genericPreview` exists → derive:
-  - `resolvedLevels`: `cls.structure.implied_levels` (or `section_marker_pattern.levels` — whichever the classifier populates for Pattern A; fall back to `[]`).
-  - `itemCount`: `genericPreview.itemsBySheet[name]?.length ?? 0`.
-  - `nameSourceColumn`: existing `headerRow[nameColIdx]` lookup already works.
-  - `attributeMappings`: existing header walk already works (it uses `parsedSheet`/`detSheet`).
-  - `conflict`: always undefined for Pattern A (no level conflict concept).
+---
 
-No new rendering primitives needed — the existing card layout fits Pattern A.
+### 4d.2.c — Cell-level transformations
 
-### Continue / Adjust on Pattern A
+**New type** (`src/types/parser.ts`):
 
-- **Continue (`onAccept`)**: branch on whether `genericPreview` is set. If yes → call a new `finalizeFromGenericPreview()` that does exactly what `handleApplyMapping` does today (persist `step_results`, mark session completed, call `onComplete`) using the pre-computed items/personMappings/levels/mergedDetection from `genericPreview` — no re-parse. If no → existing `finalizeFromHierSnapshots()`.
-- **Adjust (`onAdjust`)**: unchanged — `setPhase('mapping')` routes Pattern A to the legacy `MappingInterface` (correct behavior; `LevelMappingInterface` is B/C-only and ships in 4d.2). Pre-set `columnMappings` / `sectionMapping` / `levels` from `genericPreview` so the toggle UI opens with the AI's defaults instead of `DEFAULT_LEVELS.slice(0,3)`.
+```ts
+export type CellTransformation =
+  | { rule: 'take-first-delimited'; level?: string; delimiter?: string }
+  | { rule: 'resolve-numeric-reference'; level?: string };
+```
 
-### Side benefit
+**Classifier prompt** (`supabase/functions/classify-spreadsheet-layout/index.ts`):
 
-This also fixes the level-defaults leak on Pattern A's "Adjust" path: by seeding `levels` from the classifier's `implied_levels` before rendering legacy `MappingInterface`, the user no longer sees "Strategic Priority / Objective / Goal" defaults regardless of whether they Continue or Adjust.
+Extend `parser_directives` schema with optional `cell_transformations[]`. System-prompt addendum: extract two known patterns from `documentHints` only — "pick/take the first … when multiple" → `take-first-delimited`; "if just a number, look up / resolve / match to named" → `resolve-numeric-reference`. If user phrasing doesn't fit either pattern, return `[]`. Multi-chunk merge: union by `(rule, level)`.
 
-## Files to change
+**Parser change** (`parseHierarchicalColumns`):
 
-| File | Change |
-|---|---|
-| `src/components/steps/SpreadsheetImportStep.tsx` | Add `'generic-confirm'` to `DispatchResult`; in `tryDispatchHierarchical`, replace the unconditional `mixed routing → fallback` with the Pattern A preview branch; add `genericPreview` state; add `finalizeFromGenericPreview`; update `mapping-confirmation` render to consume `genericPreview`; seed `levels`/`columnMappings`/`sectionMapping` from preview before `setPhase('mapping')` in `onAdjust` |
-| `src/components/spreadsheet/MappingConfirmation.tsx` | No structural change — already renders from `SheetSummary` shape. Pattern A badge styling already supported (line ~50) |
+Add optional `cellTransformations?: CellTransformation[]`. Before path-key construction, for each hierarchy column cell, run `applyCellTransformations(rawValue, levelName, columnIndex, allRowsInColumn, transformations)`. `level` filter uses `stemKey` equality; missing `level` applies to all hierarchy cells.
 
-No changes to: classifier, picker, parser core, edge functions, DB, `Index.tsx`, PDF path.
+**MappingConfirmation update:**
 
-## Diagnostic logging additions
+Inside the existing directives card, render a "Cell rules" subsection when `cell_transformations` is non-empty. Each row shows a plain-language description plus `[Apply this rule]` / `[Ignore]`. Apply triggers a re-parse via the parent.
 
-- `dispatcher.dispatch` outcome `generic-confirm` (replaces `fallback / mixed-routing` on the Pattern A path) with `{ pattern, confidence, itemCount }` per sheet.
-- `ssphase4d.mapping-confirmation-shown` already includes pattern; will now show `'A'` for these sessions — no code change needed.
-- New `ssphase4d.accept-clicked` payload field `source: 'hierarchical' | 'generic'` so we can distinguish post-deploy.
-- New `ssphase4d.adjust-clicked` payload field `levelsSeededFrom: 'classifier' | 'defaults'` to confirm the leak is closed.
+**Parent state — accumulated active set (per sheet), mirrors 4d.2.b:**
 
-## No-hardcoding guarantees
+```ts
+appliedCellTransformationsBySheet: Record<string, CellTransformation[]>  // active rules, insertion order
+cellTxBaselineBySheet: Record<string, { items, personMappings }>          // pre-any-transformation snapshot
+```
 
-- Pattern A entry is gated on `cls.pattern` value + presence of classifier output, never on filename/sheet-name.
-- All defaults (column mappings, section mapping, levels) derive from runtime classifier + header analysis already in the codebase.
-- No new string allowlists.
+Apply / Undo flow:
+- On first Apply for a sheet, snapshot the current parse result into `cellTxBaselineBySheet[sheet]`.
+- Add/remove the rule (compared by `(rule, level, delimiter)` tuple) in the active list.
+- Recompute by re-calling `parseHierarchicalColumns(parsedSheet, classification, userLevels, userLevelColumnIndices, /* cellTransformations */ activeList)` with the **full merged active set** every time, then write the result into `hierResultsBySheet`.
+- When the active list empties, restore the baseline and drop the entry.
+- Important: the parser receives all currently-active transformations on every re-parse, so applying rule B never silently forgets rule A. Undo simply removes that rule from the active list and re-parses.
 
-## Validation scenarios
+**Interaction with 4d.2.a + 4d.2.b:**
+- If a level mapping is re-applied via `LevelMappingInterface` while cell transformations are active, the re-parse must include the active `cellTransformations` list so the new mapping inherits those rules.
+- Row predicates (4d.2.b) operate on the post-parse `PlanItem[]`, so they re-fold from `predicateBaselineBySheet` after any cell-transformation re-parse — i.e. when cell transformations change, capture a fresh predicate baseline from the new parse output and re-apply the active predicate set on top.
 
-1. DRAFT Initiative 1 (Pattern A, 91%) → `MappingConfirmation` renders with Pattern A badge, attribute list, item count from `generatePlanItems`. Continue persists same items legacy mapping would have produced. No "Strategic Priority" leak.
-2. Astera (Pattern A, 95–97%) → same; multi-sheet summary cards.
-3. Tulane (Pattern C with conflict) → unchanged behavior, still hits `'conflicts'` branch.
-4. Santa Cruz (Pattern B) → unchanged.
-5. Pattern A user clicks **Adjust** → legacy `MappingInterface` opens with classifier-derived levels seeded; user sees AI defaults, not `Strategic Priority/Objective/Goal`.
-6. Truly mixed selection (one Pattern B + one Pattern A in same import) → still falls back to legacy flow (rare; out of scope).
-7. Legacy session with no `layout_classification` → unchanged fallback to legacy mapping.
-8. Hard refresh between attempts.
+**Diagnostic logs (`ssphase4d2c`):** `cell-transformation-detected` (from classifier output), `cell-transformation-applied` (rule, level, cellsTransformed, itemsBefore/After, activeCount), `cell-transformation-ignored`, `cell-transformation-undone`.
 
-## Out of scope (still 4d.2)
+---
 
-- `LevelMappingInterface` for B/C reconfigure.
-- `parseHierarchicalColumns(userLevelColumnIndices)` parameter.
-- Predicate Apply translation.
-- Replacing legacy `MappingInterface` for Pattern A's Adjust path (it's the right tool for A; only B/C need a new reconfigure UI).
+### Files touched
+
+| File | a | b | c |
+|---|---|---|---|
+| `src/components/spreadsheet/LevelMappingInterface.tsx` (NEW) | ✓ | | |
+| `src/utils/parsers/applyRowPredicate.ts` (NEW) | | ✓ | |
+| `src/types/parser.ts` (CellTransformation type) | | | ✓ |
+| `src/utils/parsers/parseHierarchicalColumns.ts` | ✓ (`userLevelColumnIndices`) | | ✓ (`cellTransformations`) |
+| `src/components/steps/SpreadsheetImportStep.tsx` | ✓ phase + branching | ✓ apply/undo + accumulator | ✓ apply/undo + accumulator |
+| `src/components/spreadsheet/MappingConfirmation.tsx` | ✓ pattern-aware adjust callback | ✓ predicate Apply UI | ✓ cell rules subsection |
+| `supabase/functions/classify-spreadsheet-layout/index.ts` | | | ✓ schema + prompt |
+
+### Out of scope
+4c, 4e, persisting overrides across sessions, predicates beyond the 3 listed, transformations beyond the 2 listed, Pensacola PDF backlog, Tulane 8.3.1.2 triple-dup.
+
+### Validation flow
+Stop after each sub-phase; deliver report (files changed, deferred work, no test-file hardcoding confirmation, sample diag logs, validation scenarios, divergences). For 4d.2.c specifically, validate apply-A-then-B and apply-A-then-B-then-undo-A scenarios to confirm the merged active set behaves correctly.
