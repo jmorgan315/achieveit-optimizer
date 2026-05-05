@@ -135,6 +135,7 @@ function resolveHierarchyColumns(
   userLevels: string[] | undefined,
   classifierLevels: string[] | undefined,
   totalColumns: number,
+  userLevelColumnIndices?: number[],
 ): LevelResolution {
   const provided = (userLevels && userLevels.length > 0)
     ? userLevels
@@ -143,6 +144,19 @@ function resolveHierarchyColumns(
   if (provided.length === 0) {
     // No level guidance at all. Cannot parse hierarchically; caller falls back.
     return { resolvedLevels: [], resolvedColumnIndices: [], unresolvedLevels: [] };
+  }
+
+  // Phase 4d.2.a: explicit user override of column-per-level. Skip header
+  // matching entirely when supplied with a length-matching index array.
+  if (
+    userLevelColumnIndices &&
+    userLevelColumnIndices.length === provided.length
+  ) {
+    return {
+      resolvedLevels: provided.slice(),
+      resolvedColumnIndices: userLevelColumnIndices.slice(),
+      unresolvedLevels: [],
+    };
   }
 
   const headerIndexByName = new Map<string, number>();
