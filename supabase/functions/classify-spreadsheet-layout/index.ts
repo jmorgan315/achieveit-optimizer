@@ -64,6 +64,10 @@ A sheet structurally classified as "not_plan_content" does NOT belong in exclude
 - exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Each entry MUST be the exact canonical sheet name as it appears in the workbook (matching one of the sheetName values in the input). Do NOT include the user's phrasing, paraphrases, or case variants. If the user's note refers to a sheet by an approximate name, resolve it to the single canonical sheet name. Deduplicate. Empty by default.
 - exclude_row_predicates: string[] — human-readable row filters from the user's notes (e.g., "rows where status = Archived"). Empty by default.
 - include_only_recent: boolean — true ONLY when the user explicitly asks for the latest/most-recent version ("just the latest", "current year only"). False by default. The classifier may still flag time-versioning structurally via clarification_type without setting this.
+- cell_transformations: array — recognized cell-cleanup rules extracted from documentHints. Only emit entries that match these patterns; otherwise leave empty:
+    * "take-first-delimited" when the user says to pick/take the first value when multiple are listed in a cell. Optionally include "delimiter" (default ";") and "level" (the level/column name they referenced).
+    * "resolve-numeric-reference" when the user says number-only cells should be resolved to the corresponding named entry in the same column ("if just a number, look up / match to named"). Optionally include "level".
+  Do NOT invent rules outside these two patterns.
 
 Be precise. Respond ONLY via the report_layout tool.`;
 
