@@ -357,6 +357,26 @@ serve(async (req) => {
       if (d.include_only_recent === true) includeOnlyRecent = true;
     }
 
+    // Merge cell_transformations across chunks; union by (rule, level, delimiter).
+    const cellTxByKey = new Map<string, { rule: string; level?: string; delimiter?: string }>();
+    for (const d of directivesList) {
+      const arr = (d as { cell_transformations?: unknown }).cell_transformations;
+      if (!Array.isArray(arr)) continue;
+      for (const t of arr) {
+        if (!t || typeof t !== "object") continue;
+        const rule = (t as { rule?: unknown }).rule;
+        if (rule !== "take-first-delimited" && rule !== "resolve-numeric-reference") continue;
+        const level = typeof (t as { level?: unknown }).level === "string"
+          ? ((t as { level: string }).level).trim() || undefined
+          : undefined;
+        const delimiter = typeof (t as { delimiter?: unknown }).delimiter === "string"
+          ? ((t as { delimiter: string }).delimiter) || undefined
+          : undefined;
+        const key = `${rule}|${level || "*"}|${delimiter || ""}`;
+        if (!cellTxByKey.has(key)) cellTxByKey.set(key, { rule, level, delimiter });
+      }
+    }
+
     const merged = {
       workbook_summary: {
         primary_pattern: summaries.length === 1 ? summaries[0].primary_pattern : primary,
@@ -368,6 +388,7 @@ serve(async (req) => {
         exclude_sheets: [...excludeSheetsSet],
         exclude_row_predicates: [...excludePredsSet],
         include_only_recent: includeOnlyRecent,
+        cell_transformations: [...cellTxByKey.values()],
       },
       sheets: allSheets,
       model: MODEL,
