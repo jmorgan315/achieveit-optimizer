@@ -129,7 +129,7 @@ export function SpreadsheetImportStep({
   // Snapshot of the in-progress hierarchical results, keyed by sheet name, so
   // we can swap one sheet's items after a re-parse without rerunning others.
   const [hierResultsBySheet, setHierResultsBySheet] = useState<
-    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>
+    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[]; parsedSheet?: import('@/utils/spreadsheet-parser').ParsedSheet; classification?: SheetClassification }>
   >({});
   const [hierSheetOrder, setHierSheetOrder] = useState<string[]>([]);
 
@@ -138,6 +138,31 @@ export function SpreadsheetImportStep({
   const [clsBySheetName, setClsBySheetName] = useState<Record<string, SheetClassification>>({});
   const [parserDirectives, setParserDirectives] = useState<ParserDirectivesShape | null>(null);
   const [dismissedPredicates, setDismissedPredicates] = useState<Set<string>>(new Set());
+  const [dismissedCellRuleKeys, setDismissedCellRuleKeys] = useState<Set<string>>(new Set());
+
+  // Phase 4d.2.b — accumulated active row predicates per sheet, with the
+  // pre-apply baseline so Apply/Undo across multiple predicates is order-safe.
+  const [activePredicatesBySheet, setActivePredicatesBySheet] = useState<Record<string, string[]>>({});
+  const [predicateBaselineBySheet, setPredicateBaselineBySheet] = useState<Record<string, PlanItem[]>>({});
+
+  // Phase 4d.2.c — accumulated active cell transformations per sheet, with
+  // the pre-apply parse-result baseline so Apply/Undo never silently drop a
+  // sibling rule.
+  const [activeCellTxBySheet, setActiveCellTxBySheet] = useState<Record<string, CellTransformation[]>>({});
+  const [cellTxBaselineBySheet, setCellTxBaselineBySheet] = useState<
+    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[] }>
+  >({});
+
+  // Phase 4d.2.a — when the user clicks "Let me adjust" on a Pattern B/C sheet,
+  // we route to the LevelMappingInterface keyed by this target.
+  interface LevelMappingTarget {
+    sheetName: string;
+    classification: SheetClassification;
+    parsedSheet: import('@/utils/spreadsheet-parser').ParsedSheet;
+    initialLevels: string[];
+    initialColumnIndices: number[];
+  }
+  const [levelMappingTarget, setLevelMappingTarget] = useState<LevelMappingTarget | null>(null);
 
   // Phase 4d.1.1 — Pattern A preview computed up front so MappingConfirmation
   // can render the same AI Analysis surface for generic-routed sheets.
