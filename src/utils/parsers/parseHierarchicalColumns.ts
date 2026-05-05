@@ -51,6 +51,7 @@ export interface ParseHierarchicalResult {
   unresolvedLevels?: string[];
   resolvedLevels: string[];
   resolvedColumnIndices: number[];
+  cellsTransformed?: number;
 }
 
 const SHEET_DEFAULT_HEADER_ROW = 0;
@@ -135,6 +136,7 @@ function resolveHierarchyColumns(
   userLevels: string[] | undefined,
   classifierLevels: string[] | undefined,
   totalColumns: number,
+  userLevelColumnIndices?: number[],
 ): LevelResolution {
   const provided = (userLevels && userLevels.length > 0)
     ? userLevels
@@ -143,6 +145,19 @@ function resolveHierarchyColumns(
   if (provided.length === 0) {
     // No level guidance at all. Cannot parse hierarchically; caller falls back.
     return { resolvedLevels: [], resolvedColumnIndices: [], unresolvedLevels: [] };
+  }
+
+  // Phase 4d.2.a: explicit user override of column-per-level. Skip header
+  // matching entirely when supplied with a length-matching index array.
+  if (
+    userLevelColumnIndices &&
+    userLevelColumnIndices.length === provided.length
+  ) {
+    return {
+      resolvedLevels: provided.slice(),
+      resolvedColumnIndices: userLevelColumnIndices.slice(),
+      unresolvedLevels: [],
+    };
   }
 
   const headerIndexByName = new Map<string, number>();
@@ -182,6 +197,14 @@ function resolveHierarchyColumns(
 }
 
 /**
+ * Cell-level transformation rule applied to hierarchy column values before
+ * the parser builds path keys. See Phase 4d.2.c.
+ */
+export type CellTransformation =
+  | { rule: 'take-first-delimited'; level?: string; delimiter?: string }
+  | { rule: 'resolve-numeric-reference'; level?: string };
+
+/**
  * Parse one sheet using the unified Pattern B/C algorithm.
  */
 export function parseHierarchicalColumns(
@@ -189,6 +212,8 @@ export function parseHierarchicalColumns(
   sheetClassification: SheetClassification,
   userLevels?: string[],
   sessionId?: string | null,
+  userLevelColumnIndices?: number[],
+  cellTransformations?: CellTransformation[],
 ): ParseHierarchicalResult {
   console.log('[ssphase4b] ENTERED parseHierarchicalColumns for sheet:', sheet?.name);
   void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'entry', { sheetName: sheet?.name }, sheet?.name);
@@ -264,6 +289,7 @@ export function parseHierarchicalColumns(
     userLevels,
     classifierLevels,
     totalColumns,
+    userLevelColumnIndices,
   );
 
   const resolveLevelsPayload = {
@@ -425,6 +451,51 @@ export function parseHierarchicalColumns(
   console.log('[ssphase4b] row-scan start:', JSON.stringify(rowScanStartPayload));
   void logParserDiagnostic(sessionId, 'parseHierarchicalColumns', 'row-scan-start', rowScanStartPayload, sheet.name);
 
+  // Phase 4d.2.c: precompute per-hierarchy-column "all values" used by
+  // resolve-numeric-reference lookup. Indexed by level position.
+  const activeTransformations: CellTransformation[] = Array.isArray(cellTransformations) ? cellTransformations : [];
+  const perLevelColumnValues: string[][] = resolution.resolvedColumnIndices.map(colIdx => {
+    if (colIdx < 0) return [];
+    const out: string[] = [];
+    for (let r = dataStartRow; r < sheet.rows.length; r++) {
+      const row = sheet.rows[r];
+      if (!Array.isArray(row)) continue;
+      const v = cellAt(row, colIdx);
+      if (v) out.push(v);
+    }
+    return out;
+  });
+  let cellsTransformedCount = 0;
+
+  function applyCellTransformations(rawValue: string, levelName: string, levelIdx: number): string {
+    if (!rawValue || activeTransformations.length === 0) return rawValue;
+    let value = rawValue;
+    for (const t of activeTransformations) {
+      if (t.level && stemKey(t.level) !== stemKey(levelName)) continue;
+      if (t.rule === 'take-first-delimited') {
+        const delim = t.delimiter && t.delimiter.length > 0 ? t.delimiter : ';';
+        if (value.includes(delim)) {
+          const next = value.split(delim)[0].trim();
+          if (next !== value) { value = next; cellsTransformedCount++; }
+        }
+      } else if (t.rule === 'resolve-numeric-reference') {
+        if (/^\s*[\d.,;\s]+\s*$/.test(value)) {
+          const nums = value.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+          if (nums.length > 0) {
+            const pool = perLevelColumnValues[levelIdx] || [];
+            const resolved = nums.map(n => {
+              const found = pool.find(c => c.startsWith(n + '.') || c.startsWith(n + ' '));
+              return found || n;
+            });
+            const next = resolved.join('; ');
+            if (next !== value) { value = next; cellsTransformedCount++; }
+          }
+        }
+      }
+    }
+    return value;
+  }
+
   for (let r = dataStartRow; r < sheet.rows.length; r++) {
     const row = sheet.rows[r];
     if (!Array.isArray(row)) continue;
@@ -437,10 +508,11 @@ export function parseHierarchicalColumns(
       continue;
     }
 
-    // Read raw hierarchy values for this row.
-    const rawValues: string[] = resolution.resolvedColumnIndices.map(colIdx =>
-      colIdx >= 0 ? cellAt(row, colIdx) : '',
-    );
+    // Read raw hierarchy values for this row, applying any cell transformations.
+    const rawValues: string[] = resolution.resolvedColumnIndices.map((colIdx, i) => {
+      const raw = colIdx >= 0 ? cellAt(row, colIdx) : '';
+      return applyCellTransformations(raw, resolution.resolvedLevels[i] ?? '', i);
+    });
 
     // Inheritance fill: any blank inherits from the last seen non-blank above.
     const filled: string[] = rawValues.map((v, i) => {
@@ -632,5 +704,6 @@ export function parseHierarchicalColumns(
     unresolvedLevels: resolution.unresolvedLevels.length > 0 ? resolution.unresolvedLevels : undefined,
     resolvedLevels: resolution.resolvedLevels,
     resolvedColumnIndices: resolution.resolvedColumnIndices,
+    cellsTransformed: cellsTransformedCount,
   };
 }

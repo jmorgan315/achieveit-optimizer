@@ -64,6 +64,10 @@ A sheet structurally classified as "not_plan_content" does NOT belong in exclude
 - exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Each entry MUST be the exact canonical sheet name as it appears in the workbook (matching one of the sheetName values in the input). Do NOT include the user's phrasing, paraphrases, or case variants. If the user's note refers to a sheet by an approximate name, resolve it to the single canonical sheet name. Deduplicate. Empty by default.
 - exclude_row_predicates: string[] — human-readable row filters from the user's notes (e.g., "rows where status = Archived"). Empty by default.
 - include_only_recent: boolean — true ONLY when the user explicitly asks for the latest/most-recent version ("just the latest", "current year only"). False by default. The classifier may still flag time-versioning structurally via clarification_type without setting this.
+- cell_transformations: array — recognized cell-cleanup rules extracted from documentHints. Only emit entries that match these patterns; otherwise leave empty:
+    * "take-first-delimited" when the user says to pick/take the first value when multiple are listed in a cell. Optionally include "delimiter" (default ";") and "level" (the level/column name they referenced).
+    * "resolve-numeric-reference" when the user says number-only cells should be resolved to the corresponding named entry in the same column ("if just a number, look up / match to named"). Optionally include "level".
+  Do NOT invent rules outside these two patterns.
 
 Be precise. Respond ONLY via the report_layout tool.`;
 
@@ -91,6 +95,18 @@ const layoutToolSchema = {
         exclude_sheets: { type: "array", items: { type: "string" } },
         exclude_row_predicates: { type: "array", items: { type: "string" } },
         include_only_recent: { type: "boolean" },
+        cell_transformations: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              rule: { type: "string", enum: ["take-first-delimited", "resolve-numeric-reference"] },
+              level: { type: "string" },
+              delimiter: { type: "string" },
+            },
+            required: ["rule"],
+          },
+        },
       },
       required: ["exclude_sheets", "exclude_row_predicates", "include_only_recent"],
     },
@@ -341,6 +357,26 @@ serve(async (req) => {
       if (d.include_only_recent === true) includeOnlyRecent = true;
     }
 
+    // Merge cell_transformations across chunks; union by (rule, level, delimiter).
+    const cellTxByKey = new Map<string, { rule: string; level?: string; delimiter?: string }>();
+    for (const d of directivesList) {
+      const arr = (d as { cell_transformations?: unknown }).cell_transformations;
+      if (!Array.isArray(arr)) continue;
+      for (const t of arr) {
+        if (!t || typeof t !== "object") continue;
+        const rule = (t as { rule?: unknown }).rule;
+        if (rule !== "take-first-delimited" && rule !== "resolve-numeric-reference") continue;
+        const level = typeof (t as { level?: unknown }).level === "string"
+          ? ((t as { level: string }).level).trim() || undefined
+          : undefined;
+        const delimiter = typeof (t as { delimiter?: unknown }).delimiter === "string"
+          ? ((t as { delimiter: string }).delimiter) || undefined
+          : undefined;
+        const key = `${rule}|${level || "*"}|${delimiter || ""}`;
+        if (!cellTxByKey.has(key)) cellTxByKey.set(key, { rule, level, delimiter });
+      }
+    }
+
     const merged = {
       workbook_summary: {
         primary_pattern: summaries.length === 1 ? summaries[0].primary_pattern : primary,
@@ -352,6 +388,7 @@ serve(async (req) => {
         exclude_sheets: [...excludeSheetsSet],
         exclude_row_predicates: [...excludePredsSet],
         include_only_recent: includeOnlyRecent,
+        cell_transformations: [...cellTxByKey.values()],
       },
       sheets: allSheets,
       model: MODEL,

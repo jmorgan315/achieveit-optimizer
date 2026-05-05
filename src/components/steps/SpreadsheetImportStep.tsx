@@ -19,20 +19,32 @@ import {
   parseHierarchicalColumns,
   SheetClassification,
   stemKey,
+  CellTransformation,
 } from '@/utils/parsers/parseHierarchicalColumns';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface, LevelConflictBlock, LevelChoice } from '@/components/spreadsheet/MappingInterface';
-import { MappingConfirmation, SheetSummary, DirectivesSummary, AttributeMapping } from '@/components/spreadsheet/MappingConfirmation';
+import { LevelMappingInterface } from '@/components/spreadsheet/LevelMappingInterface';
+import {
+  MappingConfirmation,
+  SheetSummary,
+  DirectivesSummary,
+  AttributeMapping,
+  PredicateRow,
+  CellRuleRow,
+  cellRuleKey,
+} from '@/components/spreadsheet/MappingConfirmation';
+import { parsePredicate, applyPredicate, ParsedPredicate } from '@/utils/parsers/applyRowPredicate';
 import { Loader2 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { logParserDiagnostic } from '@/utils/parserDiagnostics';
 
-type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict' | 'mapping-confirmation';
+type Phase = 'parsing' | 'detection' | 'mapping' | 'generating' | 'level-conflict' | 'mapping-confirmation' | 'level-mapping';
 
 interface ParserDirectivesShape {
   exclude_sheets?: string[];
   exclude_row_predicates?: string[];
   include_only_recent?: boolean;
+  cell_transformations?: CellTransformation[];
 }
 
 interface LayoutClassification {
@@ -117,7 +129,7 @@ export function SpreadsheetImportStep({
   // Snapshot of the in-progress hierarchical results, keyed by sheet name, so
   // we can swap one sheet's items after a re-parse without rerunning others.
   const [hierResultsBySheet, setHierResultsBySheet] = useState<
-    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>
+    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[]; parsedSheet?: import('@/utils/spreadsheet-parser').ParsedSheet; classification?: SheetClassification }>
   >({});
   const [hierSheetOrder, setHierSheetOrder] = useState<string[]>([]);
 
@@ -126,6 +138,31 @@ export function SpreadsheetImportStep({
   const [clsBySheetName, setClsBySheetName] = useState<Record<string, SheetClassification>>({});
   const [parserDirectives, setParserDirectives] = useState<ParserDirectivesShape | null>(null);
   const [dismissedPredicates, setDismissedPredicates] = useState<Set<string>>(new Set());
+  const [dismissedCellRuleKeys, setDismissedCellRuleKeys] = useState<Set<string>>(new Set());
+
+  // Phase 4d.2.b — accumulated active row predicates per sheet, with the
+  // pre-apply baseline so Apply/Undo across multiple predicates is order-safe.
+  const [activePredicatesBySheet, setActivePredicatesBySheet] = useState<Record<string, string[]>>({});
+  const [predicateBaselineBySheet, setPredicateBaselineBySheet] = useState<Record<string, PlanItem[]>>({});
+
+  // Phase 4d.2.c — accumulated active cell transformations per sheet, with
+  // the pre-apply parse-result baseline so Apply/Undo never silently drop a
+  // sibling rule.
+  const [activeCellTxBySheet, setActiveCellTxBySheet] = useState<Record<string, CellTransformation[]>>({});
+  const [cellTxBaselineBySheet, setCellTxBaselineBySheet] = useState<
+    Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[] }>
+  >({});
+
+  // Phase 4d.2.a — when the user clicks "Let me adjust" on a Pattern B/C sheet,
+  // we route to the LevelMappingInterface keyed by this target.
+  interface LevelMappingTarget {
+    sheetName: string;
+    classification: SheetClassification;
+    parsedSheet: import('@/utils/spreadsheet-parser').ParsedSheet;
+    initialLevels: string[];
+    initialColumnIndices: number[];
+  }
+  const [levelMappingTarget, setLevelMappingTarget] = useState<LevelMappingTarget | null>(null);
 
   // Phase 4d.1.1 — Pattern A preview computed up front so MappingConfirmation
   // can render the same AI Analysis surface for generic-routed sheets.
@@ -261,7 +298,7 @@ export function SpreadsheetImportStep({
 
   // ── Hierarchical dispatch helpers ────────────────────────────────────────
 
-  type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
+  type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[]; parsedSheet?: import('@/utils/spreadsheet-parser').ParsedSheet; classification?: SheetClassification }>;
   type GenericConfirmPreview = {
     itemsBySheet: Record<string, PlanItem[]>;
     personMappings: PersonMapping[];
@@ -505,6 +542,9 @@ export function SpreadsheetImportStep({
         items: result.items,
         personMappings: result.personMappings,
         resolvedLevels: result.resolvedLevels,
+        resolvedColumnIndices: result.resolvedColumnIndices,
+        parsedSheet: s.sheet,
+        classification: s.cls,
       };
       result.resolvedLevels.forEach(name => {
         if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
@@ -734,6 +774,9 @@ export function SpreadsheetImportStep({
           items: result.items,
           personMappings: result.personMappings,
           resolvedLevels: result.resolvedLevels,
+          resolvedColumnIndices: result.resolvedColumnIndices,
+          parsedSheet: conflict.parsedSheet,
+          classification: conflict.sheetClassification,
         },
       }));
 
@@ -789,6 +832,160 @@ export function SpreadsheetImportStep({
       sheetNames: hierSheetOrder,
     });
   };
+
+  // ── Phase 4d.2 helpers ──────────────────────────────────────────────────
+
+  /** Re-parse a sheet with current overrides + active cell transformations,
+   *  then re-fold the active row predicates on top. Updates hierResultsBySheet
+   *  and the predicate baseline for that sheet. */
+  function reparseAndRefold(
+    sheetName: string,
+    nextCellTx: CellTransformation[],
+    nextPredicates: string[],
+    nextColumnIndices?: number[],
+  ) {
+    const hier = hierResultsBySheet[sheetName];
+    if (!hier?.parsedSheet || !hier?.classification) return;
+    const userLevelsForSheet = hier.resolvedLevels;
+    const colIndices = nextColumnIndices ?? hier.resolvedColumnIndices;
+    const result = parseHierarchicalColumns(
+      hier.parsedSheet,
+      hier.classification,
+      userLevelsForSheet,
+      sessionId,
+      colIndices,
+      nextCellTx,
+    );
+    // Apply active predicates over the fresh parse output.
+    const headers = (() => {
+      const hdrIdx = hier.classification.structure?.header_row_index ?? 0;
+      const row = hier.parsedSheet.rows?.[hdrIdx];
+      return Array.isArray(row) ? row.map(c => (c == null ? '' : String(c).trim())) : [];
+    })();
+    let foldedItems = result.items;
+    for (const p of nextPredicates) {
+      const parsed: ParsedPredicate = parsePredicate(p, headers);
+      foldedItems = applyPredicate(foldedItems, parsed, headers);
+    }
+    setHierResultsBySheet(prev => ({
+      ...prev,
+      [sheetName]: {
+        ...hier,
+        items: foldedItems,
+        personMappings: result.personMappings,
+        resolvedLevels: result.resolvedLevels,
+        resolvedColumnIndices: result.resolvedColumnIndices,
+      },
+    }));
+    // Refresh predicate baseline to the post-cell-tx parse output.
+    setPredicateBaselineBySheet(prev => ({ ...prev, [sheetName]: result.items }));
+    return { itemsAfter: foldedItems.length, cellsTransformed: result.cellsTransformed ?? 0 };
+  }
+
+  // 4d.2.a — apply column-to-level mapping from LevelMappingInterface.
+  const handleApplyLevelMapping = (userLevels: string[], userLevelColumnIndices: number[]) => {
+    const target = levelMappingTarget;
+    if (!target) return;
+    const sheetName = target.sheetName;
+    const itemsBefore = hierResultsBySheet[sheetName]?.items.length ?? 0;
+    const activeTx = activeCellTxBySheet[sheetName] ?? [];
+    const activePreds = activePredicatesBySheet[sheetName] ?? [];
+    // Update resolvedLevels then re-parse with new column indices.
+    setHierResultsBySheet(prev => ({
+      ...prev,
+      [sheetName]: { ...prev[sheetName], resolvedLevels: userLevels, resolvedColumnIndices: userLevelColumnIndices },
+    }));
+    const r = reparseAndRefold(sheetName, activeTx, activePreds, userLevelColumnIndices);
+    void logParserDiagnostic(sessionId, 'ssphase4d2a', 'level-mapping-applied', {
+      sheet: sheetName,
+      userLevels,
+      userLevelColumnIndices,
+      itemsBefore,
+      itemsAfter: r?.itemsAfter ?? 0,
+    }, sheetName);
+    setLevelMappingTarget(null);
+    setPhase('mapping-confirmation');
+  };
+
+  // 4d.2.b — apply / undo a row predicate.
+  const handleApplyPredicate = (predicate: string) => {
+    // Apply across all hierarchical sheets that have a parsed sheet/classification.
+    for (const sheetName of hierSheetOrder) {
+      const hier = hierResultsBySheet[sheetName];
+      if (!hier?.parsedSheet || !hier?.classification) continue;
+      // Capture predicate baseline if first apply on this sheet.
+      if (!predicateBaselineBySheet[sheetName]) {
+        setPredicateBaselineBySheet(prev => ({ ...prev, [sheetName]: hier.items }));
+      }
+      const nextPreds = [...(activePredicatesBySheet[sheetName] ?? []), predicate];
+      setActivePredicatesBySheet(prev => ({ ...prev, [sheetName]: nextPreds }));
+      const activeTx = activeCellTxBySheet[sheetName] ?? [];
+      const itemsBefore = hier.items.length;
+      const r = reparseAndRefold(sheetName, activeTx, nextPreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-applied', {
+        sheet: sheetName, predicate, itemsBefore, itemsAfter: r?.itemsAfter ?? 0,
+        removedCount: itemsBefore - (r?.itemsAfter ?? itemsBefore), activeCount: nextPreds.length,
+      }, sheetName);
+    }
+  };
+  const handleUndoPredicate = (predicate: string) => {
+    for (const sheetName of hierSheetOrder) {
+      const cur = activePredicatesBySheet[sheetName] ?? [];
+      if (!cur.includes(predicate)) continue;
+      const nextPreds = cur.filter(p => p !== predicate);
+      setActivePredicatesBySheet(prev => ({ ...prev, [sheetName]: nextPreds }));
+      const activeTx = activeCellTxBySheet[sheetName] ?? [];
+      reparseAndRefold(sheetName, activeTx, nextPreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-undone', {
+        sheet: sheetName, predicate, activeCount: nextPreds.length,
+      }, sheetName);
+    }
+  };
+
+  // 4d.2.c — apply / undo a cell transformation rule (by key).
+  const allCellRules: CellTransformation[] = parserDirectives?.cell_transformations ?? [];
+  const handleApplyCellRule = (key: string) => {
+    const rule = allCellRules.find(r => cellRuleKey(r) === key);
+    if (!rule) return;
+    for (const sheetName of hierSheetOrder) {
+      const hier = hierResultsBySheet[sheetName];
+      if (!hier?.parsedSheet || !hier?.classification) continue;
+      if (!cellTxBaselineBySheet[sheetName]) {
+        setCellTxBaselineBySheet(prev => ({
+          ...prev,
+          [sheetName]: {
+            items: hier.items, personMappings: hier.personMappings,
+            resolvedLevels: hier.resolvedLevels, resolvedColumnIndices: hier.resolvedColumnIndices,
+          },
+        }));
+      }
+      const cur = activeCellTxBySheet[sheetName] ?? [];
+      const nextTx = [...cur, rule];
+      setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
+      const activePreds = activePredicatesBySheet[sheetName] ?? [];
+      const itemsBefore = hier.items.length;
+      const r = reparseAndRefold(sheetName, nextTx, activePreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-applied', {
+        sheet: sheetName, rule: rule.rule, level: rule.level ?? null,
+        itemsBefore, itemsAfter: r?.itemsAfter ?? 0, cellsTransformed: r?.cellsTransformed ?? 0,
+        activeCount: nextTx.length,
+      }, sheetName);
+    }
+  };
+  const handleUndoCellRule = (key: string) => {
+    for (const sheetName of hierSheetOrder) {
+      const cur = activeCellTxBySheet[sheetName] ?? [];
+      const nextTx = cur.filter(r => cellRuleKey(r) !== key);
+      if (nextTx.length === cur.length) continue;
+      setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
+      const activePreds = activePredicatesBySheet[sheetName] ?? [];
+      reparseAndRefold(sheetName, nextTx, activePreds);
+      void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-undone', {
+        sheet: sheetName, key, activeCount: nextTx.length,
+      }, sheetName);
+    }
+  };
+
 
   if (phase === 'parsing') {
     return (
