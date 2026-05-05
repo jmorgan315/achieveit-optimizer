@@ -774,6 +774,9 @@ export function SpreadsheetImportStep({
           items: result.items,
           personMappings: result.personMappings,
           resolvedLevels: result.resolvedLevels,
+          resolvedColumnIndices: result.resolvedColumnIndices,
+          parsedSheet: conflict.parsedSheet,
+          classification: conflict.sheetClassification,
         },
       }));
 
