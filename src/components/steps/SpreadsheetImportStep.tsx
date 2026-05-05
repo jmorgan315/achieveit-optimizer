@@ -193,18 +193,34 @@ export function SpreadsheetImportStep({
             file,
             parsedSheets: sheets,
             selectedIndices: validPreselected,
+            detection: det,
           });
-          if (result.kind === 'completed' || result.kind === 'conflicts') {
+          if (result.kind === 'completed' || result.kind === 'conflicts' || result.kind === 'generic-confirm') {
             // Stash classifier metadata for the confirmation screen.
             setClsBySheetName(result.clsBySheetName);
             setParserDirectives(result.parserDirectives ?? null);
-            setHierResultsBySheet(result.perSheet);
             setHierSheetOrder(result.sheetNames);
-            if (result.kind === 'conflicts') {
-              setPendingConflicts(result.conflicts);
+            if (result.kind === 'completed' || result.kind === 'conflicts') {
+              setHierResultsBySheet(result.perSheet);
+              if (result.kind === 'conflicts') setPendingConflicts(result.conflicts);
+            } else {
+              // generic-confirm — Pattern A preview
+              setGenericPreview({
+                itemsBySheet: result.preview.itemsBySheet,
+                personMappings: result.preview.personMappings,
+                levels: result.preview.levels,
+                columnMappings: result.preview.columnMappings,
+                sectionMapping: result.preview.sectionMapping,
+                measurementMode: result.preview.measurementMode,
+              });
+              // Seed legacy mapping state so "Let me adjust" opens with classifier-derived defaults.
+              setColumnMappings(result.preview.columnMappings);
+              setSectionMapping(result.preview.sectionMapping);
+              setLevels(result.preview.levels);
             }
             setPhase('mapping-confirmation');
             void logParserDiagnostic(sessionId, 'ssphase4d', 'mapping-confirmation-shown', {
+              source: result.kind === 'generic-confirm' ? 'generic' : 'hierarchical',
               sheets: result.sheetNames.map(n => ({
                 sheet: n,
                 pattern: result.clsBySheetName[n]?.pattern ?? 'unknown',
