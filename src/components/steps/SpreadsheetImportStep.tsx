@@ -778,7 +778,17 @@ export function SpreadsheetImportStep({
     });
   };
 
-  if (phase === 'parsing') {
+  // Phase 4d.1.1 — finalize the Pattern A preview without re-parsing.
+  const finalizeFromGenericPreview = async () => {
+    if (!genericPreview) return;
+    const allItems = hierSheetOrder.flatMap(n => genericPreview.itemsBySheet[n] ?? []);
+    await persistAndComplete({
+      items: allItems,
+      personMappings: genericPreview.personMappings,
+      levels: genericPreview.levels,
+      sheetNames: hierSheetOrder,
+    });
+  };
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
