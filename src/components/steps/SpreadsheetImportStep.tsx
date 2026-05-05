@@ -306,6 +306,7 @@ export function SpreadsheetImportStep({
     file: File;
     parsedSheets: import('@/utils/spreadsheet-parser').ParsedSheet[];
     selectedIndices: number[];
+    detection: StructureDetection;
   }): Promise<DispatchResult> {
     console.log('[ssphase4b] ENTERED tryDispatchHierarchical, selectedIndices:', args.selectedIndices, 'sheetCount:', args.parsedSheets.length);
     void logParserDiagnostic(args.sessionId, 'dispatcher', 'entry', {
