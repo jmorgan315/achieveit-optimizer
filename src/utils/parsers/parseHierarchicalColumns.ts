@@ -704,5 +704,6 @@ export function parseHierarchicalColumns(
     unresolvedLevels: resolution.unresolvedLevels.length > 0 ? resolution.unresolvedLevels : undefined,
     resolvedLevels: resolution.resolvedLevels,
     resolvedColumnIndices: resolution.resolvedColumnIndices,
+    cellsTransformed: cellsTransformedCount,
   };
 }
