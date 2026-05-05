@@ -246,6 +246,14 @@ export function SpreadsheetImportStep({
   // ── Hierarchical dispatch helpers ────────────────────────────────────────
 
   type HierPerSheet = Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[] }>;
+  type GenericConfirmPreview = {
+    itemsBySheet: Record<string, PlanItem[]>;
+    personMappings: PersonMapping[];
+    levels: PlanLevel[];
+    columnMappings: Record<string, ColumnRole>;
+    sectionMapping: ElementRole;
+    measurementMode: MeasurementMode;
+  };
   type DispatchResult =
     | {
         kind: 'completed';
@@ -262,6 +270,13 @@ export function SpreadsheetImportStep({
         sheetNames: string[];
         clsBySheetName: Record<string, SheetClassification>;
         parserDirectives: ParserDirectivesShape | null;
+      }
+    | {
+        kind: 'generic-confirm';
+        sheetNames: string[];
+        clsBySheetName: Record<string, SheetClassification>;
+        parserDirectives: ParserDirectivesShape | null;
+        preview: GenericConfirmPreview;
       }
     | { kind: 'fallback'; reason: string };
 
