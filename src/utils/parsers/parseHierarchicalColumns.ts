@@ -288,6 +288,7 @@ export function parseHierarchicalColumns(
     userLevels,
     classifierLevels,
     totalColumns,
+    userLevelColumnIndices,
   );
 
   const resolveLevelsPayload = {
