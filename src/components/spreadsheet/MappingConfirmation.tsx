@@ -181,38 +181,49 @@ export function MappingConfirmation({
                             <div className="text-xs text-muted-foreground mt-1 italic">Ignored — these rows will be included.</div>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {active ? (
-                            <Button size="sm" variant="outline" onClick={() => onUndoPredicate?.(row.predicate)}>
-                              <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
-                            </Button>
-                          ) : tooComplex ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span>
-                                  <Button size="sm" variant="outline" disabled>
-                                    Apply this filter
-                                  </Button>
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                This rule is too complex to apply automatically.
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <Button size="sm" variant="outline" onClick={() => onApplyPredicate?.(row.predicate)}>
-                              Apply this filter
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant={dismissed ? 'secondary' : 'ghost'}
-                            onClick={() => onIgnoreDirective(row.predicate)}
-                            disabled={dismissed || active}
-                          >
-                            Ignore
-                          </Button>
-                        </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!predicatesEnabled ? (
+                              <>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span>
+                                      <Button size="sm" variant="outline" disabled>Apply this filter</Button>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Coming soon — 4d.2.b</TooltipContent>
+                                </Tooltip>
+                                <Button size="sm" variant="ghost" disabled>Ignore</Button>
+                              </>
+                            ) : active ? (
+                              <Button size="sm" variant="outline" onClick={() => onUndoPredicate?.(row.predicate)}>
+                                <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
+                              </Button>
+                            ) : tooComplex ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Button size="sm" variant="outline" disabled>Apply this filter</Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>This rule is too complex to apply automatically.</TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              <Button size="sm" variant="outline" onClick={() => onApplyPredicate?.(row.predicate)}>
+                                Apply this filter
+                              </Button>
+                            )}
+                            {predicatesEnabled && (
+                              <Button
+                                size="sm"
+                                variant={dismissed ? 'secondary' : 'ghost'}
+                                onClick={() => onIgnoreDirective(row.predicate)}
+                                disabled={dismissed || active}
+                              >
+                                Ignore
+                              </Button>
+                            )}
+                          </div>
+
                       </div>
                     );
                   })}
