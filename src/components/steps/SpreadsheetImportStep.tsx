@@ -1377,12 +1377,15 @@ export function SpreadsheetImportStep({
       }
       return `${String((t as { rule: string }).rule)}${lvl}`;
     };
-    const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => ({
-      rule,
-      description: describeCellRule(rule),
-      activeOnSheets: [],
-      cellsTransformed: 0,
-    }));
+    const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => {
+      const key = cellRuleKey(rule);
+      const activeOnSheets = Object.entries(activeCellTxBySheet)
+        .filter(([, rules]) => rules.some(r => cellRuleKey(r) === key))
+        .map(([s]) => s);
+      const cellsTransformed = activeOnSheets.reduce(
+        (n, s) => n + (cellsTransformedByRuleSheet[s]?.[key] ?? 0), 0);
+      return { rule, description: describeCellRule(rule), activeOnSheets, cellsTransformed };
+    });
     const directivesSummary: DirectivesSummary | undefined =
       (predicateRows.length || cellRuleRows.length)
         ? {
