@@ -1,138 +1,124 @@
-## Phase 4d.2 — LevelMappingInterface + Directive Apply
+## Goal
 
-Three independently shippable chunks. Pause for validation between each. No filename / sheet-name / column-string heuristics; all decisions flow from `layout_classification`, runtime cell content, or user input.
+Ship Phase 4d.2.a (LevelMappingInterface) end-to-end as the first validated chunk. Keep 4d.2.b and 4d.2.c plumbing in place (already written) but stub the Apply buttons with "Coming soon" tooltips so the directives surface is informational only. Do not remove `applyRowPredicate.ts`, `CellTransformation` types, parser support, or classifier schema/prompt extensions — they stay inert until wired.
 
----
+## Scope (this chunk only)
 
-### 4d.2.a — Column-to-Level mapping UI (Pattern B/C)
+1. Wire `'level-mapping'` phase render block in `SpreadsheetImportStep.tsx`.
+2. Branch `onAdjust` by classifier pattern: Pattern A → legacy `MappingInterface` (existing path); Pattern B/C → set `levelMappingTarget` and `setPhase('level-mapping')`.
+3. In `MappingConfirmation.tsx`, render predicate rows and cell-rule rows informationally with Apply buttons **disabled** + tooltip "Coming soon — 4d.2.b" / "Coming soon — 4d.2.c". Undo/Ignore also disabled to avoid half-wired state. Active-state branches (✓ Applied / Undo) become unreachable in this chunk and can be left in source but won't render because `activeOnSheets` will always be empty.
+4. Plumb `directives.predicateRows` and `directives.cellRuleRows` through `SpreadsheetImportStep` so predicates and cell rules show up. Each row's `activeOnSheets: []`, `removedCount: 0`, `cellsTransformed: 0` (informational only).
 
-**New file:** `src/components/spreadsheet/LevelMappingInterface.tsx`
+## Explicitly NOT in this chunk
 
-Two-column layout:
-- **Left** — one row per level (from `userLevels` if set, else `structure.implied_levels`). Each row shows `Level N: <name>` plus a `<Select>` listing every parsed column with label `"<header or (no header)> — Column <A1-letter> (idx N) — XX% filled"`. Defaults to the current `resolvedColumnIndices[i]` from the prior parse. Below: collapsible "Other columns" (attribute-role selects mirroring legacy `MappingInterface`) and "Skipped columns".
-- **Right** — `Live Preview` card: re-runs `parseHierarchicalColumns` (memoized) against the current selection and renders the first ~10 items (level chain + leaf name, indented).
+- Calling `handleApplyPredicate` / `handleUndoPredicate` from the UI.
+- Calling `handleApplyCellRule` / `handleUndoCellRule` from the UI.
+- Removing existing handlers, `reparseAndRefold`, `applyRowPredicate.ts`, `CellTransformation` parser support, or classifier `cell_transformations` schema/prompt — all stays as dead-but-correct code.
 
-Validation feedback:
-- Two levels share the same column index → red Alert, **Apply disabled**.
-- A level mapped to a column with 0% fill → yellow Alert (Apply allowed).
+## Files to change
 
-Footer: `[Cancel — Back to Confirmation]` and `[Apply Mapping]`.
+### `src/components/spreadsheet/MappingConfirmation.tsx`
 
-**Parser extension** (`src/utils/parsers/parseHierarchicalColumns.ts`):
+- Add a new optional prop `directivesEnabled?: { predicates: boolean; cellRules: boolean }` (default `{ predicates: false, cellRules: false }`).
+- For each predicate row: when `directivesEnabled.predicates === false`, render Apply as `<Button disabled>` wrapped in a `<Tooltip>` with content "Coming soon — 4d.2.b". Ignore button also disabled. Skip the active/dismissed visual states.
+- For each cell-rule row: same pattern with tooltip "Coming soon — 4d.2.c".
+- Keep existing handler props optional; do not invoke them when disabled.
+- The `onAttemptApplyDirective` prop already referenced from `SpreadsheetImportStep` (currently typo'd as a non-existent prop in the tsx) — either remove that callsite or accept it as a no-op prop. **Decision:** drop `onAttemptApplyDirective` prop entirely, log "coming-soon-clicked" instead is unnecessary because buttons are disabled (no click).
 
-Add optional 4th arg `userLevelColumnIndices?: number[]`. When supplied and `length === userLevels.length`, the resolver bypasses header-stem matching and uses the supplied indices directly; `resolvedColumnIndices` mirrors the override and `resolvedLevels` mirrors `userLevels`. Existing header-match + ordinal fallback is unchanged when the param is absent.
+### `src/components/steps/SpreadsheetImportStep.tsx`
 
-**SpreadsheetImportStep wiring:**
+- **Render block — add `level-mapping` phase** (before the final `return null`):
+  ```tsx
+  if (phase === 'level-mapping' && levelMappingTarget) {
+    return (
+      <LevelMappingInterface
+        sheetName={levelMappingTarget.sheetName}
+        parsedSheet={levelMappingTarget.parsedSheet}
+        classification={levelMappingTarget.classification}
+        initialLevels={levelMappingTarget.initialLevels}
+        initialColumnIndices={levelMappingTarget.initialColumnIndices}
+        cellTransformations={activeCellTxBySheet[levelMappingTarget.sheetName] ?? []}
+        sessionId={sessionId}
+        onApply={handleApplyLevelMapping}
+        onCancel={() => { setLevelMappingTarget(null); setPhase('mapping-confirmation'); }}
+      />
+    );
+  }
+  ```
 
-- New phase `'level-mapping'` plus state `levelMappingTarget: { sheetName, classification, parsedSheet, currentResolvedIndices, currentLevels } | null`.
-- `MappingConfirmation.onAdjust(sheetName)` branches on `clsBySheetName[sheetName].pattern`:
-  - Pattern A → existing legacy `MappingInterface` route (unchanged from 4d.1.1).
-  - Pattern B/C → set `levelMappingTarget` and `phase = 'level-mapping'`.
-- On Apply: re-call `parseHierarchicalColumns(parsedSheet, classification, userLevels, userLevelColumnIndices)`, splice into `hierResultsBySheet[sheetName]`, clear target, return to `'mapping-confirmation'`.
+- **Rewrite `onAdjust`** in the `mapping-confirmation` render to branch by pattern:
+  ```tsx
+  onAdjust={(sheetName) => {
+    const cls = clsBySheetName[sheetName];
+    const pattern = String(cls?.pattern ?? '').toUpperCase();
+    void logParserDiagnostic(sessionId, 'ssphase4d', 'adjust-clicked', {
+      sheet: sheetName, pattern, target: pattern === 'B' || pattern === 'C' ? 'level-mapping' : 'mapping-interface',
+    });
+    if ((pattern === 'B' || pattern === 'C') && cls) {
+      const hier = hierResultsBySheet[sheetName];
+      const parsedSheet = hier?.parsedSheet ?? detection?.sheets.find(s => s.sheet.name === sheetName)?.sheet;
+      if (!parsedSheet) { setPendingConflicts([]); setPhase('mapping'); return; }
+      const initialLevels = hier?.resolvedLevels ?? cls.structure?.implied_levels ?? [];
+      const initialColumnIndices = hier?.resolvedColumnIndices ?? initialLevels.map((_, i) => i);
+      setLevelMappingTarget({ sheetName, classification: cls, parsedSheet, initialLevels, initialColumnIndices });
+      setPhase('level-mapping');
+      return;
+    }
+    // Pattern A (and any unknown): legacy mapping flow — unchanged.
+    setPendingConflicts([]);
+    setPhase('mapping');
+  }}
+  ```
 
-**Diagnostic logs (`ssphase4d2a`):** `level-mapping-shown`, `level-mapping-applied` (itemsBefore/After), `level-mapping-cancelled`.
+- **Build `directivesSummary` with predicate + cell-rule rows** so they show informationally. All `activeOnSheets`/`removedCount`/`cellsTransformed` are 0 in this chunk:
+  ```tsx
+  const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => ({
+    predicate: p,
+    parsed: parsePredicate(p, /* headers from first hier sheet, or [] */ []),
+    activeOnSheets: [],
+    removedCount: 0,
+  }));
+  const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => ({
+    rule,
+    description: describeCellRule(rule), // small helper: "Take first delimited value before ';' for level X" etc.
+    activeOnSheets: [],
+    cellsTransformed: 0,
+  }));
+  const directivesSummary: DirectivesSummary | undefined =
+    (predicateRows.length || cellRuleRows.length)
+      ? { excludePredicates: parserDirectives?.exclude_row_predicates ?? [], predicateRows, cellRuleRows }
+      : undefined;
+  ```
 
----
+- Pass `directivesEnabled={{ predicates: false, cellRules: false }}` to `MappingConfirmation` and **drop the `onAttemptApplyDirective` prop** (it doesn't exist on the component).
 
-### 4d.2.b — Row-level directive Apply
+- Leave `handleApplyLevelMapping`, `handleApplyPredicate`, `handleUndoPredicate`, `handleApplyCellRule`, `handleUndoCellRule`, `reparseAndRefold` in place. The predicate/cell-rule handlers are simply not passed as props to `MappingConfirmation` in this chunk.
 
-**New file:** `src/utils/parsers/applyRowPredicate.ts`
+### Files NOT changed
 
-```ts
-type ParsedPredicate =
-  | { kind: 'column-equals'; columnHeader: string; value: string }
-  | { kind: 'column-contains'; columnHeader: string; text: string }
-  | { kind: 'starts-with'; text: string }
-  | { kind: 'too-complex' };
+- `src/components/spreadsheet/LevelMappingInterface.tsx` — already complete.
+- `src/utils/parsers/parseHierarchicalColumns.ts` — already accepts `userLevelColumnIndices` and `cellTransformations`.
+- `src/utils/parsers/applyRowPredicate.ts` — kept as inert utility for 4d.2.b.
+- `supabase/functions/classify-spreadsheet-layout/index.ts` — schema/prompt extensions for `cell_transformations` already deployed; harmless without UI wiring.
 
-export function parsePredicate(predicate: string, headers: string[]): ParsedPredicate;
-export function applyPredicate(items: PlanItem[], parsed: ParsedPredicate, headers: string[]): PlanItem[];
-```
+## Validation scenarios after this ships
 
-Three regex patterns, case-insensitive. Header match is stem-folded against `headers`. Anything else returns `'too-complex'`. `applyPredicate` filters `PlanItem[]` and also drops orphaned descendants (parent removed → children removed) to keep the tree consistent.
+1. **Pattern A sheet (Test 4 / Test 6)**: `MappingConfirmation` shows; "Let me adjust" routes to legacy `MappingInterface` (no regression).
+2. **Pattern B/C sheet**: "Let me adjust" routes to `LevelMappingInterface`. Map levels → live preview updates → Apply Mapping returns to `mapping-confirmation` with new resolved levels and item count. Cancel returns without changes.
+3. **Mixed B/C + A**: each sheet's "Let me adjust" routes to its own UI based on its classifier pattern.
+4. **Sheets with directives**: predicate and cell-rule rows render with disabled Apply buttons + "Coming soon" tooltips. No state mutation when hovered/clicked.
+5. **No directives**: directives card hidden entirely.
+6. **Continue (Looks good)**: still finalizes from hier snapshots / generic preview as before.
 
-**MappingConfirmation update:**
+## Diagnostic logs expected
 
-For each predicate in `directives.excludePredicates`, run `parsePredicate` at render and:
-- `too-complex` → `[Apply this filter]` disabled with tooltip "This rule is too complex to apply automatically."
-- otherwise → `[Apply this filter]` active. On click: parent re-derives items with `applyPredicate`, updates the per-sheet snapshot, badge changes to `"✓ Applied — removed N rows"` with `[Undo]`.
+- `ssphase4d / adjust-clicked` with `target: 'level-mapping' | 'mapping-interface'` based on pattern.
+- `ssphase4d2a / level-mapping-applied` on Apply Mapping with itemsBefore/itemsAfter.
 
-**Parent state — accumulated active set (per sheet):**
+## Report-back format
 
-```ts
-appliedPredicatesBySheet: Record<string, Set<string>>   // active predicates currently filtering
-predicateBaselineBySheet: Record<string, PlanItem[]>     // pre-any-predicate snapshot, captured on first Apply
-```
-
-Apply / Undo flow:
-- On first Apply for a sheet, capture the current `hierResultsBySheet[sheet].items` into `predicateBaselineBySheet[sheet]`.
-- Add/remove the predicate string in the active set.
-- Recompute: start from baseline, fold every active predicate through `applyPredicate` in stable insertion order, write the result back into `hierResultsBySheet`.
-- When the active set empties, drop the baseline entry.
-- This guarantees applying B then A then undoing B leaves A still active with no ordering bugs.
-
-**Diagnostic logs (`ssphase4d2b`):** `predicate-parsed` (per render, batched once per predicate), `predicate-applied` (kind, itemsBefore/After, removedCount, activeCount), `predicate-undone` (activeCount), `predicate-ignored`.
-
----
-
-### 4d.2.c — Cell-level transformations
-
-**New type** (`src/types/parser.ts`):
-
-```ts
-export type CellTransformation =
-  | { rule: 'take-first-delimited'; level?: string; delimiter?: string }
-  | { rule: 'resolve-numeric-reference'; level?: string };
-```
-
-**Classifier prompt** (`supabase/functions/classify-spreadsheet-layout/index.ts`):
-
-Extend `parser_directives` schema with optional `cell_transformations[]`. System-prompt addendum: extract two known patterns from `documentHints` only — "pick/take the first … when multiple" → `take-first-delimited`; "if just a number, look up / resolve / match to named" → `resolve-numeric-reference`. If user phrasing doesn't fit either pattern, return `[]`. Multi-chunk merge: union by `(rule, level)`.
-
-**Parser change** (`parseHierarchicalColumns`):
-
-Add optional `cellTransformations?: CellTransformation[]`. Before path-key construction, for each hierarchy column cell, run `applyCellTransformations(rawValue, levelName, columnIndex, allRowsInColumn, transformations)`. `level` filter uses `stemKey` equality; missing `level` applies to all hierarchy cells.
-
-**MappingConfirmation update:**
-
-Inside the existing directives card, render a "Cell rules" subsection when `cell_transformations` is non-empty. Each row shows a plain-language description plus `[Apply this rule]` / `[Ignore]`. Apply triggers a re-parse via the parent.
-
-**Parent state — accumulated active set (per sheet), mirrors 4d.2.b:**
-
-```ts
-appliedCellTransformationsBySheet: Record<string, CellTransformation[]>  // active rules, insertion order
-cellTxBaselineBySheet: Record<string, { items, personMappings }>          // pre-any-transformation snapshot
-```
-
-Apply / Undo flow:
-- On first Apply for a sheet, snapshot the current parse result into `cellTxBaselineBySheet[sheet]`.
-- Add/remove the rule (compared by `(rule, level, delimiter)` tuple) in the active list.
-- Recompute by re-calling `parseHierarchicalColumns(parsedSheet, classification, userLevels, userLevelColumnIndices, /* cellTransformations */ activeList)` with the **full merged active set** every time, then write the result into `hierResultsBySheet`.
-- When the active list empties, restore the baseline and drop the entry.
-- Important: the parser receives all currently-active transformations on every re-parse, so applying rule B never silently forgets rule A. Undo simply removes that rule from the active list and re-parses.
-
-**Interaction with 4d.2.a + 4d.2.b:**
-- If a level mapping is re-applied via `LevelMappingInterface` while cell transformations are active, the re-parse must include the active `cellTransformations` list so the new mapping inherits those rules.
-- Row predicates (4d.2.b) operate on the post-parse `PlanItem[]`, so they re-fold from `predicateBaselineBySheet` after any cell-transformation re-parse — i.e. when cell transformations change, capture a fresh predicate baseline from the new parse output and re-apply the active predicate set on top.
-
-**Diagnostic logs (`ssphase4d2c`):** `cell-transformation-detected` (from classifier output), `cell-transformation-applied` (rule, level, cellsTransformed, itemsBefore/After, activeCount), `cell-transformation-ignored`, `cell-transformation-undone`.
-
----
-
-### Files touched
-
-| File | a | b | c |
-|---|---|---|---|
-| `src/components/spreadsheet/LevelMappingInterface.tsx` (NEW) | ✓ | | |
-| `src/utils/parsers/applyRowPredicate.ts` (NEW) | | ✓ | |
-| `src/types/parser.ts` (CellTransformation type) | | | ✓ |
-| `src/utils/parsers/parseHierarchicalColumns.ts` | ✓ (`userLevelColumnIndices`) | | ✓ (`cellTransformations`) |
-| `src/components/steps/SpreadsheetImportStep.tsx` | ✓ phase + branching | ✓ apply/undo + accumulator | ✓ apply/undo + accumulator |
-| `src/components/spreadsheet/MappingConfirmation.tsx` | ✓ pattern-aware adjust callback | ✓ predicate Apply UI | ✓ cell rules subsection |
-| `supabase/functions/classify-spreadsheet-layout/index.ts` | | | ✓ schema + prompt |
-
-### Out of scope
-4c, 4e, persisting overrides across sessions, predicates beyond the 3 listed, transformations beyond the 2 listed, Pensacola PDF backlog, Tulane 8.3.1.2 triple-dup.
-
-### Validation flow
-Stop after each sub-phase; deliver report (files changed, deferred work, no test-file hardcoding confirmation, sample diag logs, validation scenarios, divergences). For 4d.2.c specifically, validate apply-A-then-B and apply-A-then-B-then-undo-A scenarios to confirm the merged active set behaves correctly.
+After shipping:
+- Files changed (only the two above).
+- Confirmation that no test-file-specific hardcoding was introduced.
+- Diagnostic log examples from one Pattern B/C upload going through level-mapping.
+- Confirmation that 4d.2.b/4d.2.c handlers + utilities remain in source, unwired.

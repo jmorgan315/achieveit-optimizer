@@ -1105,9 +1105,46 @@ export function SpreadsheetImportStep({
       };
     });
 
-    const directivesSummary: DirectivesSummary | undefined = parserDirectives?.exclude_row_predicates?.length
-      ? { excludePredicates: parserDirectives.exclude_row_predicates }
-      : undefined;
+    // Build informational directive rows (4d.2.a: Apply UI is gated off).
+    const firstHierName = hierSheetOrder.find(n => hierResultsBySheet[n]?.parsedSheet);
+    const headersForParse: string[] = (() => {
+      if (!firstHierName) return [];
+      const hier = hierResultsBySheet[firstHierName];
+      const hdrIdx = hier?.classification?.structure?.header_row_index ?? 0;
+      const row = hier?.parsedSheet?.rows?.[hdrIdx];
+      return Array.isArray(row) ? row.map(c => (c == null ? '' : String(c).trim())) : [];
+    })();
+    const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => ({
+      predicate: p,
+      parsed: parsePredicate(p, headersForParse),
+      activeOnSheets: [],
+      removedCount: 0,
+    }));
+    const describeCellRule = (t: CellTransformation): string => {
+      const lvl = t.level ? ` for level "${t.level}"` : '';
+      if (t.rule === 'take-first-delimited') {
+        const delim = (t as { delimiter?: string }).delimiter || ',';
+        return `Take the first value before "${delim}"${lvl}`;
+      }
+      if (t.rule === 'resolve-numeric-reference') {
+        return `Resolve numeric reference IDs to their full names${lvl}`;
+      }
+      return `${String((t as { rule: string }).rule)}${lvl}`;
+    };
+    const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => ({
+      rule,
+      description: describeCellRule(rule),
+      activeOnSheets: [],
+      cellsTransformed: 0,
+    }));
+    const directivesSummary: DirectivesSummary | undefined =
+      (predicateRows.length || cellRuleRows.length)
+        ? {
+            excludePredicates: parserDirectives?.exclude_row_predicates ?? [],
+            predicateRows,
+            cellRuleRows,
+          }
+        : undefined;
 
     const isGeneric = !!genericPreview;
 
@@ -1116,7 +1153,9 @@ export function SpreadsheetImportStep({
         sheetSummaries={sheetSummaries}
         directives={directivesSummary}
         dismissedPredicates={dismissedPredicates}
+        dismissedCellRuleKeys={dismissedCellRuleKeys}
         conflictBusy={conflictApplyBusy}
+        directivesEnabled={{ predicates: false, cellRules: false }}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
             source: isGeneric ? 'generic' : 'hierarchical',
@@ -1131,13 +1170,26 @@ export function SpreadsheetImportStep({
         }}
         onAdjust={(sheetName) => {
           const cls = clsBySheetName[sheetName];
+          const pattern = String(cls?.pattern ?? '').toUpperCase();
+          const target = (pattern === 'B' || pattern === 'C') ? 'level-mapping' : 'mapping-interface';
           void logParserDiagnostic(sessionId, 'ssphase4d', 'adjust-clicked', {
             sheet: sheetName,
-            pattern: cls?.pattern ?? 'unknown',
-            target: 'mapping-interface',
+            pattern,
+            target,
             levelsSeededFrom: isGeneric ? 'classifier' : 'defaults',
           });
-          // Drop any pending conflicts so legacy mapping isn't blocked.
+          if ((pattern === 'B' || pattern === 'C') && cls) {
+            const hier = hierResultsBySheet[sheetName];
+            const parsedSheet = hier?.parsedSheet ?? detection?.sheets.find(s => s.sheet.name === sheetName)?.sheet;
+            if (parsedSheet) {
+              const initialLevels = hier?.resolvedLevels ?? cls.structure?.implied_levels ?? [];
+              const initialColumnIndices = hier?.resolvedColumnIndices ?? initialLevels.map((_, i) => i);
+              setLevelMappingTarget({ sheetName, classification: cls, parsedSheet, initialLevels, initialColumnIndices });
+              setPhase('level-mapping');
+              return;
+            }
+          }
+          // Pattern A (and any unknown): legacy mapping flow.
           setPendingConflicts([]);
           setPhase('mapping');
         }}
@@ -1153,9 +1205,22 @@ export function SpreadsheetImportStep({
           });
           void logParserDiagnostic(sessionId, 'ssphase4d', 'directive-ignored', { predicate });
         }}
-        onAttemptApplyDirective={(predicate) => {
-          void logParserDiagnostic(sessionId, 'ssphase4d', 'directive-apply-attempted-disabled', { predicate });
-        }}
+      />
+    );
+  }
+
+  if (phase === 'level-mapping' && levelMappingTarget) {
+    return (
+      <LevelMappingInterface
+        sheetName={levelMappingTarget.sheetName}
+        parsedSheet={levelMappingTarget.parsedSheet}
+        classification={levelMappingTarget.classification}
+        initialLevels={levelMappingTarget.initialLevels}
+        initialColumnIndices={levelMappingTarget.initialColumnIndices}
+        cellTransformations={activeCellTxBySheet[levelMappingTarget.sheetName] ?? []}
+        sessionId={sessionId}
+        onApply={handleApplyLevelMapping}
+        onCancel={() => { setLevelMappingTarget(null); setPhase('mapping-confirmation'); }}
       />
     );
   }

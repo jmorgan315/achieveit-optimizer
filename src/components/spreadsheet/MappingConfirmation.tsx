@@ -72,6 +72,8 @@ interface MappingConfirmationProps {
   dismissedPredicates: Set<string>;
   dismissedCellRuleKeys?: Set<string>;
   conflictBusy: boolean;
+  /** Phase 4d.2.a: directive Apply UI is gated. Defaults to all-disabled. */
+  directivesEnabled?: { predicates: boolean; cellRules: boolean };
   onAccept: () => void;
   onAdjust: (sheetName: string) => void;
   onApplyConflict: (sheetName: string, choice: LevelChoice) => void;
@@ -115,6 +117,7 @@ export function MappingConfirmation({
   dismissedPredicates,
   dismissedCellRuleKeys,
   conflictBusy,
+  directivesEnabled,
   onAccept,
   onAdjust,
   onApplyConflict,
@@ -125,6 +128,9 @@ export function MappingConfirmation({
   onUndoCellRule,
   onIgnoreCellRule,
 }: MappingConfirmationProps) {
+  const predicatesEnabled = directivesEnabled?.predicates ?? false;
+  const cellRulesEnabled = directivesEnabled?.cellRules ?? false;
+
   const hasUnresolvedConflict = useMemo(
     () => sheetSummaries.some(s => !!s.conflict),
     [sheetSummaries],
@@ -175,38 +181,49 @@ export function MappingConfirmation({
                             <div className="text-xs text-muted-foreground mt-1 italic">Ignored — these rows will be included.</div>
                           )}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          {active ? (
-                            <Button size="sm" variant="outline" onClick={() => onUndoPredicate?.(row.predicate)}>
-                              <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
-                            </Button>
-                          ) : tooComplex ? (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span>
-                                  <Button size="sm" variant="outline" disabled>
-                                    Apply this filter
-                                  </Button>
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                This rule is too complex to apply automatically.
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <Button size="sm" variant="outline" onClick={() => onApplyPredicate?.(row.predicate)}>
-                              Apply this filter
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant={dismissed ? 'secondary' : 'ghost'}
-                            onClick={() => onIgnoreDirective(row.predicate)}
-                            disabled={dismissed || active}
-                          >
-                            Ignore
-                          </Button>
-                        </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {!predicatesEnabled ? (
+                              <>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <span>
+                                      <Button size="sm" variant="outline" disabled>Apply this filter</Button>
+                                    </span>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Coming soon — 4d.2.b</TooltipContent>
+                                </Tooltip>
+                                <Button size="sm" variant="ghost" disabled>Ignore</Button>
+                              </>
+                            ) : active ? (
+                              <Button size="sm" variant="outline" onClick={() => onUndoPredicate?.(row.predicate)}>
+                                <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
+                              </Button>
+                            ) : tooComplex ? (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Button size="sm" variant="outline" disabled>Apply this filter</Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>This rule is too complex to apply automatically.</TooltipContent>
+                              </Tooltip>
+                            ) : (
+                              <Button size="sm" variant="outline" onClick={() => onApplyPredicate?.(row.predicate)}>
+                                Apply this filter
+                              </Button>
+                            )}
+                            {predicatesEnabled && (
+                              <Button
+                                size="sm"
+                                variant={dismissed ? 'secondary' : 'ghost'}
+                                onClick={() => onIgnoreDirective(row.predicate)}
+                                disabled={dismissed || active}
+                              >
+                                Ignore
+                              </Button>
+                            )}
+                          </div>
+
                       </div>
                     );
                   })}
@@ -235,7 +252,19 @@ export function MappingConfirmation({
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          {active ? (
+                          {!cellRulesEnabled ? (
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Button size="sm" variant="outline" disabled>Apply this rule</Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>Coming soon — 4d.2.c</TooltipContent>
+                              </Tooltip>
+                              <Button size="sm" variant="ghost" disabled>Ignore</Button>
+                            </>
+                          ) : active ? (
                             <Button size="sm" variant="outline" onClick={() => onUndoCellRule?.(key)}>
                               <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
                             </Button>
@@ -244,14 +273,16 @@ export function MappingConfirmation({
                               Apply this rule
                             </Button>
                           )}
-                          <Button
-                            size="sm"
-                            variant={dismissed ? 'secondary' : 'ghost'}
-                            onClick={() => onIgnoreCellRule?.(key)}
-                            disabled={dismissed || active}
-                          >
-                            Ignore
-                          </Button>
+                          {cellRulesEnabled && (
+                            <Button
+                              size="sm"
+                              variant={dismissed ? 'secondary' : 'ghost'}
+                              onClick={() => onIgnoreCellRule?.(key)}
+                              disabled={dismissed || active}
+                            >
+                              Ignore
+                            </Button>
+                          )}
                         </div>
                       </div>
                     );
