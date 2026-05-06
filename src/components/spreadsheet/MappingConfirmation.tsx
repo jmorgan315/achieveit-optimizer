@@ -205,7 +205,7 @@ export function MappingConfirmation({
                                     <Button size="sm" variant="outline" disabled>Apply this filter</Button>
                                   </span>
                                 </TooltipTrigger>
-                                <TooltipContent>This rule is too complex to apply automatically.</TooltipContent>
+                                <TooltipContent>This rule is too complex to apply automatically. Use 'Adjust' to manually exclude rows.</TooltipContent>
                               </Tooltip>
                             ) : (
                               <Button size="sm" variant="outline" onClick={() => onApplyPredicate?.(row.predicate)}>

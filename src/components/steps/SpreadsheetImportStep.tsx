@@ -144,6 +144,10 @@ export function SpreadsheetImportStep({
   // pre-apply baseline so Apply/Undo across multiple predicates is order-safe.
   const [activePredicatesBySheet, setActivePredicatesBySheet] = useState<Record<string, string[]>>({});
   const [predicateBaselineBySheet, setPredicateBaselineBySheet] = useState<Record<string, PlanItem[]>>({});
+  // Generic (Pattern A) baseline + per-sheet, per-predicate removed counts so
+  // the directives card can render "removed N rows" totals.
+  const [genericPredicateBaselineBySheet, setGenericPredicateBaselineBySheet] = useState<Record<string, PlanItem[]>>({});
+  const [removedCountByPredicateBySheet, setRemovedCountByPredicateBySheet] = useState<Record<string, Record<string, number>>>({});
 
   // Phase 4d.2.c — accumulated active cell transformations per sheet, with
   // the pre-apply parse-result baseline so Apply/Undo never silently drop a
@@ -1013,12 +1017,32 @@ export function SpreadsheetImportStep({
   };
 
   // 4d.2.b — apply / undo a row predicate.
+  const headersForSheet = (sheetName: string): string[] => {
+    const hier = hierResultsBySheet[sheetName];
+    if (hier?.parsedSheet && hier?.classification) {
+      const hdrIdx = hier.classification.structure?.header_row_index ?? 0;
+      const row = hier.parsedSheet.rows?.[hdrIdx];
+      return Array.isArray(row) ? row.map(c => (c == null ? '' : String(c).trim())) : [];
+    }
+    const detSheet = detection?.sheets.find(s => s.sheet.name === sheetName);
+    const cls = clsBySheetName[sheetName];
+    const hdrIdx = cls?.structure?.header_row_index ?? 0;
+    const row = detSheet?.sheet.rows?.[hdrIdx];
+    return Array.isArray(row) ? row.map(c => (c == null ? '' : String(c).trim())) : [];
+  };
+
+  const recordRemoved = (sheetName: string, predicate: string, removed: number) => {
+    setRemovedCountByPredicateBySheet(prev => ({
+      ...prev,
+      [sheetName]: { ...(prev[sheetName] ?? {}), [predicate]: removed },
+    }));
+  };
+
   const handleApplyPredicate = (predicate: string) => {
-    // Apply across all hierarchical sheets that have a parsed sheet/classification.
+    // Hierarchical sheets — re-parse + re-fold via existing helper.
     for (const sheetName of hierSheetOrder) {
       const hier = hierResultsBySheet[sheetName];
       if (!hier?.parsedSheet || !hier?.classification) continue;
-      // Capture predicate baseline if first apply on this sheet.
       if (!predicateBaselineBySheet[sheetName]) {
         setPredicateBaselineBySheet(prev => ({ ...prev, [sheetName]: hier.items }));
       }
@@ -1027,12 +1051,49 @@ export function SpreadsheetImportStep({
       const activeTx = activeCellTxBySheet[sheetName] ?? [];
       const itemsBefore = hier.items.length;
       const r = reparseAndRefold(sheetName, activeTx, nextPreds);
+      const removed = itemsBefore - (r?.itemsAfter ?? itemsBefore);
+      recordRemoved(sheetName, predicate, removed);
+      const parsed = parsePredicate(predicate, headersForSheet(sheetName));
       void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-applied', {
-        sheet: sheetName, predicate, itemsBefore, itemsAfter: r?.itemsAfter ?? 0,
-        removedCount: itemsBefore - (r?.itemsAfter ?? itemsBefore), activeCount: nextPreds.length,
+        sheet: sheetName, predicate, kind: parsed.kind, mode: 'hier',
+        itemsBefore, itemsAfter: r?.itemsAfter ?? 0, removedCount: removed,
+        activeCount: nextPreds.length,
       }, sheetName);
     }
+    // Generic (Pattern A) sheets — filter from baseline + re-fold.
+    if (genericPreview) {
+      const sheetNames = Object.keys(genericPreview.itemsBySheet);
+      for (const sheetName of sheetNames) {
+        const currentItems = genericPreview.itemsBySheet[sheetName] ?? [];
+        const baseline = genericPredicateBaselineBySheet[sheetName] ?? currentItems;
+        if (!genericPredicateBaselineBySheet[sheetName]) {
+          setGenericPredicateBaselineBySheet(prev => ({ ...prev, [sheetName]: currentItems }));
+        }
+        const nextPreds = [...(activePredicatesBySheet[sheetName] ?? []), predicate];
+        setActivePredicatesBySheet(prev => ({ ...prev, [sheetName]: nextPreds }));
+        const headers = headersForSheet(sheetName);
+        let folded = baseline;
+        for (const p of nextPreds) {
+          folded = applyPredicate(folded, parsePredicate(p, headers), headers);
+        }
+        const itemsBefore = currentItems.length;
+        const itemsAfter = folded.length;
+        setGenericPreview(prev => prev ? ({
+          ...prev,
+          itemsBySheet: { ...prev.itemsBySheet, [sheetName]: folded },
+        }) : prev);
+        const removed = baseline.length - itemsAfter;
+        recordRemoved(sheetName, predicate, Math.max(0, itemsBefore - itemsAfter));
+        const parsed = parsePredicate(predicate, headers);
+        void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-applied', {
+          sheet: sheetName, predicate, kind: parsed.kind, mode: 'generic',
+          itemsBefore, itemsAfter, removedCount: removed,
+          activeCount: nextPreds.length,
+        }, sheetName);
+      }
+    }
   };
+
   const handleUndoPredicate = (predicate: string) => {
     for (const sheetName of hierSheetOrder) {
       const cur = activePredicatesBySheet[sheetName] ?? [];
@@ -1040,10 +1101,45 @@ export function SpreadsheetImportStep({
       const nextPreds = cur.filter(p => p !== predicate);
       setActivePredicatesBySheet(prev => ({ ...prev, [sheetName]: nextPreds }));
       const activeTx = activeCellTxBySheet[sheetName] ?? [];
-      reparseAndRefold(sheetName, activeTx, nextPreds);
+      const r = reparseAndRefold(sheetName, activeTx, nextPreds);
+      setRemovedCountByPredicateBySheet(prev => {
+        const sheetMap = { ...(prev[sheetName] ?? {}) };
+        delete sheetMap[predicate];
+        return { ...prev, [sheetName]: sheetMap };
+      });
       void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-undone', {
-        sheet: sheetName, predicate, activeCount: nextPreds.length,
+        sheet: sheetName, predicate, mode: 'hier',
+        itemsAfter: r?.itemsAfter ?? 0, activeCount: nextPreds.length,
       }, sheetName);
+    }
+    if (genericPreview) {
+      const sheetNames = Object.keys(genericPreview.itemsBySheet);
+      for (const sheetName of sheetNames) {
+        const cur = activePredicatesBySheet[sheetName] ?? [];
+        if (!cur.includes(predicate)) continue;
+        const nextPreds = cur.filter(p => p !== predicate);
+        setActivePredicatesBySheet(prev => ({ ...prev, [sheetName]: nextPreds }));
+        const baseline = genericPredicateBaselineBySheet[sheetName]
+          ?? genericPreview.itemsBySheet[sheetName] ?? [];
+        const headers = headersForSheet(sheetName);
+        let folded = baseline;
+        for (const p of nextPreds) {
+          folded = applyPredicate(folded, parsePredicate(p, headers), headers);
+        }
+        setGenericPreview(prev => prev ? ({
+          ...prev,
+          itemsBySheet: { ...prev.itemsBySheet, [sheetName]: folded },
+        }) : prev);
+        setRemovedCountByPredicateBySheet(prev => {
+          const sheetMap = { ...(prev[sheetName] ?? {}) };
+          delete sheetMap[predicate];
+          return { ...prev, [sheetName]: sheetMap };
+        });
+        void logParserDiagnostic(sessionId, 'ssphase4d2b', 'predicate-undone', {
+          sheet: sheetName, predicate, mode: 'generic',
+          itemsAfter: folded.length, activeCount: nextPreds.length,
+        }, sheetName);
+      }
     }
   };
 
@@ -1219,12 +1315,19 @@ export function SpreadsheetImportStep({
       const row = hier?.parsedSheet?.rows?.[hdrIdx];
       return Array.isArray(row) ? row.map(c => (c == null ? '' : String(c).trim())) : [];
     })();
-    const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => ({
-      predicate: p,
-      parsed: parsePredicate(p, headersForParse),
-      activeOnSheets: [],
-      removedCount: 0,
-    }));
+    const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => {
+      const activeOnSheets = Object.entries(activePredicatesBySheet)
+        .filter(([, preds]) => preds.includes(p))
+        .map(([s]) => s);
+      const removedCount = activeOnSheets.reduce(
+        (n, s) => n + (removedCountByPredicateBySheet[s]?.[p] ?? 0), 0);
+      return {
+        predicate: p,
+        parsed: parsePredicate(p, headersForParse),
+        activeOnSheets,
+        removedCount,
+      };
+    });
     const describeCellRule = (t: CellTransformation): string => {
       const lvl = t.level ? ` for level "${t.level}"` : '';
       if (t.rule === 'take-first-delimited') {
@@ -1264,7 +1367,9 @@ export function SpreadsheetImportStep({
         dismissedPredicates={dismissedPredicates}
         dismissedCellRuleKeys={dismissedCellRuleKeys}
         conflictBusy={conflictApplyBusy}
-        directivesEnabled={{ predicates: false, cellRules: false }}
+        directivesEnabled={{ predicates: true, cellRules: false }}
+        onApplyPredicate={handleApplyPredicate}
+        onUndoPredicate={handleUndoPredicate}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
             source: mode,
