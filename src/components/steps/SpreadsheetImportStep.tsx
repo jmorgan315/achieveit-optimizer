@@ -311,6 +311,20 @@ export function SpreadsheetImportStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
+  // 4d.2.c — log detected cell-transformation rules once per session.
+  useEffect(() => {
+    const rules = parserDirectives?.cell_transformations ?? [];
+    if (!rules.length || cellRulesDetectedLoggedRef.current) return;
+    cellRulesDetectedLoggedRef.current = true;
+    void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-detected', {
+      rules: rules.map(r => ({
+        rule: r.rule,
+        level: r.level ?? null,
+        delimiter: (r as { delimiter?: string }).delimiter ?? null,
+      })),
+    });
+  }, [parserDirectives, sessionId]);
+
   // Phase 4b.2 belt-and-braces guard: if any code path ever populates
   // pendingConflicts without switching phase, force the conflict screen
   // rather than silently rendering the legacy mapping UI.
