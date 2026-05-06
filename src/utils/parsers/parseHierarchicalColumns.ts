@@ -153,9 +153,20 @@ function resolveHierarchyColumns(
     userLevelColumnIndices &&
     userLevelColumnIndices.length === provided.length
   ) {
+    // Phase 4d.2.a Bug B: filter out skip-sentinel (-1) entries in lockstep so
+    // skipped levels disappear from the resolved chain entirely. Tree depth
+    // collapses naturally; descendants parent to the nearest non-skipped level.
+    const keptLevels: string[] = [];
+    const keptIndices: number[] = [];
+    for (let i = 0; i < provided.length; i++) {
+      if (userLevelColumnIndices[i] >= 0) {
+        keptLevels.push(provided[i]);
+        keptIndices.push(userLevelColumnIndices[i]);
+      }
+    }
     return {
-      resolvedLevels: provided.slice(),
-      resolvedColumnIndices: userLevelColumnIndices.slice(),
+      resolvedLevels: keptLevels,
+      resolvedColumnIndices: keptIndices,
       unresolvedLevels: [],
     };
   }

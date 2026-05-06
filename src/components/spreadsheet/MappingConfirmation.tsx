@@ -310,17 +310,28 @@ export function MappingConfirmation({
 
               <Card>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-base flex items-center gap-2 flex-wrap">
-                    <Sparkles className="h-4 w-4 text-primary" />
-                    AI Analysis
-                    <Badge variant="outline" className="font-normal">{summary.sheetName}</Badge>
-                    <Badge className={`font-normal ${badge.className}`} variant="outline">{badge.label}</Badge>
-                    {typeof summary.confidence === 'number' && (
-                      <span className="text-xs text-muted-foreground font-normal">
-                        {Math.round(summary.confidence)}% confidence
-                      </span>
-                    )}
-                  </CardTitle>
+                  <div className="flex items-start justify-between gap-3">
+                    <CardTitle className="text-base flex items-center gap-2 flex-wrap">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                      AI Analysis
+                      <Badge variant="outline" className="font-normal">{summary.sheetName}</Badge>
+                      <Badge className={`font-normal ${badge.className}`} variant="outline">{badge.label}</Badge>
+                      {typeof summary.confidence === 'number' && (
+                        <span className="text-xs text-muted-foreground font-normal">
+                          {Math.round(summary.confidence)}% confidence
+                        </span>
+                      )}
+                    </CardTitle>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onAdjust(summary.sheetName)}
+                      className="shrink-0"
+                    >
+                      <Settings2 className="h-4 w-4 mr-2" />
+                      Adjust
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4 text-sm">
                   {summary.resolvedLevels.length > 0 && (
@@ -376,14 +387,6 @@ export function MappingConfirmation({
         })}
 
         <div className="flex items-center justify-end gap-2 pt-2">
-          <Button
-            variant="outline"
-            onClick={() => onAdjust(sheetSummaries[0]?.sheetName ?? '')}
-            disabled={sheetSummaries.length === 0}
-          >
-            <Settings2 className="h-4 w-4 mr-2" />
-            Let me adjust
-          </Button>
           <Tooltip>
             <TooltipTrigger asChild>
               <span>

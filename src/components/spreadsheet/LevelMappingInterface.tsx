@@ -124,7 +124,9 @@ export function LevelMappingInterface({
   const canApply = usedTwice.length === 0;
 
   const columnOptions = useMemo(() => {
-    const opts: Array<{ value: string; label: string }> = [];
+    const opts: Array<{ value: string; label: string }> = [
+      { value: '-1', label: '(None — skip this level)' },
+    ];
     for (let i = 0; i < totalColumns; i++) {
       const header = headerRow[i] || '(no header)';
       const pct = Math.round((fillRatios[i] || 0) * 100);
@@ -157,7 +159,17 @@ export function LevelMappingInterface({
                   value={String(levelIndices[i] ?? -1)}
                   onValueChange={(v) => {
                     const next = levelIndices.slice();
-                    next[i] = parseInt(v, 10);
+                    const newIdx = parseInt(v, 10);
+                    const prevIdx = next[i];
+                    next[i] = newIdx;
+                    // Force-swap: if another level held this column, move it to
+                    // the slot we just vacated. Skip when picking the -1
+                    // sentinel — multiple levels may legally share "skip".
+                    if (newIdx !== -1) {
+                      for (let j = 0; j < next.length; j++) {
+                        if (j !== i && next[j] === newIdx) next[j] = prevIdx;
+                      }
+                    }
                     setLevelIndices(next);
                   }}
                 >
