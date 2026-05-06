@@ -1,124 +1,86 @@
-## Goal
+## Scope
 
-Ship Phase 4d.2.a (LevelMappingInterface) end-to-end as the first validated chunk. Keep 4d.2.b and 4d.2.c plumbing in place (already written) but stub the Apply buttons with "Coming soon" tooltips so the directives surface is informational only. Do not remove `applyRowPredicate.ts`, `CellTransformation` types, parser support, or classifier schema/prompt extensions — they stay inert until wired.
+Single PR bundling three independent fixes inside Phase 4d.2.a. Directive Apply (4d.2.b/c) remains gated.
 
-## Scope (this chunk only)
+### 1. D2-1 — Per-sheet Adjust button
 
-1. Wire `'level-mapping'` phase render block in `SpreadsheetImportStep.tsx`.
-2. Branch `onAdjust` by classifier pattern: Pattern A → legacy `MappingInterface` (existing path); Pattern B/C → set `levelMappingTarget` and `setPhase('level-mapping')`.
-3. In `MappingConfirmation.tsx`, render predicate rows and cell-rule rows informationally with Apply buttons **disabled** + tooltip "Coming soon — 4d.2.b" / "Coming soon — 4d.2.c". Undo/Ignore also disabled to avoid half-wired state. Active-state branches (✓ Applied / Undo) become unreachable in this chunk and can be left in source but won't render because `activeOnSheets` will always be empty.
-4. Plumb `directives.predicateRows` and `directives.cellRuleRows` through `SpreadsheetImportStep` so predicates and cell rules show up. Each row's `activeOnSheets: []`, `removedCount: 0`, `cellsTransformed: 0` (informational only).
+**File:** `src/components/spreadsheet/MappingConfirmation.tsx`
 
-## Explicitly NOT in this chunk
+- Remove the global "Let me adjust" button from the bottom action bar (lines ~378–386). Bottom bar keeps only "Looks good — Continue".
+- Add an "Adjust" button to each sheet's `<CardHeader>` (right-aligned, small/outline variant) that calls `onAdjust(summary.sheetName)`.
+- No prop signature changes; `onAdjust` is already per-sheet.
 
-- Calling `handleApplyPredicate` / `handleUndoPredicate` from the UI.
-- Calling `handleApplyCellRule` / `handleUndoCellRule` from the UI.
-- Removing existing handlers, `reparseAndRefold`, `applyRowPredicate.ts`, `CellTransformation` parser support, or classifier `cell_transformations` schema/prompt — all stays as dead-but-correct code.
+### 2. Bug A — Force-swap on duplicate column pick
 
-## Files to change
+**File:** `src/components/spreadsheet/LevelMappingInterface.tsx` (`onValueChange` inside the level Select, ~line 153)
 
-### `src/components/spreadsheet/MappingConfirmation.tsx`
+Replace the naive `next[i] = parseInt(v, 10)` with:
 
-- Add a new optional prop `directivesEnabled?: { predicates: boolean; cellRules: boolean }` (default `{ predicates: false, cellRules: false }`).
-- For each predicate row: when `directivesEnabled.predicates === false`, render Apply as `<Button disabled>` wrapped in a `<Tooltip>` with content "Coming soon — 4d.2.b". Ignore button also disabled. Skip the active/dismissed visual states.
-- For each cell-rule row: same pattern with tooltip "Coming soon — 4d.2.c".
-- Keep existing handler props optional; do not invoke them when disabled.
-- The `onAttemptApplyDirective` prop already referenced from `SpreadsheetImportStep` (currently typo'd as a non-existent prop in the tsx) — either remove that callsite or accept it as a no-op prop. **Decision:** drop `onAttemptApplyDirective` prop entirely, log "coming-soon-clicked" instead is unnecessary because buttons are disabled (no click).
-
-### `src/components/steps/SpreadsheetImportStep.tsx`
-
-- **Render block — add `level-mapping` phase** (before the final `return null`):
-  ```tsx
-  if (phase === 'level-mapping' && levelMappingTarget) {
-    return (
-      <LevelMappingInterface
-        sheetName={levelMappingTarget.sheetName}
-        parsedSheet={levelMappingTarget.parsedSheet}
-        classification={levelMappingTarget.classification}
-        initialLevels={levelMappingTarget.initialLevels}
-        initialColumnIndices={levelMappingTarget.initialColumnIndices}
-        cellTransformations={activeCellTxBySheet[levelMappingTarget.sheetName] ?? []}
-        sessionId={sessionId}
-        onApply={handleApplyLevelMapping}
-        onCancel={() => { setLevelMappingTarget(null); setPhase('mapping-confirmation'); }}
-      />
-    );
+```ts
+const newIdx = parseInt(v, 10);
+const prevIdx = next[i];
+next[i] = newIdx;
+// Skip swap when picking the skip sentinel — multiple levels may share -1.
+if (newIdx !== -1) {
+  for (let j = 0; j < next.length; j++) {
+    if (j !== i && next[j] === newIdx) next[j] = prevIdx;
   }
-  ```
+}
+setLevelIndices(next);
+```
 
-- **Rewrite `onAdjust`** in the `mapping-confirmation` render to branch by pattern:
-  ```tsx
-  onAdjust={(sheetName) => {
-    const cls = clsBySheetName[sheetName];
-    const pattern = String(cls?.pattern ?? '').toUpperCase();
-    void logParserDiagnostic(sessionId, 'ssphase4d', 'adjust-clicked', {
-      sheet: sheetName, pattern, target: pattern === 'B' || pattern === 'C' ? 'level-mapping' : 'mapping-interface',
-    });
-    if ((pattern === 'B' || pattern === 'C') && cls) {
-      const hier = hierResultsBySheet[sheetName];
-      const parsedSheet = hier?.parsedSheet ?? detection?.sheets.find(s => s.sheet.name === sheetName)?.sheet;
-      if (!parsedSheet) { setPendingConflicts([]); setPhase('mapping'); return; }
-      const initialLevels = hier?.resolvedLevels ?? cls.structure?.implied_levels ?? [];
-      const initialColumnIndices = hier?.resolvedColumnIndices ?? initialLevels.map((_, i) => i);
-      setLevelMappingTarget({ sheetName, classification: cls, parsedSheet, initialLevels, initialColumnIndices });
-      setPhase('level-mapping');
-      return;
+This eliminates the Radix no-op symptom (selecting an already-used value silently failed) by guaranteeing the assignment always changes state. The `usedTwice` warning becomes a transient state only when no swap target exists (rare cascade case).
+
+### 3. Bug B — Skip-level sentinel `-1`
+
+**File:** `src/components/spreadsheet/LevelMappingInterface.tsx`
+
+- Prepend `{ value: '-1', label: '(None — skip this level)' }` to `columnOptions` (~line 122).
+- The `usedTwice` memo already filters `idx < 0` — unchanged.
+- The `lowFillLevelWarnings` memo already excludes `idx < 0` — unchanged.
+- The live preview already passes `levelIndices` straight through — unchanged.
+
+**File:** `src/utils/parsers/parseHierarchicalColumns.ts` (`resolveHierarchyColumns`, ~lines 134–197)
+
+When `userLevelColumnIndices` is supplied and length-matches `provided`, filter both arrays in lockstep so skipped slots disappear before tree construction:
+
+```ts
+if (userLevelColumnIndices && userLevelColumnIndices.length === provided.length) {
+  const keptLevels: string[] = [];
+  const keptIndices: number[] = [];
+  for (let i = 0; i < provided.length; i++) {
+    if (userLevelColumnIndices[i] >= 0) {
+      keptLevels.push(provided[i]);
+      keptIndices.push(userLevelColumnIndices[i]);
     }
-    // Pattern A (and any unknown): legacy mapping flow — unchanged.
-    setPendingConflicts([]);
-    setPhase('mapping');
-  }}
-  ```
+  }
+  return {
+    resolvedLevels: keptLevels,
+    resolvedColumnIndices: keptIndices,
+    unresolvedLevels: [],
+  };
+}
+```
 
-- **Build `directivesSummary` with predicate + cell-rule rows** so they show informationally. All `activeOnSheets`/`removedCount`/`cellsTransformed` are 0 in this chunk:
-  ```tsx
-  const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => ({
-    predicate: p,
-    parsed: parsePredicate(p, /* headers from first hier sheet, or [] */ []),
-    activeOnSheets: [],
-    removedCount: 0,
-  }));
-  const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => ({
-    rule,
-    description: describeCellRule(rule), // small helper: "Take first delimited value before ';' for level X" etc.
-    activeOnSheets: [],
-    cellsTransformed: 0,
-  }));
-  const directivesSummary: DirectivesSummary | undefined =
-    (predicateRows.length || cellRuleRows.length)
-      ? { excludePredicates: parserDirectives?.exclude_row_predicates ?? [], predicateRows, cellRuleRows }
-      : undefined;
-  ```
+**Diff scope check (parser):** Only the existing user-override branch is touched. Tree depth collapses naturally because the filtered array becomes the new `resolution.resolvedLevels` / `resolvedColumnIndices`, and every downstream loop (`lastNonBlank`, `parentByKey`, depth assignment) is already keyed off `resolution.resolvedColumnIndices.length`. Descendants keep parentage by walking the (now-shorter) resolved chain — no separate "skip past" logic required because the skipped levels never enter the chain at all.
 
-- Pass `directivesEnabled={{ predicates: false, cellRules: false }}` to `MappingConfirmation` and **drop the `onAttemptApplyDirective` prop** (it doesn't exist on the component).
+The other resolution branch (header/ordinal matching when no user indices supplied) is untouched.
 
-- Leave `handleApplyLevelMapping`, `handleApplyPredicate`, `handleUndoPredicate`, `handleApplyCellRule`, `handleUndoCellRule`, `reparseAndRefold` in place. The predicate/cell-rule handlers are simply not passed as props to `MappingConfirmation` in this chunk.
+## Files changed
 
-### Files NOT changed
+- `src/components/spreadsheet/MappingConfirmation.tsx` — move Adjust button; remove global Adjust.
+- `src/components/spreadsheet/LevelMappingInterface.tsx` — force-swap; sentinel option.
+- `src/utils/parsers/parseHierarchicalColumns.ts` — lockstep filter of `-1` indices in user-override branch only.
 
-- `src/components/spreadsheet/LevelMappingInterface.tsx` — already complete.
-- `src/utils/parsers/parseHierarchicalColumns.ts` — already accepts `userLevelColumnIndices` and `cellTransformations`.
-- `src/utils/parsers/applyRowPredicate.ts` — kept as inert utility for 4d.2.b.
-- `supabase/functions/classify-spreadsheet-layout/index.ts` — schema/prompt extensions for `cell_transformations` already deployed; harmless without UI wiring.
+## Out of scope
 
-## Validation scenarios after this ships
+- 4d.2.b / 4d.2.c wiring (still gated, tooltips unchanged).
+- Bug C — pending user hard-refresh verification.
+- Cascade-resolver UX for the rare case where force-swap can't find a clean target (warning Alert is sufficient).
 
-1. **Pattern A sheet (Test 4 / Test 6)**: `MappingConfirmation` shows; "Let me adjust" routes to legacy `MappingInterface` (no regression).
-2. **Pattern B/C sheet**: "Let me adjust" routes to `LevelMappingInterface`. Map levels → live preview updates → Apply Mapping returns to `mapping-confirmation` with new resolved levels and item count. Cancel returns without changes.
-3. **Mixed B/C + A**: each sheet's "Let me adjust" routes to its own UI based on its classifier pattern.
-4. **Sheets with directives**: predicate and cell-rule rows render with disabled Apply buttons + "Coming soon" tooltips. No state mutation when hovered/clicked.
-5. **No directives**: directives card hidden entirely.
-6. **Continue (Looks good)**: still finalizes from hier snapshots / generic preview as before.
+## Validation after deploy
 
-## Diagnostic logs expected
-
-- `ssphase4d / adjust-clicked` with `target: 'level-mapping' | 'mapping-interface'` based on pattern.
-- `ssphase4d2a / level-mapping-applied` on Apply Mapping with itemsBefore/itemsAfter.
-
-## Report-back format
-
-After shipping:
-- Files changed (only the two above).
-- Confirmation that no test-file-specific hardcoding was introduced.
-- Diagnostic log examples from one Pattern B/C upload going through level-mapping.
-- Confirmation that 4d.2.b/4d.2.c handlers + utilities remain in source, unwired.
+1. Multi-sheet upload → each sheet card has its own Adjust button routing per-pattern.
+2. Tulane: change Level 4 from col 4 → col 3 directly; force-swap moves the previous Level-3 holder to col 4.
+3. Tulane: set a middle level to "(None — skip this level)" → live preview re-renders with collapsed depth, descendants still parent correctly to the nearest non-skipped ancestor.
+4. Continue from level-mapping → finalization unchanged.
