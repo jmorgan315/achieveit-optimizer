@@ -271,6 +271,15 @@ export function MappingConfirmation({
                             <Button size="sm" variant="outline" onClick={() => onUndoCellRule?.(key)}>
                               <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
                             </Button>
+                          ) : !hasHierarchicalSheets ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span>
+                                  <Button size="sm" variant="outline" disabled>Apply this rule</Button>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>Cell rules currently apply only to hierarchical patterns (B/C).</TooltipContent>
+                            </Tooltip>
                           ) : (
                             <Button size="sm" variant="outline" onClick={() => onApplyCellRule?.(key)}>
                               Apply this rule
