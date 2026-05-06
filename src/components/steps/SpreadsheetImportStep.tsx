@@ -890,6 +890,54 @@ export function SpreadsheetImportStep({
     });
   };
 
+  // Phase 4d.2.a — finalize a mixed-confirm view (hierarchical sheets + generic
+  // sheets in one selection). Walk the unified sheet order and pull each sheet's
+  // items from whichever bucket holds them.
+  const finalizeFromMixed = async () => {
+    let snapshots: typeof hierResultsBySheet = {};
+    let order: string[] = [];
+    setHierResultsBySheet(prev => { snapshots = prev; return prev; });
+    setHierSheetOrder(prev => { order = prev; return prev; });
+
+    const allItems: PlanItem[] = [];
+    const personSet = new Set<string>();
+    const levelNamesUnion: string[] = [];
+
+    for (const n of order) {
+      const hier = snapshots[n];
+      if (hier) {
+        allItems.push(...hier.items);
+        hier.personMappings.forEach(p => personSet.add(p.foundName));
+        hier.resolvedLevels.forEach(name => {
+          if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
+        });
+        continue;
+      }
+      const genericItems = genericPreview?.itemsBySheet[n];
+      if (genericItems) allItems.push(...genericItems);
+    }
+    if (genericPreview) {
+      genericPreview.personMappings.forEach(p => personSet.add(p.foundName));
+      genericPreview.levels.forEach(l => {
+        if (l.name && !levelNamesUnion.includes(l.name)) levelNamesUnion.push(l.name);
+      });
+    }
+
+    const resolvedLevels: PlanLevel[] = levelNamesUnion.length > 0
+      ? levelNamesUnion.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
+      : DEFAULT_LEVELS.slice(0, 3);
+    const personMappings: PersonMapping[] = Array.from(personSet).map((name, i) => ({
+      id: String(i + 1), foundName: name, email: '', isResolved: false,
+    }));
+
+    await persistAndComplete({
+      items: allItems,
+      personMappings,
+      levels: resolvedLevels,
+      sheetNames: order,
+    });
+  };
+
   // ── Phase 4d.2 helpers ──────────────────────────────────────────────────
 
   /** Re-parse a sheet with current overrides + active cell transformations,
