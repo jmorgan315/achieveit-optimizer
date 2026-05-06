@@ -232,16 +232,19 @@ export function SpreadsheetImportStep({
             selectedIndices: validPreselected,
             detection: det,
           });
-          if (result.kind === 'completed' || result.kind === 'conflicts' || result.kind === 'generic-confirm') {
-            // Stash classifier metadata for the confirmation screen.
+          if (
+            result.kind === 'completed' ||
+            result.kind === 'conflicts' ||
+            result.kind === 'generic-confirm' ||
+            result.kind === 'mixed-confirm'
+          ) {
             setClsBySheetName(result.clsBySheetName);
             setParserDirectives(result.parserDirectives ?? null);
             setHierSheetOrder(result.sheetNames);
             if (result.kind === 'completed' || result.kind === 'conflicts') {
               setHierResultsBySheet(result.perSheet);
               if (result.kind === 'conflicts') setPendingConflicts(result.conflicts);
-            } else {
-              // generic-confirm — Pattern A preview
+            } else if (result.kind === 'generic-confirm') {
               setGenericPreview({
                 itemsBySheet: result.preview.itemsBySheet,
                 personMappings: result.preview.personMappings,
@@ -250,20 +253,40 @@ export function SpreadsheetImportStep({
                 sectionMapping: result.preview.sectionMapping,
                 measurementMode: result.preview.measurementMode,
               });
-              // Seed legacy mapping state so "Let me adjust" opens with classifier-derived defaults.
+              setColumnMappings(result.preview.columnMappings);
+              setSectionMapping(result.preview.sectionMapping);
+              setLevels(result.preview.levels);
+            } else {
+              // mixed-confirm — populate both halves.
+              setHierResultsBySheet(result.perSheet);
+              if (result.conflicts.length > 0) setPendingConflicts(result.conflicts);
+              setGenericPreview({
+                itemsBySheet: result.preview.itemsBySheet,
+                personMappings: result.preview.personMappings,
+                levels: result.preview.levels,
+                columnMappings: result.preview.columnMappings,
+                sectionMapping: result.preview.sectionMapping,
+                measurementMode: result.preview.measurementMode,
+              });
               setColumnMappings(result.preview.columnMappings);
               setSectionMapping(result.preview.sectionMapping);
               setLevels(result.preview.levels);
             }
             setPhase('mapping-confirmation');
             void logParserDiagnostic(sessionId, 'ssphase4d', 'mapping-confirmation-shown', {
-              source: result.kind === 'generic-confirm' ? 'generic' : 'hierarchical',
+              source: result.kind === 'generic-confirm'
+                ? 'generic'
+                : result.kind === 'mixed-confirm'
+                  ? 'mixed'
+                  : 'hierarchical',
               sheets: result.sheetNames.map(n => ({
                 sheet: n,
                 pattern: result.clsBySheetName[n]?.pattern ?? 'unknown',
                 confidence: result.clsBySheetName[n]?.confidence ?? null,
               })),
-              hasConflict: result.kind === 'conflicts',
+              hasConflict:
+                result.kind === 'conflicts' ||
+                (result.kind === 'mixed-confirm' && result.conflicts.length > 0),
               hasDirectives: !!(result.parserDirectives?.exclude_row_predicates?.length),
             });
             return;
