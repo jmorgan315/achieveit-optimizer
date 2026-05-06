@@ -477,12 +477,35 @@ export function parseHierarchicalColumns(
     return out;
   });
   let cellsTransformedCount = 0;
+  const matchLogged = new Set<string>();
 
   function applyCellTransformations(rawValue: string, levelName: string, levelIdx: number): string {
     if (!rawValue || activeTransformations.length === 0) return rawValue;
     let value = rawValue;
     for (const t of activeTransformations) {
-      if (t.level && stemKey(t.level) !== stemKey(levelName)) continue;
+      const colIdx = resolution.resolvedColumnIndices[levelIdx] ?? -1;
+      const headerName = colIdx >= 0 ? (headerRow[colIdx] || '') : '';
+      let matchedVia: 'unscoped' | 'level-name' | 'column-header' | null = null;
+      if (!t.level) {
+        matchedVia = 'unscoped';
+      } else {
+        const target = stemKey(t.level);
+        if (target === stemKey(levelName)) matchedVia = 'level-name';
+        else if (headerName && target === stemKey(headerName)) matchedVia = 'column-header';
+      }
+      if (t.level && matchedVia === null) continue;
+      const logKey = `${t.rule}|${t.level || '*'}|${levelIdx}`;
+      if (!matchLogged.has(logKey)) {
+        matchLogged.add(logKey);
+        void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-match', {
+          rule: t.rule,
+          tLevel: t.level ?? null,
+          matchedVia,
+          levelName,
+          headerName,
+          levelIdx,
+        }, sheet.name);
+      }
       if (t.rule === 'take-first-delimited') {
         const delim = t.delimiter && t.delimiter.length > 0 ? t.delimiter : ';';
         if (value.includes(delim)) {

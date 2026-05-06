@@ -1,66 +1,47 @@
-# Phase 4d.2.c — Wire cell-level transformations
+## Phase 4d.2.c hotfix — Accept column header as `level` in cell transformations
 
-Most infrastructure already exists from earlier inert work: `CellTransformation` type, `cellTransformations` parameter in `parseHierarchicalColumns` (with `cellsTransformedCount` returned as `cellsTransformed`), classifier `cell_transformations` extraction, `handleApplyCellRule` / `handleUndoCellRule` in `SpreadsheetImportStep`, `cellTxBaselineBySheet` state, `dismissedCellRuleKeys` state, and `MappingConfirmation` rendering with `onApply/Undo/IgnoreCellRule` props.
+### Problem
+Classifier emitted `cell_transformations: [{ rule: 'take-first-delimited', level: 'Title' }]` because the user pointed at column "Title" (header text), but the level NAME at that position is "Objective". `applyCellTransformations` only stem-folds `t.level` against the level name, so every row is skipped → 0 transformed.
 
-What's missing: the gate flag is still `cellRules: false`, the parent doesn't pass the three cell-rule callbacks, no `handleIgnoreCellRule`, the `cellRuleRows` always reports `activeOnSheets: []` and `cellsTransformed: 0`, no per-rule disable for Pattern A (Option B), and the per-session "detected" diagnostic isn't fired.
+### Decision
+**Path A** (parser flexibility). Match `t.level` against either the level name OR the column header at that position. Keeps it robust to the natural ways users describe targets in notes ("the Title column" vs "the Objective level"), without depending on a perfect classifier translation step.
 
-## Scope decision
+### Change
 
-**Option B**: Pattern A out of scope. The existing handlers only loop `hierSheetOrder`. When the dispatched set has no hierarchical sheets, we render the rule with a disabled Apply button and a tooltip explaining the limitation. Santa Cruz (Pattern B) is the primary target; deferring Pattern A keeps the change small and avoids touching `generatePlanItems`.
+**File:** `src/utils/parsers/parseHierarchicalColumns.ts`
 
-## Changes
+`headerRow: string[]` is already in scope above `applyCellTransformations`. Pass it (or close over it) and update the level guard:
 
-### 1. `src/components/steps/SpreadsheetImportStep.tsx`
+```ts
+function applyCellTransformations(rawValue: string, levelName: string, levelIdx: number): string {
+  if (!rawValue || activeTransformations.length === 0) return rawValue;
+  let value = rawValue;
+  for (const t of activeTransformations) {
+    if (t.level) {
+      const target = stemKey(t.level);
+      const colIdx = resolution.resolvedColumnIndices[levelIdx] ?? -1;
+      const headerName = colIdx >= 0 ? (headerRow[colIdx] || '') : '';
+      const matchesLevel = target === stemKey(levelName)
+                        || (headerName && target === stemKey(headerName));
+      if (!matchesLevel) continue;
+    }
+    // ...existing rule branches unchanged
+  }
+  return value;
+}
+```
 
-- Add a `cellsTransformedByRuleSheet: Record<sheetName, Record<ruleKey, number>>` state (parallel to `removedCountByPredicateBySheet`).
-- In `handleApplyCellRule`, after `reparseAndRefold`, write `r.cellsTransformed` into that state for `(sheetName, key)`.
-- In `handleUndoCellRule`, delete that entry.
-- Add `handleIgnoreCellRule(key)`: add `key` to `dismissedCellRuleKeys`, log `cell-transformation-ignored` with `{ rule, level }` resolved via `allCellRules.find`.
-- When building `cellRuleRows` (~line 1342), populate:
-  - `activeOnSheets`: sheets where `activeCellTxBySheet[sheet]` includes a rule with the matching `cellRuleKey`.
-  - `cellsTransformed`: sum of `cellsTransformedByRuleSheet[sheet][key]` across `activeOnSheets`.
-- One-shot `cell-transformation-detected` log per session: ref a `useEffect` keyed on `parserDirectives?.cell_transformations` length so we log once when directives first arrive (guard with a `useRef` flag to avoid duplicates on re-renders).
-- Flip `directivesEnabled={{ predicates: true, cellRules: true }}`.
-- Pass `onApplyCellRule={handleApplyCellRule}`, `onUndoCellRule={handleUndoCellRule}`, `onIgnoreCellRule={handleIgnoreCellRule}` to `MappingConfirmation`.
-- Pass a new `hasHierarchicalSheets: boolean` prop (true when `hierSheetOrder.some(n => hierResultsBySheet[n]?.parsedSheet)`).
+No other call sites change. `headerRow` is the same array already used elsewhere in the function.
 
-### 2. `src/components/spreadsheet/MappingConfirmation.tsx`
+### Diagnostics
+Add one log on first non-trivial `applyCellTransformations` invocation per sheet capturing: `t.level`, matched-via (`level-name` | `column-header` | `unscoped`), `levelName`, `headerName`. Logged under `parser_name: 'ssphase4d2c'`, `log_type: 'cell-transformation-match'`. This makes it obvious in the admin Parser Diagnostics card which form the classifier produced.
 
-- Add prop `hasHierarchicalSheets?: boolean` (default `true` for back-compat).
-- In the cell-rule rendering branch where `cellRulesEnabled === true`:
-  - If `!hasHierarchicalSheets` and not active → render disabled Apply with tooltip: "Cell rules currently apply only to hierarchical patterns (B/C)." Ignore stays enabled.
-  - Otherwise behave like the predicate row: Apply (enabled), Undo when active, Ignore (disabled when active or already dismissed).
-- Keep the legacy `cellRulesEnabled === false` "Coming soon — 4d.2.c" tooltip path untouched.
+### Validation
+- Santa Cruz workbook with classifier output `level: "Title"` against the Objective column → `cellsTransformed > 0`, "Applied — affected N rows" badge populated, parsed item names show first-delimited values.
+- Re-run with a synthetic `level: "Objective"` (level name form) → still works (regression check).
+- Unscoped transformation (`level` omitted) → applies to all hierarchy levels (existing behavior preserved).
+- Undo restores original counts.
 
-### 3. No changes to `parseHierarchicalColumns.ts`
-
-`cellsTransformed` is already returned and surfaced through `reparseAndRefold`. The per-cell diagnostic log was deemed unnecessary — the aggregate `cellsTransformed` count is enough for the "affected N rows" badge and the `cell-transformation-applied` log.
-
-## Diagnostics (parser_name = `ssphase4d2c`)
-
-- `cell-transformation-detected` — fired once per session on first directives arrival: `{ rules: [{ rule, level, delimiter }] }`.
-- `cell-transformation-applied` — already fired in handler.
-- `cell-transformation-undone` — already fired in handler.
-- `cell-transformation-ignored` — added in new handler.
-
-## Files changed
-
-- `src/components/steps/SpreadsheetImportStep.tsx`
-- `src/components/spreadsheet/MappingConfirmation.tsx`
-- `.lovable/plan.md`
-
-## Out of scope
-
-Pattern A cell-rule application; per-cell logging; cross-session persistence. Same as 4d.2.b semantics for "first row wins" attribute data.
-
-## Validation
-
-| Scenario | Expected |
-|---|---|
-| Santa Cruz upload with both directive notes | Two cell rules in card, Apply enabled |
-| Apply take-first-delimited | "1. … ;#2. …" → "1. …", item count drops, badge shows N affected, Undo present |
-| Apply resolve-numeric-reference | "5;6" → "5. Dynamic Economy; 6. Operational Excellence" |
-| Apply both, then Undo each | State restores in reverse |
-| Tulane (no cell rules) | Cell-rule subsection not rendered |
-| Pattern A only (DRAFT) with cell-rule notes | Rules render; Apply disabled with tooltip; Ignore enabled |
-| Regression baselines (Tulane 169/52, Santa Cruz 729, Carmen 14/17) | Unchanged when no cell rule applied |
+### Out of scope
+- No classifier prompt change. (Path B left as future tightening if we see misfires from the looser match.)
+- No change to Pattern A path (still gated per 4d.2.c Option B).
