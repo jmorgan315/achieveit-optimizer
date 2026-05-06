@@ -1408,9 +1408,13 @@ export function SpreadsheetImportStep({
         dismissedPredicates={dismissedPredicates}
         dismissedCellRuleKeys={dismissedCellRuleKeys}
         conflictBusy={conflictApplyBusy}
-        directivesEnabled={{ predicates: true, cellRules: false }}
+        directivesEnabled={{ predicates: true, cellRules: true }}
+        hasHierarchicalSheets={hasHier}
         onApplyPredicate={handleApplyPredicate}
         onUndoPredicate={handleUndoPredicate}
+        onApplyCellRule={handleApplyCellRule}
+        onUndoCellRule={handleUndoCellRule}
+        onIgnoreCellRule={handleIgnoreCellRule}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
             source: mode,
