@@ -1129,7 +1129,7 @@ export function SpreadsheetImportStep({
       if (t.rule === 'resolve-numeric-reference') {
         return `Resolve numeric reference IDs to their full names${lvl}`;
       }
-      return `${t.rule}${lvl}`;
+      return `${String((t as { rule: string }).rule)}${lvl}`;
     };
     const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => ({
       rule,
