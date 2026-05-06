@@ -129,6 +129,7 @@ export function MappingConfirmation({
   onApplyCellRule,
   onUndoCellRule,
   onIgnoreCellRule,
+  hasHierarchicalSheets = true,
 }: MappingConfirmationProps) {
   const predicatesEnabled = directivesEnabled?.predicates ?? false;
   const cellRulesEnabled = directivesEnabled?.cellRules ?? false;
