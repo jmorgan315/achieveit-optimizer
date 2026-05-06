@@ -1,101 +1,80 @@
-## Phase 4d.2.b — Wire row-predicate Apply/Undo into MappingConfirmation
+# Phase 4d.2.b — Bug-Fix Plan (Bugs 1, 2, 3)
 
-Most infrastructure already exists in source as inert code. Scope is to flip the gate on, pass per-sheet active-state into the directives card, and extend the handlers to cover Pattern A (`genericPreview`) sheets in addition to hierarchical (`hierResultsBySheet`) sheets.
+Ship in order: Bug 1 → Bug 2 → Bug 3.
 
-### Findings from current code
+---
 
-- `MappingConfirmation.tsx` already accepts `onApplyPredicate`, `onUndoPredicate`, and an `onIgnoreDirective` (its existing name for "ignore predicate"). When `directivesEnabled.predicates === true`, it already renders the active Apply/Undo buttons and shows the Applied badge keyed off `row.activeOnSheets.length > 0` and `row.removedCount`. It also already disables Apply with the right tooltip when `parsed.kind === 'too-complex'`.
-- `SpreadsheetImportStep.tsx` already implements:
-  - `parsePredicate` / `applyPredicate` import (line 36)
-  - `activePredicatesBySheet`, `predicateBaselineBySheet` state (lines 145–146)
-  - `reparseAndRefold` (lines 946–988): re-parses and re-folds active predicates
-  - `handleApplyPredicate` / `handleUndoPredicate` (lines 1016–1048)
-  - `applyPredicate` cascades parent removals to descendants via `parentId` traversal — orphan handling is already correct.
-- Two real gaps:
-  1. `directivesEnabled={{ predicates: false, cellRules: false }}` (line 1267) — gate is closed.
-  2. `predicateRows` is built with `activeOnSheets: []` and `removedCount: 0` (lines 1222–1227) — Apply state never reflects in the UI even after a successful apply.
-  3. `handleApplyPredicate` / `handleUndoPredicate` only iterate `hierSheetOrder` over hierarchical sheets and call `reparseAndRefold` (which only touches `hierResultsBySheet`). Pattern A sheets (`genericPreview.itemsBySheet[name]`) are not filtered today.
-  4. `onApplyPredicate` / `onUndoPredicate` callbacks are not currently passed to `<MappingConfirmation>`.
+## Bug 1 — Carry source-row data on PlanItem so Skip-mapped columns are filterable
 
-### Changes
+### 1a. `src/types/plan.ts`
+Add optional field:
+```ts
+/** Phase 4d.2.b — original source-row data keyed by header text.
+ *  Populated only at leaf creation. Distinct from PlanItem.status. */
+rawRowData?: Record<string, string>;
+```
 
-**1. `src/components/steps/SpreadsheetImportStep.tsx`**
+### 1b. `src/utils/parsers/parseHierarchicalColumns.ts`
+Inside the `if (isLeaf)` block (~line 620), build a header→value map from the source row's full header set and assign to `item.rawRowData` before the existing role attachments. Capture `headerRow` once at the top of the row loop if not already in scope.
 
-- Track per-sheet baseline + last-removed counts for generic preview as well:
-  - Add `genericPredicateBaselineBySheet: Record<string, PlanItem[]>` and reuse `activePredicatesBySheet` (keyed by sheet name) for both modes.
-- Extend `handleApplyPredicate(predicate)` to also handle Pattern A sheets:
-  - For each sheet name in `genericPreview?.itemsBySheet ?? {}`:
-    - On first apply, snapshot the current items into the generic baseline.
-    - Recompute filtered items by starting from the **baseline** and re-applying every predicate in `nextPreds` (mirrors hier path so multi-predicate ordering is order-safe).
-    - Headers come from the corresponding `parsedSheet` for that generic sheet (look up in `detection?.sheets`).
-    - Update `genericPreview` immutably: `setGenericPreview(prev => ({ ...prev, itemsBySheet: { ...prev.itemsBySheet, [sheetName]: filtered } }))`.
-    - Log `predicate-applied` to `parser_diagnostics` with `parser_name: 'ssphase4d2b'` carrying `{ sheet, predicate, kind, itemsBefore, itemsAfter, removedCount, mode: 'generic' }`.
-- Extend `handleUndoPredicate(predicate)` symmetrically for `genericPreview` (re-fold remaining predicates from baseline; if `nextPreds` is empty, restore baseline directly).
-- Track `removedCountByPredicateBySheet: Record<sheet, Record<predicate, number>>` so the UI can show "removed N rows" per sheet/predicate. Updated inside both Apply paths.
-- Build `predicateRows` (around line 1222) with real values:
-  ```ts
-  const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => {
-    const activeOnSheets = Object.entries(activePredicatesBySheet)
-      .filter(([, preds]) => preds.includes(p))
-      .map(([s]) => s);
-    const removedCount = activeOnSheets.reduce(
-      (n, s) => n + (removedCountByPredicateBySheet[s]?.[p] ?? 0), 0);
-    return { predicate: p, parsed: parsePredicate(p, headersForParse), activeOnSheets, removedCount };
-  });
-  ```
-  Also emit `predicate-parsed` diagnostic per predicate the first render (guarded by a `useEffect` on the predicate list).
-- Flip the gate: `directivesEnabled={{ predicates: true, cellRules: false }}`.
-- Pass the callbacks:
-  ```ts
-  onApplyPredicate={handleApplyPredicate}
-  onUndoPredicate={handleUndoPredicate}
-  ```
-  Keep the existing `onIgnoreDirective` for Ignore (already wired) and additionally log `predicate-ignored` under `parser_name: 'ssphase4d2b'` for traceability (in addition to the existing `ssphase4d`/`directive-ignored` log).
+### 1c. `src/utils/spreadsheet-parser.ts` (Pattern A)
+In `generatePlanItems`, populate `rawRowData` on:
+- **Strategy branch** `actionItem` (~line 640) — using `sectionColMap`
+- **Generic branch** `item` (~line 743) — using `colIndexMap`
 
-**2. `src/components/spreadsheet/MappingConfirmation.tsx`**
+Skip on parents (Strategy/Outcome/Section items) and on `measItem` (Level 4 derivative — cascade handles it via parentId).
 
-No prop-shape changes needed — the component already exposes `onApplyPredicate`, `onUndoPredicate`, `onIgnoreDirective` and renders all three states (active, applied+Undo, too-complex disabled+tooltip). Only confirm:
-- Tooltip copy for `too-complex` reads "This rule is too complex to apply automatically." Update to the spec wording: *"This rule is too complex to apply automatically. Use 'Adjust' to manually exclude rows."*
-- Cell-rule rows continue to show disabled Apply with "Coming soon — 4d.2.c" tooltip (unchanged).
+### 1d. `src/utils/parsers/applyRowPredicate.ts`
+- `findHeader`: split input on `/` and try each segment via stem-fold; return first match.
+- `fieldFor(item, columnHeader)`: prefer `item.rawRowData` lookup via stem-folded key match. Legacy fallback only when `rawRowData` missing. **Deliberately do NOT route source "Status" to `item.status`** (lifecycle ≠ source data).
+- Pass raw `parsed.columnHeader` to `fieldFor` (header resolution moves inside).
 
-**3. No changes** to `applyRowPredicate.ts` — orphan/cascade handling already in place.
+---
 
-### Diagnostics (parser_name = 'ssphase4d2b')
+## Bug 2 — Parser regex gaps (`applyRowPredicate.ts`)
 
-- `predicate-parsed` — `{ predicate, kind, args }` once per predicate when MappingConfirmation first mounts with directives.
-- `predicate-applied` — per sheet: `{ sheet, predicate, kind, mode: 'hier' | 'generic', itemsBefore, itemsAfter, removedCount, activeCount }`.
-- `predicate-undone` — per sheet: `{ sheet, predicate, mode, itemsAfter, activeCount }`.
-- `predicate-ignored` — `{ predicate }`.
+- Define `Q = ["“”'‘’]` (curly + straight quotes, single + double).
+- Add **column-scoped starts-with**: `rows where <col> starts with <text>` → emits `column-contains`-style match scoped to that column. (Falls through to bare starts-with if header doesn't resolve.)
+- Broaden existing `column-equals` and `column-contains` regexes to use `Q`.
+- Bare starts-with regex unchanged in semantics, just uses `Q`.
+- Header `/`-split handled by `findHeader` from Bug 1d.
 
-### Out of scope (deferred)
+---
 
-- Cell-rule Apply (4d.2.c) — buttons stay disabled with current tooltip.
-- New predicate kinds beyond `column-equals`, `column-contains`, `starts-with`.
-- Persisting active predicates across session resume.
+## Bug 3 — Classifier prompt (`supabase/functions/classify-spreadsheet-layout/index.ts` line 65)
 
-### Validation matrix
+Replace one-line description with explicit guidance to preserve simple forms:
+- Don't invent column qualifiers when user didn't name a column.
+- Don't join ambiguous columns with `/`.
+- Accepted forms: `rows starting with X`, `rows where Col = X`, `rows where Col contains X`, `rows where Col starts with X`.
+- More complex notes → leave near user's wording (parser will mark too-complex).
 
-| Test upload + note | Expected |
+No schema change.
+
+---
+
+## Validation matrix
+
+| Scenario | Expected |
 |---|---|
-| DRAFT, "skip rows where status = Closed" | Parsed `column-equals`; Apply enabled; click → matching rows + descendants removed; badge "✓ Applied — removed N rows" + Undo |
-| DRAFT, "skip rows starting with Draft" | Parsed `starts-with`; Apply works on name/description |
-| DRAFT, "skip rows containing Pending" | Parsed `column-contains`; Apply works |
-| DRAFT, long compound sentence | Parsed `too-complex`; Apply disabled with updated tooltip |
-| Pattern A sheet (Initiative 1 with note) | `genericPreview.itemsBySheet[name]` filtered, count updates on the sheet card |
-| Pattern B/C sheet (Tulane with note) | `hierResultsBySheet[name].items` filtered, count updates |
-| Click Undo | Items restored; if it was the only active predicate, baseline state returned exactly |
-| Click Ignore | Row marked dismissed, no filtering; `predicate-ignored` log fires |
-| Continue after Apply | Filtered items flow into final import via existing `finalizeFromMixed/Generic/HierSnapshots` paths |
-| No-regression: Tulane skip-Tactic still 1 Strategy per block; Santa Cruz 730; Carmen 17 | Unchanged |
+| Tulane "skip rows where Status = ongoing" | `column-equals(Status, ongoing)`; ~66 leaves + descendants removed |
+| Tulane "skip rows where Tactic/Description starts with Draft" | `findHeader` resolves first matching segment; column-scoped match |
+| DRAFT "skip rows starting with Draft" | bare `starts-with` on name/description |
+| Curly-quoted note `'Status' is 'Closed'` | parses cleanly |
+| Pattern A sheet (Initiative) | `genericPreview.itemsBySheet[name]` filtered via `rawRowData` |
+| No-regression: Tulane=170, Santa Cruz=730, Carmen=17 | Unchanged |
 
-### No-hardcoding guarantees
+## Files changed
 
-- All predicate matching uses regex in `parsePredicate` against the AI's text.
-- Header lookup uses `stemKey` fold (existing 4b.1 helper).
-- No filename or sheet-name conditionals introduced.
+- `src/types/plan.ts`
+- `src/utils/parsers/parseHierarchicalColumns.ts`
+- `src/utils/spreadsheet-parser.ts`
+- `src/utils/parsers/applyRowPredicate.ts`
+- `supabase/functions/classify-spreadsheet-layout/index.ts`
+- `.lovable/plan.md`
 
-### Files changed
+## Out of scope
 
-- `src/components/steps/SpreadsheetImportStep.tsx`
-- `src/components/spreadsheet/MappingConfirmation.tsx` (tooltip copy only)
-- `.lovable/plan.md` (phase log update)
+- Cell-rule Apply (4d.2.c)
+- Resume-session rehydration of `rawRowData` (in-memory this phase)
+- Upward parent cascade (downward only per Q2)

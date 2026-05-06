@@ -618,6 +618,16 @@ export function parseHierarchicalColumns(
       });
 
       if (isLeaf) {
+        // Phase 4d.2.b: snapshot every column from this source row so
+        // row-predicate Apply can filter on Skip-mapped columns.
+        const raw: Record<string, string> = {};
+        for (let ci = 0; ci < headerRow.length; ci++) {
+          const h = headerRow[ci] == null ? '' : String(headerRow[ci]).trim();
+          if (!h) continue;
+          raw[h] = cellAt(row, ci);
+        }
+        item.rawRowData = raw;
+
         // Attach attributes only to the leaf.
         if (ownerIdx != null) {
           const owner = cellAt(row, ownerIdx);

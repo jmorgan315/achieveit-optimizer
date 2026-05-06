@@ -52,6 +52,10 @@ export interface PlanItem {
   issues: PlanItemIssue[];
   confidence?: number;
   corrections?: string[];
+  /** Phase 4d.2.b — original source-row data keyed by header text.
+   *  Populated only at leaf creation. Used by row-predicate Apply to
+   *  filter on Skip-mapped columns. Distinct from PlanItem.status (lifecycle). */
+  rawRowData?: Record<string, string>;
 }
 
 export interface PlanItemIssue {

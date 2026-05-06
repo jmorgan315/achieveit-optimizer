@@ -652,6 +652,14 @@ export function generatePlanItems(
           confidence: 100,
         });
 
+        // Phase 4d.2.b: snapshot source row by header for predicate Apply.
+        const rawA: Record<string, string> = {};
+        sectionColMap.forEach((idx, h) => {
+          const v = row[idx];
+          rawA[h] = v == null ? '' : String(v).trim();
+        });
+        actionItem.rawRowData = rawA;
+
         // Handle measurement column
         if (metricVal) {
           if (measurementMode === 'level4') {
@@ -754,6 +762,14 @@ export function generatePlanItems(
           members,
           confidence: 100,
         });
+
+        // Phase 4d.2.b: snapshot source row by header for predicate Apply.
+        const rawG: Record<string, string> = {};
+        colIndexMap.forEach((idx, h) => {
+          const v = row[idx];
+          rawG[h] = v == null ? '' : String(v).trim();
+        });
+        item.rawRowData = rawG;
 
         if (metric) {
           item.metricDescription = 'Track to Target';

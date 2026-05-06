@@ -1,5 +1,5 @@
 /**
- * Phase 4d.2.b — translate AI exclude_row_predicates into 3 supported regex
+ * Phase 4d.2.b — translate AI exclude_row_predicates into supported regex
  * patterns and apply them against PlanItem trees.
  *
  * No filename/sheet-name heuristics. Every parsed predicate carries explicit
@@ -17,35 +17,58 @@ export type ParsedPredicate =
   | { kind: 'too-complex' };
 
 function findHeader(name: string, headers: string[]): string | null {
-  const target = stemKey(name);
-  const hit = headers.find(h => stemKey(h) === target);
-  return hit ?? null;
+  // Allow "tactic/description" → try each segment via stem-fold; first wins.
+  const parts = name.includes('/')
+    ? name.split('/').map(s => s.trim()).filter(Boolean)
+    : [name];
+  for (const part of parts) {
+    const target = stemKey(part);
+    const hit = headers.find(h => stemKey(h) === target);
+    if (hit) return hit;
+  }
+  return null;
 }
+
+// Quote chars: straight + curly, single + double.
+const Q = `["“”'‘’]`;
 
 /**
  * Recognized natural-language patterns (case-insensitive):
- *  1. "rows where <header> = <value>"  / "rows where <header> is <value>"
+ *  1. "rows where <header> = <value>" / "...is <value>" / "...equals <value>"
  *  2. "rows where <header> contains <text>" / "...includes <text>"
- *  3. "rows starting with <text>" / "rows that start with <text>"
+ *  3. "rows where <header> starts with <text>"
+ *  4. "rows starting with <text>" (bare)
  */
 export function parsePredicate(predicate: string, headers: string[]): ParsedPredicate {
   const raw = String(predicate || '').trim();
   if (!raw) return { kind: 'too-complex' };
   const text = raw.replace(/^skip\s+/i, '').replace(/^exclude\s+/i, '').trim();
 
-  // starts-with
-  let m = text.match(/^rows?\s+(?:that\s+)?start(?:ing|s)?\s+with\s+["“']?(.+?)["”']?\.?$/i);
+  // column-scoped starts-with
+  let m = text.match(new RegExp(
+    `^rows?\\s+where\\s+(?:the\\s+)?${Q}?(.+?)${Q}?\\s+starts?\\s+with\\s+${Q}?(.+?)${Q}?\\.?$`, 'i'));
+  if (m) {
+    const header = findHeader(m[1].trim(), headers);
+    if (header) return { kind: 'column-contains', columnHeader: header, text: m[2].trim() };
+    // Fall through to bare starts-with if header didn't resolve.
+  }
+
+  // bare starts-with
+  m = text.match(new RegExp(
+    `^rows?\\s+(?:that\\s+)?start(?:ing|s)?\\s+with\\s+${Q}?(.+?)${Q}?\\.?$`, 'i'));
   if (m) return { kind: 'starts-with', text: m[1].trim() };
 
   // column contains
-  m = text.match(/^rows?\s+where\s+(?:the\s+)?["“']?(.+?)["”']?\s+(?:contains|includes)\s+["“']?(.+?)["”']?\.?$/i);
+  m = text.match(new RegExp(
+    `^rows?\\s+where\\s+(?:the\\s+)?${Q}?(.+?)${Q}?\\s+(?:contains|includes)\\s+${Q}?(.+?)${Q}?\\.?$`, 'i'));
   if (m) {
     const header = findHeader(m[1].trim(), headers);
     if (header) return { kind: 'column-contains', columnHeader: header, text: m[2].trim() };
   }
 
   // column equals / is
-  m = text.match(/^rows?\s+where\s+(?:the\s+)?["“']?(.+?)["”']?\s+(?:=|==|is|equals?)\s+["“']?(.+?)["”']?\.?$/i);
+  m = text.match(new RegExp(
+    `^rows?\\s+where\\s+(?:the\\s+)?${Q}?(.+?)${Q}?\\s+(?:=|==|is|equals?)\\s+${Q}?(.+?)${Q}?\\.?$`, 'i'));
   if (m) {
     const header = findHeader(m[1].trim(), headers);
     if (header) return { kind: 'column-equals', columnHeader: header, value: m[2].trim() };
@@ -55,15 +78,28 @@ export function parsePredicate(predicate: string, headers: string[]): ParsedPred
 }
 
 /**
- * Apply a parsed predicate to a flat PlanItem list. Matches against:
- *  - starts-with: item.name OR description starts with text
- *  - column-equals/contains: PlanItem fields are looked up by stem-folded
- *    header → known PlanItem field. Unknown headers degrade to name match.
+ * fieldFor — prefer source row data via PlanItem.rawRowData (4d.2.b).
+ * Stem-folded header lookup so capitalization/whitespace differences match.
+ * Legacy fallback only when rawRowData is missing (older sessions).
  *
- * Removed parents cascade-remove their descendants.
+ * NOTE: deliberately does NOT route source "Status" → item.status. The
+ * lifecycle field has different semantics from a source-data Status column.
  */
-function fieldFor(item: PlanItem, headerStem: string): string {
-  switch (headerStem) {
+function fieldFor(item: PlanItem, columnHeader: string): string {
+  const raw = item.rawRowData;
+  if (raw) {
+    const target = stemKey(columnHeader);
+    for (const k of Object.keys(raw)) {
+      if (stemKey(k) === target) {
+        const v = raw[k];
+        if (v != null && v !== '') return v;
+      }
+    }
+    // rawRowData present but no key match → return empty (no fallback).
+    return '';
+  }
+  // Legacy fallback
+  switch (stemKey(columnHeader)) {
     case 'name':
     case 'item':
     case stemKey('item name'):
@@ -72,8 +108,6 @@ function fieldFor(item: PlanItem, headerStem: string): string {
     case 'owner':
     case stemKey('assignee'):
       return item.assignedTo || '';
-    case 'status':
-      return String(item.status || '');
     case stemKey('description'):
       return item.description || '';
     case stemKey('due date'):
@@ -105,10 +139,10 @@ export function applyPredicate(
       const t = lower(parsed.text);
       match = lower(it.name || '').startsWith(t) || lower(it.description || '').startsWith(t);
     } else if (parsed.kind === 'column-equals') {
-      const v = fieldFor(it, stemKey(parsed.columnHeader));
+      const v = fieldFor(it, parsed.columnHeader);
       match = lower(v).trim() === lower(parsed.value).trim();
     } else if (parsed.kind === 'column-contains') {
-      const v = fieldFor(it, stemKey(parsed.columnHeader));
+      const v = fieldFor(it, parsed.columnHeader);
       match = lower(v).includes(lower(parsed.text));
     }
     if (match) removeIds.add(it.id);
