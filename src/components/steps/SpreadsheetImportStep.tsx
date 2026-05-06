@@ -144,6 +144,10 @@ export function SpreadsheetImportStep({
   // pre-apply baseline so Apply/Undo across multiple predicates is order-safe.
   const [activePredicatesBySheet, setActivePredicatesBySheet] = useState<Record<string, string[]>>({});
   const [predicateBaselineBySheet, setPredicateBaselineBySheet] = useState<Record<string, PlanItem[]>>({});
+  // Generic (Pattern A) baseline + per-sheet, per-predicate removed counts so
+  // the directives card can render "removed N rows" totals.
+  const [genericPredicateBaselineBySheet, setGenericPredicateBaselineBySheet] = useState<Record<string, PlanItem[]>>({});
+  const [removedCountByPredicateBySheet, setRemovedCountByPredicateBySheet] = useState<Record<string, Record<string, number>>>({});
 
   // Phase 4d.2.c — accumulated active cell transformations per sheet, with
   // the pre-apply parse-result baseline so Apply/Undo never silently drop a
