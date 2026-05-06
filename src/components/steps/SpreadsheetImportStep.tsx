@@ -1251,7 +1251,11 @@ export function SpreadsheetImportStep({
           }
         : undefined;
 
-    const isGeneric = !!genericPreview;
+    const hasHier = Object.keys(hierResultsBySheet).length > 0;
+    const hasGeneric = !!genericPreview;
+    const mode: 'mixed' | 'generic' | 'hierarchical' = hasHier && hasGeneric
+      ? 'mixed'
+      : hasGeneric ? 'generic' : 'hierarchical';
 
     return (
       <MappingConfirmation
@@ -1263,11 +1267,13 @@ export function SpreadsheetImportStep({
         directivesEnabled={{ predicates: false, cellRules: false }}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
-            source: isGeneric ? 'generic' : 'hierarchical',
+            source: mode,
             sheets: sheetSummaries.map(s => ({ sheet: s.sheetName, items: s.itemCount })),
             totalItems: sheetSummaries.reduce((n, s) => n + s.itemCount, 0),
           });
-          if (isGeneric) {
+          if (mode === 'mixed') {
+            finalizeFromMixed();
+          } else if (mode === 'generic') {
             finalizeFromGenericPreview();
           } else {
             finalizeFromHierSnapshots();
