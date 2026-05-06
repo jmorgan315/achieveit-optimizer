@@ -252,7 +252,19 @@ export function MappingConfirmation({
                           )}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          {active ? (
+                          {!cellRulesEnabled ? (
+                            <>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span>
+                                    <Button size="sm" variant="outline" disabled>Apply this rule</Button>
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>Coming soon — 4d.2.c</TooltipContent>
+                              </Tooltip>
+                              <Button size="sm" variant="ghost" disabled>Ignore</Button>
+                            </>
+                          ) : active ? (
                             <Button size="sm" variant="outline" onClick={() => onUndoCellRule?.(key)}>
                               <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
                             </Button>
@@ -261,14 +273,16 @@ export function MappingConfirmation({
                               Apply this rule
                             </Button>
                           )}
-                          <Button
-                            size="sm"
-                            variant={dismissed ? 'secondary' : 'ghost'}
-                            onClick={() => onIgnoreCellRule?.(key)}
-                            disabled={dismissed || active}
-                          >
-                            Ignore
-                          </Button>
+                          {cellRulesEnabled && (
+                            <Button
+                              size="sm"
+                              variant={dismissed ? 'secondary' : 'ghost'}
+                              onClick={() => onIgnoreCellRule?.(key)}
+                              disabled={dismissed || active}
+                            >
+                              Ignore
+                            </Button>
+                          )}
                         </div>
                       </div>
                     );
