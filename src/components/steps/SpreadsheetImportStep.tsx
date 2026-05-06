@@ -1367,7 +1367,9 @@ export function SpreadsheetImportStep({
         dismissedPredicates={dismissedPredicates}
         dismissedCellRuleKeys={dismissedCellRuleKeys}
         conflictBusy={conflictApplyBusy}
-        directivesEnabled={{ predicates: false, cellRules: false }}
+        directivesEnabled={{ predicates: true, cellRules: false }}
+        onApplyPredicate={handleApplyPredicate}
+        onUndoPredicate={handleUndoPredicate}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
             source: mode,
