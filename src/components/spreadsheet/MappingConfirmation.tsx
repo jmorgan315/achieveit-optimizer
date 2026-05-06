@@ -72,6 +72,8 @@ interface MappingConfirmationProps {
   dismissedPredicates: Set<string>;
   dismissedCellRuleKeys?: Set<string>;
   conflictBusy: boolean;
+  /** Phase 4d.2.a: directive Apply UI is gated. Defaults to all-disabled. */
+  directivesEnabled?: { predicates: boolean; cellRules: boolean };
   onAccept: () => void;
   onAdjust: (sheetName: string) => void;
   onApplyConflict: (sheetName: string, choice: LevelChoice) => void;
