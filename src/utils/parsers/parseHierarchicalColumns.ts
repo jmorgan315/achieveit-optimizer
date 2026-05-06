@@ -651,10 +651,8 @@ export function parseHierarchicalColumns(
       }
 
       items.push(item);
-      if (!isLeaf || leafIsInherited) {
-        parentByKey.set(dedupeKey, item);
-        parentId = item.id;
-      }
+      parentByKey.set(dedupeKey, item);
+      parentId = item.id;
     }
   }
 
