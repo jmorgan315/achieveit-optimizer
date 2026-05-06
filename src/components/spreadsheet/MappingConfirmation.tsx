@@ -83,6 +83,8 @@ interface MappingConfirmationProps {
   onApplyCellRule?: (ruleKey: string) => void;
   onUndoCellRule?: (ruleKey: string) => void;
   onIgnoreCellRule?: (ruleKey: string) => void;
+  /** Phase 4d.2.c — Option B: cell rules only apply to hierarchical (B/C) sheets. */
+  hasHierarchicalSheets?: boolean;
 }
 
 const COLUMN_ROLE_LABEL: Record<ColumnRole, string> = {
@@ -127,6 +129,7 @@ export function MappingConfirmation({
   onApplyCellRule,
   onUndoCellRule,
   onIgnoreCellRule,
+  hasHierarchicalSheets = true,
 }: MappingConfirmationProps) {
   const predicatesEnabled = directivesEnabled?.predicates ?? false;
   const cellRulesEnabled = directivesEnabled?.cellRules ?? false;
@@ -268,6 +271,15 @@ export function MappingConfirmation({
                             <Button size="sm" variant="outline" onClick={() => onUndoCellRule?.(key)}>
                               <Undo2 className="h-3.5 w-3.5 mr-1" /> Undo
                             </Button>
+                          ) : !hasHierarchicalSheets ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span>
+                                  <Button size="sm" variant="outline" disabled>Apply this rule</Button>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>Cell rules currently apply only to hierarchical patterns (B/C).</TooltipContent>
+                            </Tooltip>
                           ) : (
                             <Button size="sm" variant="outline" onClick={() => onApplyCellRule?.(key)}>
                               Apply this rule

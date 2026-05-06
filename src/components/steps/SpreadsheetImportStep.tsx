@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { PlanItem, PersonMapping, PlanLevel, DEFAULT_LEVELS } from '@/types/plan';
 import {
@@ -156,6 +156,9 @@ export function SpreadsheetImportStep({
   const [cellTxBaselineBySheet, setCellTxBaselineBySheet] = useState<
     Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[] }>
   >({});
+  // 4d.2.c — per-sheet cells-transformed counts keyed by ruleKey.
+  const [cellsTransformedByRuleSheet, setCellsTransformedByRuleSheet] = useState<Record<string, Record<string, number>>>({});
+  const cellRulesDetectedLoggedRef = useRef(false);
 
   // Phase 4d.2.a — when the user clicks "Let me adjust" on a Pattern B/C sheet,
   // we route to the LevelMappingInterface keyed by this target.
@@ -307,6 +310,20 @@ export function SpreadsheetImportStep({
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
+
+  // 4d.2.c — log detected cell-transformation rules once per session.
+  useEffect(() => {
+    const rules = parserDirectives?.cell_transformations ?? [];
+    if (!rules.length || cellRulesDetectedLoggedRef.current) return;
+    cellRulesDetectedLoggedRef.current = true;
+    void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-detected', {
+      rules: rules.map(r => ({
+        rule: r.rule,
+        level: r.level ?? null,
+        delimiter: (r as { delimiter?: string }).delimiter ?? null,
+      })),
+    });
+  }, [parserDirectives, sessionId]);
 
   // Phase 4b.2 belt-and-braces guard: if any code path ever populates
   // pendingConflicts without switching phase, force the conflict screen
@@ -1166,10 +1183,15 @@ export function SpreadsheetImportStep({
       const activePreds = activePredicatesBySheet[sheetName] ?? [];
       const itemsBefore = hier.items.length;
       const r = reparseAndRefold(sheetName, nextTx, activePreds);
+      const cellsTransformed = r?.cellsTransformed ?? 0;
+      setCellsTransformedByRuleSheet(prev => ({
+        ...prev,
+        [sheetName]: { ...(prev[sheetName] ?? {}), [key]: cellsTransformed },
+      }));
       void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-applied', {
         sheet: sheetName, rule: rule.rule, level: rule.level ?? null,
-        itemsBefore, itemsAfter: r?.itemsAfter ?? 0, cellsTransformed: r?.cellsTransformed ?? 0,
-        activeCount: nextTx.length,
+        itemsBefore, itemsAfter: r?.itemsAfter ?? 0, cellsTransformed,
+        activeCount: nextTx.length, mode: 'hier',
       }, sheetName);
     }
   };
@@ -1181,10 +1203,26 @@ export function SpreadsheetImportStep({
       setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
       const activePreds = activePredicatesBySheet[sheetName] ?? [];
       reparseAndRefold(sheetName, nextTx, activePreds);
+      setCellsTransformedByRuleSheet(prev => {
+        const sheetMap = { ...(prev[sheetName] ?? {}) };
+        delete sheetMap[key];
+        return { ...prev, [sheetName]: sheetMap };
+      });
       void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-undone', {
         sheet: sheetName, key, activeCount: nextTx.length,
       }, sheetName);
     }
+  };
+  const handleIgnoreCellRule = (key: string) => {
+    setDismissedCellRuleKeys(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    const rule = allCellRules.find(r => cellRuleKey(r) === key);
+    void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-ignored', {
+      key, rule: rule?.rule ?? null, level: rule?.level ?? null,
+    });
   };
 
 
@@ -1339,12 +1377,15 @@ export function SpreadsheetImportStep({
       }
       return `${String((t as { rule: string }).rule)}${lvl}`;
     };
-    const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => ({
-      rule,
-      description: describeCellRule(rule),
-      activeOnSheets: [],
-      cellsTransformed: 0,
-    }));
+    const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => {
+      const key = cellRuleKey(rule);
+      const activeOnSheets = Object.entries(activeCellTxBySheet)
+        .filter(([, rules]) => rules.some(r => cellRuleKey(r) === key))
+        .map(([s]) => s);
+      const cellsTransformed = activeOnSheets.reduce(
+        (n, s) => n + (cellsTransformedByRuleSheet[s]?.[key] ?? 0), 0);
+      return { rule, description: describeCellRule(rule), activeOnSheets, cellsTransformed };
+    });
     const directivesSummary: DirectivesSummary | undefined =
       (predicateRows.length || cellRuleRows.length)
         ? {
@@ -1367,9 +1408,13 @@ export function SpreadsheetImportStep({
         dismissedPredicates={dismissedPredicates}
         dismissedCellRuleKeys={dismissedCellRuleKeys}
         conflictBusy={conflictApplyBusy}
-        directivesEnabled={{ predicates: true, cellRules: false }}
+        directivesEnabled={{ predicates: true, cellRules: true }}
+        hasHierarchicalSheets={hasHier}
         onApplyPredicate={handleApplyPredicate}
         onUndoPredicate={handleUndoPredicate}
+        onApplyCellRule={handleApplyCellRule}
+        onUndoCellRule={handleUndoCellRule}
+        onIgnoreCellRule={handleIgnoreCellRule}
         onAccept={() => {
           void logParserDiagnostic(sessionId, 'ssphase4d', 'accept-clicked', {
             source: mode,
