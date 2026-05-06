@@ -661,7 +661,7 @@ export function parseHierarchicalColumns(
       }
 
       items.push(item);
-      if (!isLeaf) {
+      if (!isLeaf || leafIsInherited) {
         parentByKey.set(dedupeKey, item);
         parentId = item.id;
       }
