@@ -1169,10 +1169,15 @@ export function SpreadsheetImportStep({
       const activePreds = activePredicatesBySheet[sheetName] ?? [];
       const itemsBefore = hier.items.length;
       const r = reparseAndRefold(sheetName, nextTx, activePreds);
+      const cellsTransformed = r?.cellsTransformed ?? 0;
+      setCellsTransformedByRuleSheet(prev => ({
+        ...prev,
+        [sheetName]: { ...(prev[sheetName] ?? {}), [key]: cellsTransformed },
+      }));
       void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-applied', {
         sheet: sheetName, rule: rule.rule, level: rule.level ?? null,
-        itemsBefore, itemsAfter: r?.itemsAfter ?? 0, cellsTransformed: r?.cellsTransformed ?? 0,
-        activeCount: nextTx.length,
+        itemsBefore, itemsAfter: r?.itemsAfter ?? 0, cellsTransformed,
+        activeCount: nextTx.length, mode: 'hier',
       }, sheetName);
     }
   };
@@ -1184,10 +1189,26 @@ export function SpreadsheetImportStep({
       setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
       const activePreds = activePredicatesBySheet[sheetName] ?? [];
       reparseAndRefold(sheetName, nextTx, activePreds);
+      setCellsTransformedByRuleSheet(prev => {
+        const sheetMap = { ...(prev[sheetName] ?? {}) };
+        delete sheetMap[key];
+        return { ...prev, [sheetName]: sheetMap };
+      });
       void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-undone', {
         sheet: sheetName, key, activeCount: nextTx.length,
       }, sheetName);
     }
+  };
+  const handleIgnoreCellRule = (key: string) => {
+    setDismissedCellRuleKeys(prev => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    const rule = allCellRules.find(r => cellRuleKey(r) === key);
+    void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-ignored', {
+      key, rule: rule?.rule ?? null, level: rule?.level ?? null,
+    });
   };
 
 
