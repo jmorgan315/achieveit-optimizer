@@ -62,7 +62,17 @@ parser_directives describes ONLY what the user told us in their notes (documentH
 A sheet structurally classified as "not_plan_content" does NOT belong in exclude_sheets — that's already conveyed by its pattern. Only put a sheet in exclude_sheets if the user's notes explicitly say to skip it (e.g., "ignore the budget tab", "skip last year's data").
 
 - exclude_sheets: string[] — sheet names the user's notes explicitly say to skip. Each entry MUST be the exact canonical sheet name as it appears in the workbook (matching one of the sheetName values in the input). Do NOT include the user's phrasing, paraphrases, or case variants. If the user's note refers to a sheet by an approximate name, resolve it to the single canonical sheet name. Deduplicate. Empty by default.
-- exclude_row_predicates: string[] — human-readable row filters from the user's notes (e.g., "rows where status = Archived"). Empty by default.
+- exclude_row_predicates: string[] — human-readable row filters from the user's notes. Empty by default.
+    Preserve the user's phrasing when it's already a clear filter; do not over-canonicalize.
+    Do NOT invent column qualifiers when the user's input doesn't specify a column.
+    Do NOT join ambiguous columns with "/". Pick one column, or use the un-columned starts-with form.
+    Accepted forms (use whichever fits the user's wording most naturally):
+      • "rows starting with <text>"               — when user named no column
+      • "rows where <Column> = <value>"            — equality on a named column
+      • "rows where <Column> contains <text>"      — substring match on a named column
+      • "rows where <Column> starts with <text>"   — prefix match on a named column
+    If the user's note is more complex than these forms, leave it close to their original wording —
+    the parser will mark it too-complex and the user can adjust manually.
 - include_only_recent: boolean — true ONLY when the user explicitly asks for the latest/most-recent version ("just the latest", "current year only"). False by default. The classifier may still flag time-versioning structurally via clarification_type without setting this.
 - cell_transformations: array — recognized cell-cleanup rules extracted from documentHints. Only emit entries that match these patterns; otherwise leave empty:
     * "take-first-delimited" when the user says to pick/take the first value when multiple are listed in a cell. Optionally include "delimiter" (default ";") and "level" (the level/column name they referenced).
