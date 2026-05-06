@@ -1287,7 +1287,7 @@ export function SpreadsheetImportStep({
             sheet: sheetName,
             pattern,
             target,
-            levelsSeededFrom: isGeneric ? 'classifier' : 'defaults',
+            levelsSeededFrom: hasGeneric ? 'classifier' : 'defaults',
           });
           if ((pattern === 'B' || pattern === 'C') && cls) {
             const hier = hierResultsBySheet[sheetName];
