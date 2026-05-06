@@ -1315,12 +1315,19 @@ export function SpreadsheetImportStep({
       const row = hier?.parsedSheet?.rows?.[hdrIdx];
       return Array.isArray(row) ? row.map(c => (c == null ? '' : String(c).trim())) : [];
     })();
-    const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => ({
-      predicate: p,
-      parsed: parsePredicate(p, headersForParse),
-      activeOnSheets: [],
-      removedCount: 0,
-    }));
+    const predicateRows: PredicateRow[] = (parserDirectives?.exclude_row_predicates ?? []).map(p => {
+      const activeOnSheets = Object.entries(activePredicatesBySheet)
+        .filter(([, preds]) => preds.includes(p))
+        .map(([s]) => s);
+      const removedCount = activeOnSheets.reduce(
+        (n, s) => n + (removedCountByPredicateBySheet[s]?.[p] ?? 0), 0);
+      return {
+        predicate: p,
+        parsed: parsePredicate(p, headersForParse),
+        activeOnSheets,
+        removedCount,
+      };
+    });
     const describeCellRule = (t: CellTransformation): string => {
       const lvl = t.level ? ` for level "${t.level}"` : '';
       if (t.rule === 'take-first-delimited') {
