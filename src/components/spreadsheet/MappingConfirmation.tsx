@@ -83,6 +83,8 @@ interface MappingConfirmationProps {
   onApplyCellRule?: (ruleKey: string) => void;
   onUndoCellRule?: (ruleKey: string) => void;
   onIgnoreCellRule?: (ruleKey: string) => void;
+  /** Phase 4d.2.c — Option B: cell rules only apply to hierarchical (B/C) sheets. */
+  hasHierarchicalSheets?: boolean;
 }
 
 const COLUMN_ROLE_LABEL: Record<ColumnRole, string> = {
