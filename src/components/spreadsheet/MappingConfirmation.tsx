@@ -117,6 +117,7 @@ export function MappingConfirmation({
   dismissedPredicates,
   dismissedCellRuleKeys,
   conflictBusy,
+  directivesEnabled,
   onAccept,
   onAdjust,
   onApplyConflict,
@@ -127,6 +128,9 @@ export function MappingConfirmation({
   onUndoCellRule,
   onIgnoreCellRule,
 }: MappingConfirmationProps) {
+  const predicatesEnabled = directivesEnabled?.predicates ?? false;
+  const cellRulesEnabled = directivesEnabled?.cellRules ?? false;
+
   const hasUnresolvedConflict = useMemo(
     () => sheetSummaries.some(s => !!s.conflict),
     [sheetSummaries],
