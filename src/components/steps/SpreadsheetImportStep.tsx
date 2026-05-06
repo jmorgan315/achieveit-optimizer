@@ -156,6 +156,9 @@ export function SpreadsheetImportStep({
   const [cellTxBaselineBySheet, setCellTxBaselineBySheet] = useState<
     Record<string, { items: PlanItem[]; personMappings: PersonMapping[]; resolvedLevels: string[]; resolvedColumnIndices?: number[] }>
   >({});
+  // 4d.2.c — per-sheet cells-transformed counts keyed by ruleKey.
+  const [cellsTransformedByRuleSheet, setCellsTransformedByRuleSheet] = useState<Record<string, Record<string, number>>>({});
+  const cellRulesDetectedLoggedRef = useRef(false);
 
   // Phase 4d.2.a — when the user clicks "Let me adjust" on a Pattern B/C sheet,
   // we route to the LevelMappingInterface keyed by this target.
