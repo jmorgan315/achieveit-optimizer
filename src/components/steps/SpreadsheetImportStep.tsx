@@ -331,6 +331,15 @@ export function SpreadsheetImportStep({
         parserDirectives: ParserDirectivesShape | null;
         preview: GenericConfirmPreview;
       }
+    | {
+        kind: 'mixed-confirm';
+        sheetNames: string[];
+        clsBySheetName: Record<string, SheetClassification>;
+        parserDirectives: ParserDirectivesShape | null;
+        perSheet: HierPerSheet;
+        preview: GenericConfirmPreview;
+        conflicts: PendingConflict[];
+      }
     | { kind: 'fallback'; reason: string };
 
   /**
