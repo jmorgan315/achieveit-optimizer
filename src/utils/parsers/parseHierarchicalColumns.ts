@@ -587,6 +587,12 @@ export function parseHierarchicalColumns(
       }
 
       const isLeaf = d === leafDepthIdx;
+      // An "inherited leaf" is a leaf whose value at the leaf depth came from
+      // inheritance rather than this row's own raw cell. Happens when the user
+      // skips the originally-deepest level and the new leaf column is sparse
+      // (e.g. Tulane with Tactic skipped: Strategy text only on first row of
+      // each block, blank-then-inherited on the rest).
+      const leafIsInherited = isLeaf && !rawValues[d];
       // Whitespace-collapse + lowercase for dedupe only; storage keeps original `value`.
       const pathKey = filled
         .slice(0, d + 1)
@@ -594,12 +600,16 @@ export function parseHierarchicalColumns(
         .join(' > ');
       const dedupeKey = `${d}|${pathKey}`;
 
-      // Leaves are ALWAYS unique (each data row is its own leaf, even if name repeats).
-      // Parents are deduped by (depth + path).
-      if (!isLeaf) {
+      // Parents OR inherited leaves dedup by (depth + path). Only "real" leaves
+      // (raw cell present at leaf depth) stay unique per row.
+      if (!isLeaf || leafIsInherited) {
         const existing = parentByKey.get(dedupeKey);
         if (existing) {
           parentId = existing.id;
+          if (isLeaf) {
+            // Inherited leaf collapsed into existing parent — done with row.
+            break;
+          }
           continue;
         }
       }
