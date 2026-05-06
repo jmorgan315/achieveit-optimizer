@@ -412,107 +412,39 @@ export function SpreadsheetImportStep({
       return { sheet, cls, decision };
     });
 
-    // Phase 4d.1.1: when every selected sheet is generic AND we have classifier
-    // output, run Pattern A (legacy generic) up front so MappingConfirmation can
-    // render a preview. Truly mixed selections still fall back.
-    const allHierarchical = selected.every(s => s.decision.kind === 'hierarchical');
-    const allGeneric = selected.every(s => s.decision.kind === 'generic');
-    if (!allHierarchical) {
-      if (allGeneric) {
-        const clsRecord: Record<string, SheetClassification> = {};
-        clsBySheetName.forEach((v, k) => { clsRecord[k] = v; });
-        const directives: ParserDirectivesShape | null = cls.parser_directives ?? null;
+    // Phase 4d.2.a (revised): split selected sheets into hierarchical and
+    // generic subsets and route each via its own pipeline. The combined
+    // result lands in MappingConfirmation as long as every generic sheet
+    // has classifier output; only "no classifier at all" forces fallback.
+    const hierSelected = selected.filter(s => s.decision.kind === 'hierarchical' && s.cls);
+    const genericSelected = selected.filter(s => s.decision.kind === 'generic');
+    const genericWithoutCls = genericSelected.filter(s => !s.cls);
 
-        // Build defaults from the first selected sheet (mirrors post-detect block).
-        const selectedDetections = args.selectedIndices
-          .map(i => args.detection.sheets[i])
-          .filter(Boolean);
-        const merged = mergeSheetDetections(selectedDetections);
-        const firstSheet = selectedDetections[0];
-        const columnMappingsDefault: Record<string, ColumnRole> = {};
-        firstSheet?.allColumnHeaders.forEach(col => {
-          columnMappingsDefault[col] = getDefaultColumnRole(col);
-        });
-        const sectionMappingDefault: ElementRole = args.detection.hasStrategyPattern
-          ? { type: 'level', depth: 1 }
-          : (firstSheet?.sections.some(s => s.headerText) ? { type: 'level', depth: 1 } : { type: 'skip' });
+    const clsRecord: Record<string, SheetClassification> = {};
+    clsBySheetName.forEach((v, k) => { clsRecord[k] = v; });
+    const directives: ParserDirectivesShape | null = cls.parser_directives ?? null;
 
-        // Prefer classifier-derived levels per first selected sheet, else strategy/default.
-        const firstName = firstSheet?.sheet.name;
-        const firstCls = firstName ? clsBySheetName.get(firstName) : undefined;
-        const impliedFirst = firstCls?.structure?.implied_levels ?? [];
-        const previewLevels: PlanLevel[] = impliedFirst.length > 0
-          ? impliedFirst.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
-          : (args.detection.hasStrategyPattern ? STRATEGY_LEVELS : DEFAULT_LEVELS.slice(0, 3));
-
-        const measurementMode: MeasurementMode = 'level4';
-        const { items, personMappings } = generatePlanItems(merged, {
-          selectedSheetIndices: args.selectedIndices,
-          sectionMapping: sectionMappingDefault,
-          columnMappings: columnMappingsDefault,
-          levels: previewLevels,
-          measurementMode,
-        });
-
-        // Bucket items by sheet for per-card counts.
-        const itemsBySheet: Record<string, PlanItem[]> = {};
-        const sheetNamesPreview: string[] = selectedDetections.map(s => s.sheet.name);
-        sheetNamesPreview.forEach(n => { itemsBySheet[n] = []; });
-        for (const it of items) {
-          const sn = (it as any).sheetName;
-          if (sn && itemsBySheet[sn]) itemsBySheet[sn].push(it);
-          else if (sheetNamesPreview[0]) itemsBySheet[sheetNamesPreview[0]].push(it);
-        }
-
-        console.log('[ssphase4d] dispatch: generic-confirm preview', {
-          sheets: sheetNamesPreview,
-          totalItems: items.length,
-        });
-        void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
-          outcome: 'generic-confirm',
-          perSheet: selected.map(s => ({
-            sheet: s.sheet.name,
-            pattern: s.cls?.pattern ?? 'unknown',
-            confidence: s.cls?.confidence ?? null,
-            itemCount: itemsBySheet[s.sheet.name]?.length ?? 0,
-          })),
-        });
-
-        return {
-          kind: 'generic-confirm',
-          sheetNames: sheetNamesPreview,
-          clsBySheetName: clsRecord,
-          parserDirectives: directives,
-          preview: {
-            itemsBySheet,
-            personMappings,
-            levels: previewLevels,
-            columnMappings: columnMappingsDefault,
-            sectionMapping: sectionMappingDefault,
-            measurementMode,
-          },
-        };
-      }
-
-      console.log('[ssphase4b] dispatch: mixed routing → falling back to existing mapping flow');
+    if (genericWithoutCls.length > 0 && hierSelected.length === 0) {
+      // No actionable classification at all — preserve legacy fallback.
+      console.log('[ssphase4b] dispatch: generic w/o classification → fallback');
       void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
         outcome: 'fallback',
-        reason: 'mixed routing',
-        perSheet: selected.map(s => ({ sheet: s.sheet.name, kind: s.decision.kind })),
+        reason: 'generic-without-classification',
+        perSheet: selected.map(s => ({ sheet: s.sheet.name, kind: s.decision.kind, hasCls: !!s.cls })),
       });
-      return { kind: 'fallback', reason: 'mixed routing' };
+      return { kind: 'fallback', reason: 'generic-without-classification' };
     }
 
-    // Run the parser per sheet, accumulate results.
+    // ── Hierarchical subset ────────────────────────────────────────────────
     const personSet = new Set<string>();
     const levelNamesUnion: string[] = [];
-    const sheetNames: string[] = [];
+    const hierSheetNames: string[] = [];
     const perSheet: HierPerSheet = {};
     const conflicts: PendingConflict[] = [];
 
-    for (const s of selected) {
-      if (s.decision.kind !== 'hierarchical' || !s.cls) continue;
-      if (s.decision.lowConfidence) {
+    for (const s of hierSelected) {
+      if (!s.cls) continue;
+      if (s.decision.kind === 'hierarchical' && s.decision.lowConfidence) {
         console.warn('[ssphase4b] low-confidence dispatch:', s.sheet.name, 'pattern=', s.cls.pattern, 'confidence=', s.cls.confidence);
       }
 
@@ -529,7 +461,7 @@ export function SpreadsheetImportStep({
 
       const equivalent = hasUser && implied.length > 0
         ? levelsEquivalent(userLevels, implied)
-        : true; // no comparison possible → no conflict
+        : true;
       const detected = hasUser && implied.length > 0 && !equivalent;
       const reason = !hasUser || implied.length === 0
         ? 'none'
@@ -559,7 +491,7 @@ export function SpreadsheetImportStep({
         if (name && !levelNamesUnion.includes(name)) levelNamesUnion.push(name);
       });
       result.personMappings.forEach(p => personSet.add(p.foundName));
-      sheetNames.push(s.sheet.name);
+      hierSheetNames.push(s.sheet.name);
 
       if (detected) {
         conflicts.push({
@@ -573,16 +505,109 @@ export function SpreadsheetImportStep({
       }
     }
 
-    const clsRecord: Record<string, SheetClassification> = {};
-    clsBySheetName.forEach((v, k) => { clsRecord[k] = v; });
-    const directives: ParserDirectivesShape | null = cls.parser_directives ?? null;
+    // ── Generic subset (Pattern A preview) ────────────────────────────────
+    let genericPreviewBuilt: GenericConfirmPreview | null = null;
+    if (genericSelected.length > 0 && genericWithoutCls.length === 0) {
+      const genericIndicesInSelection = args.selectedIndices.filter(idx => {
+        const sheet = args.parsedSheets[idx];
+        const c = clsBySheetName.get(sheet.name);
+        const dec = decideDispatch(c);
+        return dec.kind === 'generic';
+      });
+      const selectedDetections = genericIndicesInSelection
+        .map(i => args.detection.sheets[i])
+        .filter(Boolean);
+      const merged = mergeSheetDetections(selectedDetections);
+      const firstSheet = selectedDetections[0];
+      const columnMappingsDefault: Record<string, ColumnRole> = {};
+      firstSheet?.allColumnHeaders.forEach(col => {
+        columnMappingsDefault[col] = getDefaultColumnRole(col);
+      });
+      const sectionMappingDefault: ElementRole = args.detection.hasStrategyPattern
+        ? { type: 'level', depth: 1 }
+        : (firstSheet?.sections.some(s => s.headerText) ? { type: 'level', depth: 1 } : { type: 'skip' });
 
-    if (conflicts.length > 0) {
-      // Caller will stash perSheet/sheetNames and switch phase.
-      return { kind: 'conflicts', conflicts, perSheet, sheetNames, clsBySheetName: clsRecord, parserDirectives: directives };
+      const firstName = firstSheet?.sheet.name;
+      const firstCls = firstName ? clsBySheetName.get(firstName) : undefined;
+      const impliedFirst = firstCls?.structure?.implied_levels ?? [];
+      const previewLevels: PlanLevel[] = impliedFirst.length > 0
+        ? impliedFirst.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
+        : (args.detection.hasStrategyPattern ? STRATEGY_LEVELS : DEFAULT_LEVELS.slice(0, 3));
+
+      const measurementMode: MeasurementMode = 'level4';
+      const { items, personMappings } = generatePlanItems(merged, {
+        selectedSheetIndices: genericIndicesInSelection,
+        sectionMapping: sectionMappingDefault,
+        columnMappings: columnMappingsDefault,
+        levels: previewLevels,
+        measurementMode,
+      });
+
+      const itemsBySheet: Record<string, PlanItem[]> = {};
+      const sheetNamesPreview: string[] = selectedDetections.map(s => s.sheet.name);
+      sheetNamesPreview.forEach(n => { itemsBySheet[n] = []; });
+      for (const it of items) {
+        const sn = (it as PlanItem & { sheetName?: string }).sheetName;
+        if (sn && itemsBySheet[sn]) itemsBySheet[sn].push(it);
+        else if (sheetNamesPreview[0]) itemsBySheet[sheetNamesPreview[0]].push(it);
+      }
+
+      personMappings.forEach(p => personSet.add(p.foundName));
+
+      genericPreviewBuilt = {
+        itemsBySheet,
+        personMappings,
+        levels: previewLevels,
+        columnMappings: columnMappingsDefault,
+        sectionMapping: sectionMappingDefault,
+        measurementMode,
+      };
     }
 
-    const allItems: PlanItem[] = sheetNames.flatMap(n => perSheet[n]?.items ?? []);
+    // ── Compose unified result ────────────────────────────────────────────
+    // Stable order: walk original selection so cards render in the order the
+    // user picked sheets (mixing hierarchical/generic).
+    const orderedSheetNames: string[] = args.selectedIndices
+      .map(i => args.parsedSheets[i]?.name)
+      .filter((n): n is string => !!n);
+
+    if (hierSelected.length > 0 && genericPreviewBuilt) {
+      void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
+        outcome: 'mixed-confirm',
+        hierSheets: hierSheetNames,
+        genericSheets: Object.keys(genericPreviewBuilt.itemsBySheet),
+      });
+      return {
+        kind: 'mixed-confirm',
+        sheetNames: orderedSheetNames,
+        clsBySheetName: clsRecord,
+        parserDirectives: directives,
+        perSheet,
+        preview: genericPreviewBuilt,
+        conflicts,
+      };
+    }
+
+    if (hierSelected.length === 0 && genericPreviewBuilt) {
+      void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
+        outcome: 'generic-confirm',
+        sheets: Object.keys(genericPreviewBuilt.itemsBySheet),
+      });
+      return {
+        kind: 'generic-confirm',
+        sheetNames: orderedSheetNames,
+        clsBySheetName: clsRecord,
+        parserDirectives: directives,
+        preview: genericPreviewBuilt,
+      };
+    }
+
+    // Hierarchical-only path.
+    if (conflicts.length > 0) {
+      return { kind: 'conflicts', conflicts, perSheet, sheetNames: hierSheetNames, clsBySheetName: clsRecord, parserDirectives: directives };
+    }
+
+    const allItems: PlanItem[] = hierSheetNames.flatMap(n => perSheet[n]?.items ?? []);
     const resolvedLevels: PlanLevel[] = levelNamesUnion.length > 0
       ? levelNamesUnion.map((name, i) => ({ id: String(i + 1), name, depth: i + 1 }))
       : DEFAULT_LEVELS.slice(0, 3);
@@ -596,9 +621,9 @@ export function SpreadsheetImportStep({
 
     return {
       kind: 'completed',
-      payload: { items: allItems, personMappings, levels: resolvedLevels, sheetNames },
+      payload: { items: allItems, personMappings, levels: resolvedLevels, sheetNames: hierSheetNames },
       perSheet,
-      sheetNames,
+      sheetNames: hierSheetNames,
       clsBySheetName: clsRecord,
       parserDirectives: directives,
     };
