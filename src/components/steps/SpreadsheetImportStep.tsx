@@ -1418,8 +1418,13 @@ export function SpreadsheetImportStep({
     };
     const cellRuleRows: CellRuleRow[] = (parserDirectives?.cell_transformations ?? []).map(rule => {
       const key = cellRuleKey(rule);
+      // Hotfix #4: match by stable __originalKey tag set in handleApplyCellRule,
+      // because Hotfix #2 remaps `level` between the source rule and the active
+      // rule, so cellRuleKey(r) no longer equals the source key after apply.
       const activeOnSheets = Object.entries(activeCellTxBySheet)
-        .filter(([, rules]) => rules.some(r => cellRuleKey(r) === key))
+        .filter(([, rules]) =>
+          rules.some(r => (r as { __originalKey?: string }).__originalKey === key)
+        )
         .map(([s]) => s);
       const cellsTransformed = activeOnSheets.reduce(
         (n, s) => n + (cellsTransformedByRuleSheet[s]?.[key] ?? 0), 0);
