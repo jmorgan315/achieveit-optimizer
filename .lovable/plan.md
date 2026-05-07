@@ -1,62 +1,64 @@
+# Phase 4d.2.c Hotfix #3 — Ground `cell_transformations.level` to `implied_levels`
 
-## Phase 4d.2.c hotfix #2 — Remap classifier-tagged levels to user-stated levels
+Scope: `supabase/functions/classify-spreadsheet-layout/index.ts` only. No parser changes. Hotfix #2's position-based remap stays as defense-in-depth.
 
-### Bug
+## Prompt diff
 
-`cell_transformations[].level` is set once by the classifier using its own `implied_levels` (e.g. "Government Area"). When the user states different levels (Focus Area / Goal / Objective), neither the parser's level-name match nor Fix A's column-header fallback finds a hit, so transformations are silently skipped (0 cells transformed).
+In the `cell_transformations` bullet (lines 77–80 of `PATTERN_GUIDE`), replace:
 
-### Fix — position-based remap at Apply time
-
-Remap each rule's `level` field per-sheet, immediately before pushing it into `activeCellTxBySheet`. Use the sheet's classifier `implied_levels` as the source positions and the parsed `resolvedLevels` (which already reflect `userLevels` when in effect) as the target positions.
-
-### Changes
-
-**`src/utils/parsers/parseHierarchicalColumns.ts`** — export a small helper:
-
-```ts
-export function remapCellTransformationLevels(
-  rules: CellTransformation[],
-  classifierLevels: string[],
-  effectiveLevels: string[],
-): { remapped: CellTransformation[]; dropped: Array<{ rule: string; level: string; reason: string }> }
+```
+- cell_transformations: array — recognized cell-cleanup rules extracted from documentHints. Only emit entries that match these patterns; otherwise leave empty:
+    * "take-first-delimited" when the user says to pick/take the first value when multiple are listed in a cell. Optionally include "delimiter" (default ";") and "level" (the level/column name they referenced).
+    * "resolve-numeric-reference" when the user says number-only cells should be resolved to the corresponding named entry in the same column ("if just a number, look up / match to named"). Optionally include "level".
+  Do NOT invent rules outside these two patterns.
 ```
 
-Logic per rule:
-- `t.level` empty → keep as-is (unscoped).
-- find `i = classifierLevels.findIndex(l => stemKey(l) === stemKey(t.level))`
-- `i < 0` → keep as-is (let parser's level-name + column-header fallbacks try).
-- `i >= effectiveLevels.length` → drop, record reason `"position-beyond-user-levels"`.
-- otherwise → substitute `level := effectiveLevels[i]`.
+with:
 
-**`src/components/steps/SpreadsheetImportStep.tsx`** — modify `handleApplyCellRule` (around line 1165):
+```
+- cell_transformations: array — recognized cell-cleanup rules extracted from documentHints. Only emit entries that match these patterns; otherwise leave empty:
+    * "take-first-delimited" when the user says to pick/take the first value when multiple are listed in a cell. Optionally include "delimiter" (default ";") and "level".
+    * "resolve-numeric-reference" when the user says number-only cells should be resolved to the corresponding named entry in the same column ("if just a number, look up / match to named"). Optionally include "level".
+  Do NOT invent rules outside these two patterns.
 
-For each `sheetName` in `hierSheetOrder`:
-1. Look up `hier = hierResultsBySheet[sheetName]` and its stored `classification.structure.implied_levels` (already kept on `hier.classification`).
-2. Call `remapCellTransformationLevels([rule], classifierLevels, hier.resolvedLevels)`.
-3. If `remapped.length === 0` (dropped), log `ssphase4d2c / cell-transformation-inapplicable` with sheet, original level, classifier levels, user levels — and skip this sheet.
-4. Push the remapped rule (not the original) into `activeCellTxBySheet[sheetName]` and proceed with `reparseAndRefold`.
+  RULES FOR THE "level" FIELD (critical — these prevent the most common classifier error):
 
-Also remap inside `handleUndoCellRule` matching: undo by original `key` (the pre-remap key persists on the UI rule list); when comparing to active rules we need to recover identity. Simplest: keep an auxiliary `Map<sheetName, Map<originalKey, remappedKey>>` populated on apply, and use it on undo. (Or compare by the original rule's `key` stored as a parallel field on the active entry — adding `originalKey?: string` to `CellTransformation` is fine; the parser ignores unknown fields.)
+  1. GROUNDING. The "level" value MUST be either:
+       (a) empty/omitted (rule applies workbook-wide), OR
+       (b) a case-insensitive match to one of the level names you put into some sheet's structure.implied_levels for this same response.
+     NEVER write an arbitrary column header here. NEVER invent a level name. If the user's wording does not resolve to any implied_levels entry, leave "level" empty.
 
-**Diagnostic additions (`ssphase4d2c`):**
-- `cell-transformation-remap` per sheet — `{ originalLevel, classifierLevels, effectiveLevels, remappedLevel | null, dropped: bool, reason? }`.
-- `cell-transformation-inapplicable` when fully dropped on every sheet — surfaces in admin diagnostics so we know the rule never fired.
+  2. SEMANTIC RESOLUTION — USER WORDING WINS. When documentHints references a level by name (e.g., "focus area", "objective", "tactic"), find the closest implied_levels entry across all sheets using stem-folded, case-insensitive, singular/plural-tolerant matching, and use the user's wording as the anchor:
+       - If the user says "focus area" and any sheet's implied_levels contains "Focus Area", use "Focus Area" — even if you classified that same column on a different sheet as "Government Area", "Department Team", or any other label. The user's wording overrides your own level naming.
+       - Your level naming is only a fallback for when the user did not name the level at all.
+     If the user's term matches NO implied_levels entry on any sheet, leave "level" empty rather than substituting a near-miss header.
 
-### Out of scope
-- Classifier prompt changes — keep the classifier emitting whatever level vocabulary it sees; remap is purely client-side.
-- Pattern A path — cell rules already disabled there.
+  3. ANTI-PATTERN GUARD — DO NOT GUESS FROM DATA SHAPE. The "level" field describes the user's intent, not the structural shape of the data. Do NOT pick a level (or column) just because that column happens to contain semicolon-delimited cells, numeric-only cells, or any other pattern that matches the rule. The data shape is irrelevant here; only the user's words in documentHints determine "level".
+```
 
-### Validation scenarios
+And in `layoutToolSchema`, replace the bare `level: { type: "string" }` (line ~114) with:
 
-1. **Santa Cruz reproducer**: classifier emits 5 levels including "Government Area" at position 0; user states 3 levels Focus Area/Goal/Objective. Apply `take-first-delimited` rule with `level:"Government Area"` → remaps to `level:"Focus Area"`, parser matches via `level-name`, cells-transformed > 0.
-2. **Classifier level beyond user count**: rule tagged `level:"Service"` (classifier position 3) with user count = 3 → dropped, diagnostic logged, UI badge shows "0 affected" (no parser execution).
-3. **Names match across user/classifier (Fix A scenario)**: rule `level:"Title"`, both classifier and user have "Title" at same position → remap is a no-op, behavior unchanged.
-4. **Unscoped rule** (`t.level` undefined) → passes through untouched, parser applies to all positions.
-5. **Multi-sheet, different classifier levels**: two hier sheets with different `implied_levels` but same user override; remap runs per-sheet, each sheet substitutes via its own classifier basis.
-6. **Undo after apply**: rule remains in `parserDirectives` UI list; undo correctly removes the (remapped) entry from `activeCellTxBySheet` and re-parses.
-7. **"Let me adjust" path**: open `LevelMappingInterface` after applying; `cellTransformations` passed through are already remapped; parser inside the modal re-applies cleanly.
+```
+level: {
+  type: "string",
+  description: "Empty, OR a case-insensitive match to one of this response's implied_levels entries. NEVER an arbitrary column header. When the user named a level in documentHints, prefer the user's wording (resolved against implied_levels) over your own level interpretation.",
+},
+```
 
-### Files touched
-- `src/utils/parsers/parseHierarchicalColumns.ts` (export helper)
-- `src/components/steps/SpreadsheetImportStep.tsx` (use helper in apply/undo, add diagnostics)
-- `.lovable/plan.md` (record hotfix #2)
+No other code or schema changes. The merge logic in the serve handler already keys on `(rule, level, delimiter)` and tolerates empty `level`, so no downstream changes needed.
+
+## Validation matrix
+
+| Workbook | documentHints | Expected `cell_transformations` |
+|---|---|---|
+| Santa Cruz | "Pick the first focus area when multiple are listed. If a cell contains just a number, align with the corresponding focus area name." | Two rules with `level: "Focus Area"` (or empty if classifier still uses 5-level scheme without "Focus Area"). NEVER `"Department Team"` / `"Government Area"` / other headers. |
+| Santa Cruz | Detailed prompt with explicit Q/R column letters | Same as before — regression-only check. Hotfix #2 remap still kicks in if classifier picks a non-user level. |
+| Santa Cruz | (none) | `cell_transformations: []` |
+| DRAFT (Pattern A) | Notes unrelated to cell rules | `cell_transformations: []` (no leakage from non-rule notes) |
+| Tulane | Cell-rule notes mentioning "Tactics" column | `level` matches a Tulane `implied_levels` entry (e.g., `"Tactic"`/`"Tactics"`), not a random header. |
+
+Diagnostics to inspect after deploy: `parser_diagnostics` rows of type `cell-transformation-remap` should show fewer remaps (because classifier already grounds correctly). `cell-transformation-inapplicable` should not regress.
+
+## Files touched
+- `supabase/functions/classify-spreadsheet-layout/index.ts`
+- `.lovable/plan.md` (changelog entry)
