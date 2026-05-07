@@ -216,6 +216,56 @@ export type CellTransformation =
   | { rule: 'resolve-numeric-reference'; level?: string };
 
 /**
+ * Phase 4d.2.c hotfix #2 — Remap classifier-tagged level names to user-stated
+ * level vocabulary by ordinal position. Required when the user overrides the
+ * classifier's `implied_levels` and the classifier-emitted `cell_transformations`
+ * still reference the classifier's level names.
+ *
+ * Per rule:
+ *  - empty/undefined `level` (unscoped) → keep as-is.
+ *  - classifierLevels position match → substitute effectiveLevels[i] (no-op if equal).
+ *  - position beyond effectiveLevels.length → drop with reason.
+ *  - no classifier match → keep as-is (parser fallbacks may still match).
+ */
+export function remapCellTransformationLevels(
+  rules: CellTransformation[],
+  classifierLevels: string[],
+  effectiveLevels: string[],
+): {
+  remapped: CellTransformation[];
+  dropped: Array<{ rule: string; level: string; reason: string }>;
+  trace: Array<{ originalLevel: string | null; remappedLevel: string | null; matchedPosition: number; dropped: boolean; reason?: string }>;
+} {
+  const remapped: CellTransformation[] = [];
+  const dropped: Array<{ rule: string; level: string; reason: string }> = [];
+  const trace: Array<{ originalLevel: string | null; remappedLevel: string | null; matchedPosition: number; dropped: boolean; reason?: string }> = [];
+  for (const r of rules) {
+    if (!r.level) {
+      remapped.push(r);
+      trace.push({ originalLevel: null, remappedLevel: null, matchedPosition: -1, dropped: false });
+      continue;
+    }
+    const target = stemKey(r.level);
+    const i = classifierLevels.findIndex(l => stemKey(l) === target);
+    if (i < 0) {
+      // Unknown classifier basis — keep, let parser fallbacks try.
+      remapped.push(r);
+      trace.push({ originalLevel: r.level, remappedLevel: r.level, matchedPosition: -1, dropped: false, reason: 'no-classifier-match' });
+      continue;
+    }
+    if (i >= effectiveLevels.length) {
+      dropped.push({ rule: r.rule, level: r.level, reason: 'position-beyond-user-levels' });
+      trace.push({ originalLevel: r.level, remappedLevel: null, matchedPosition: i, dropped: true, reason: 'position-beyond-user-levels' });
+      continue;
+    }
+    const newLevel = effectiveLevels[i];
+    remapped.push({ ...r, level: newLevel });
+    trace.push({ originalLevel: r.level, remappedLevel: newLevel, matchedPosition: i, dropped: false });
+  }
+  return { remapped, dropped, trace };
+}
+
+/**
  * Parse one sheet using the unified Pattern B/C algorithm.
  */
 export function parseHierarchicalColumns(
