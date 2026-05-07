@@ -20,6 +20,7 @@ import {
   SheetClassification,
   stemKey,
   CellTransformation,
+  remapCellTransformationLevels,
 } from '@/utils/parsers/parseHierarchicalColumns';
 import { DetectionSummary } from '@/components/spreadsheet/DetectionSummary';
 import { MappingInterface, LevelConflictBlock, LevelChoice } from '@/components/spreadsheet/MappingInterface';
