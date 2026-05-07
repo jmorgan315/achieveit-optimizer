@@ -1166,9 +1166,38 @@ export function SpreadsheetImportStep({
   const handleApplyCellRule = (key: string) => {
     const rule = allCellRules.find(r => cellRuleKey(r) === key);
     if (!rule) return;
+    let appliedOnAnySheet = false;
     for (const sheetName of hierSheetOrder) {
       const hier = hierResultsBySheet[sheetName];
       if (!hier?.parsedSheet || !hier?.classification) continue;
+      // Hotfix #2: remap classifier-tagged level → user-stated level by ordinal position.
+      const classifierLevels = hier.classification.structure?.implied_levels ?? [];
+      const effectiveLevels = hier.resolvedLevels ?? [];
+      const { remapped, dropped, trace } = remapCellTransformationLevels(
+        [rule],
+        classifierLevels,
+        effectiveLevels,
+      );
+      void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-remap', {
+        sheet: sheetName,
+        originalKey: key,
+        rule: rule.rule,
+        originalLevel: rule.level ?? null,
+        classifierLevels,
+        effectiveLevels,
+        trace,
+        dropped,
+      }, sheetName);
+      if (remapped.length === 0) {
+        // Fully dropped on this sheet — record 0 affected.
+        setCellsTransformedByRuleSheet(prev => ({
+          ...prev,
+          [sheetName]: { ...(prev[sheetName] ?? {}), [key]: 0 },
+        }));
+        continue;
+      }
+      // Tag the applied rule with its UI key so undo can find it.
+      const tagged = remapped.map(r => ({ ...r, __originalKey: key })) as (CellTransformation & { __originalKey?: string })[];
       if (!cellTxBaselineBySheet[sheetName]) {
         setCellTxBaselineBySheet(prev => ({
           ...prev,
@@ -1179,7 +1208,7 @@ export function SpreadsheetImportStep({
         }));
       }
       const cur = activeCellTxBySheet[sheetName] ?? [];
-      const nextTx = [...cur, rule];
+      const nextTx = [...cur, ...tagged];
       setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
       const activePreds = activePredicatesBySheet[sheetName] ?? [];
       const itemsBefore = hier.items.length;
@@ -1189,17 +1218,26 @@ export function SpreadsheetImportStep({
         ...prev,
         [sheetName]: { ...(prev[sheetName] ?? {}), [key]: cellsTransformed },
       }));
+      appliedOnAnySheet = true;
       void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-applied', {
-        sheet: sheetName, rule: rule.rule, level: rule.level ?? null,
+        sheet: sheetName, rule: rule.rule,
+        originalLevel: rule.level ?? null,
+        appliedLevel: tagged[0].level ?? null,
         itemsBefore, itemsAfter: r?.itemsAfter ?? 0, cellsTransformed,
         activeCount: nextTx.length, mode: 'hier',
       }, sheetName);
+    }
+    if (!appliedOnAnySheet) {
+      void logParserDiagnostic(sessionId, 'ssphase4d2c', 'cell-transformation-inapplicable', {
+        key, rule: rule.rule, originalLevel: rule.level ?? null,
+        reason: 'remap-dropped-on-all-sheets',
+      });
     }
   };
   const handleUndoCellRule = (key: string) => {
     for (const sheetName of hierSheetOrder) {
       const cur = activeCellTxBySheet[sheetName] ?? [];
-      const nextTx = cur.filter(r => cellRuleKey(r) !== key);
+      const nextTx = cur.filter(r => (r as { __originalKey?: string }).__originalKey !== key);
       if (nextTx.length === cur.length) continue;
       setActiveCellTxBySheet(prev => ({ ...prev, [sheetName]: nextTx }));
       const activePreds = activePredicatesBySheet[sheetName] ?? [];
