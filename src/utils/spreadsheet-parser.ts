@@ -373,6 +373,100 @@ function detectStrategyPattern(sheet: ParsedSheet, rows: (string | number | null
   return { sheet, sections, allColumnHeaders, totalDataRows, hasStrategyPattern: true };
 }
 
+/**
+ * Phase 4c.1 — classifier-driven generic detection.
+ * Walks rows from `hint.data_starts_at_row` using `hint.section_marker_pattern`
+ * to delimit sections. If the pattern is null, the sheet is treated as a single
+ * region. Column headers come from `rows[hint.header_row_index]`.
+ */
+function detectGenericFromClassifier(
+  sheet: ParsedSheet,
+  rows: (string | number | null)[][],
+  hint: ClassifierStructureHint,
+): SheetDetection {
+  const headerRowIndex = hint.header_row_index as number;
+  const dataStartsAtRow = hint.data_starts_at_row as number;
+  const headerRow = rows[headerRowIndex];
+  const colHeaders = Array.isArray(headerRow)
+    ? headerRow.map(c => (c != null ? String(c).trim() : '')).filter(s => s.length > 0)
+    : [];
+  const allColumnHeaders: string[] = [];
+  colHeaders.forEach(h => { if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h); });
+
+  let markerRe: RegExp | null = null;
+  if (hint.section_marker_pattern) {
+    try { markerRe = new RegExp(hint.section_marker_pattern); } catch { markerRe = null; }
+  }
+
+  // Last non-empty row index (inclusive bound).
+  let lastNonEmpty = rows.length - 1;
+  while (lastNonEmpty >= dataStartsAtRow) {
+    const r = rows[lastNonEmpty];
+    if (Array.isArray(r) && r.some(c => c != null && String(c).trim() !== '')) break;
+    lastNonEmpty--;
+  }
+
+  const sections: DetectedSection[] = [];
+
+  const isMarker = (r: (string | number | null)[] | undefined): boolean => {
+    if (!markerRe || !Array.isArray(r)) return false;
+    const first = r.find(c => c != null && String(c).trim() !== '');
+    if (first == null) return false;
+    return markerRe.test(String(first).trim());
+  };
+
+  if (!markerRe) {
+    // Single region.
+    sections.push({
+      headerText: '',
+      headerRowIndex: -1,
+      columnHeaders: colHeaders,
+      columnHeaderRowIndex: headerRowIndex,
+      dataRowStart: dataStartsAtRow,
+      dataRowEnd: lastNonEmpty + 1,
+      dataRowCount: Math.max(0, lastNonEmpty + 1 - dataStartsAtRow),
+      sectionType: 'generic',
+    });
+  } else {
+    // Find marker rows from dataStartsAtRow onward.
+    const markerIdxs: number[] = [];
+    for (let i = dataStartsAtRow; i <= lastNonEmpty; i++) {
+      if (isMarker(rows[i])) markerIdxs.push(i);
+    }
+    if (markerIdxs.length === 0) {
+      sections.push({
+        headerText: '',
+        headerRowIndex: -1,
+        columnHeaders: colHeaders,
+        columnHeaderRowIndex: headerRowIndex,
+        dataRowStart: dataStartsAtRow,
+        dataRowEnd: lastNonEmpty + 1,
+        dataRowCount: Math.max(0, lastNonEmpty + 1 - dataStartsAtRow),
+        sectionType: 'generic',
+      });
+    } else {
+      for (let m = 0; m < markerIdxs.length; m++) {
+        const start = markerIdxs[m];
+        const end = m + 1 < markerIdxs.length ? markerIdxs[m + 1] : lastNonEmpty + 1;
+        const headerCell = rows[start].find(c => c != null && String(c).trim() !== '');
+        sections.push({
+          headerText: headerCell != null ? String(headerCell).trim() : '',
+          headerRowIndex: start,
+          columnHeaders: colHeaders,
+          columnHeaderRowIndex: headerRowIndex,
+          dataRowStart: start + 1,
+          dataRowEnd: end,
+          dataRowCount: Math.max(0, end - (start + 1)),
+          sectionType: 'generic',
+        });
+      }
+    }
+  }
+
+  const totalDataRows = sections.reduce((s, sec) => s + sec.dataRowCount, 0);
+  return { sheet, sections, allColumnHeaders, totalDataRows, hasStrategyPattern: false };
+}
+
 function detectGenericPattern(sheet: ParsedSheet, rows: (string | number | null)[][], avgCols: number): SheetDetection {
   const sections: DetectedSection[] = [];
   const allColumnHeaders: string[] = [];
