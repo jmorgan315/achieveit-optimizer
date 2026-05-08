@@ -184,12 +184,46 @@ export function SpreadsheetImportStep({
   }
   const [genericPreview, setGenericPreview] = useState<GenericPreview | null>(null);
 
+  // Phase 4c.1 — single-fetch dedup of layout_classification across the mount
+  // useEffect (for detectStructure hints) and tryDispatchHierarchical.
+  const classificationRef = useRef<Promise<LayoutClassification | null> | null>(null);
+  function getClassification(): Promise<LayoutClassification | null> {
+    if (classificationRef.current) return classificationRef.current;
+    classificationRef.current = (async () => {
+      const { data, error } = await supabase
+        .from('processing_sessions')
+        .select('layout_classification')
+        .eq('id', sessionId)
+        .maybeSingle();
+      if (error || !data?.layout_classification) return null;
+      return data.layout_classification as unknown as LayoutClassification;
+    })();
+    return classificationRef.current;
+  }
+
   // Parse on mount
   useEffect(() => {
     (async () => {
       try {
         const sheets = await parseSpreadsheetFile(file);
-        const det = detectStructure(sheets);
+        // Phase 4c.1 — build classifier hints map for detectStructure.
+        const cls = await getClassification();
+        let hints: Record<string, import('@/utils/spreadsheet-parser').ClassifierStructureHint> | undefined;
+        if (cls && !cls.error && Array.isArray(cls.sheets)) {
+          hints = {};
+          for (const s of cls.sheets) {
+            if (!s?.sheet_name) continue;
+            const st = s.structure || {};
+            hints[s.sheet_name] = {
+              pattern: s.pattern,
+              header_row_index: st.header_row_index ?? null,
+              data_starts_at_row: st.data_starts_at_row ?? null,
+              section_marker_pattern: (st as { section_marker_pattern?: string | null }).section_marker_pattern ?? null,
+              implied_levels: st.implied_levels,
+            };
+          }
+        }
+        const det = detectStructure(sheets, hints, sessionId);
         setDetection(det);
 
         // Honor preselected indices from SheetPickerStep when provided.
