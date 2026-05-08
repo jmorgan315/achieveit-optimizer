@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, vi } from 'vitest';
 
 // Mock the diagnostics logger before importing the parser so the borderline
