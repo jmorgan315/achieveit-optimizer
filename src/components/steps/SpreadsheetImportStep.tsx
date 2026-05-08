@@ -438,24 +438,16 @@ export function SpreadsheetImportStep({
       selectedIndices: args.selectedIndices,
       sheetCount: args.parsedSheets.length,
     });
-    // Fetch layout_classification for this session.
-    const { data, error } = await supabase
-      .from('processing_sessions')
-      .select('layout_classification')
-      .eq('id', args.sessionId)
-      .maybeSingle();
-
-    if (error || !data?.layout_classification) {
+    // Phase 4c.1 — reuse the cached classification fetch from mount.
+    const cls = await getClassification();
+    if (!cls) {
       console.log('[ssphase4b] dispatch: no layout_classification → fallback');
       void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
         outcome: 'fallback',
         reason: 'no layout_classification',
-        error: error?.message ?? null,
       });
       return { kind: 'fallback', reason: 'no layout_classification' };
     }
-
-    const cls = data.layout_classification as unknown as LayoutClassification;
     if (cls.error || !cls.sheets || cls.sheets.length === 0) {
       console.log('[ssphase4b] dispatch: layout_classification empty/error → fallback');
       void logParserDiagnostic(args.sessionId, 'dispatcher', 'dispatch', {
