@@ -1,5 +1,66 @@
 import * as XLSX from 'xlsx';
 import { PlanItem, PlanLevel, PersonMapping } from '@/types/plan';
+import { logParserDiagnostic } from '@/utils/parserDiagnostics';
+
+/**
+ * Phase 4c.1 — classifier-driven structure detection hint.
+ * One per sheet, sourced from `processing_sessions.layout_classification`.
+ * Optional everywhere; absence falls through to the legacy heuristic path.
+ */
+export interface ClassifierStructureHint {
+  pattern?: string | null;
+  header_row_index?: number | null;
+  data_starts_at_row?: number | null;
+  section_marker_pattern?: string | null;
+  implied_levels?: string[];
+}
+
+/**
+ * Phase 4c.1 — classifier/heuristic agreement check on candidate strategy markers.
+ * Returns true iff classifier-selected marker rows also look like strategy rows
+ * to the legacy heuristic at >=80% agreement. Borderline (between 0% and 80%)
+ * fires a surveillance diagnostic but still falls through to heuristic path.
+ *
+ * Never throws — bad regex / empty markers yield false.
+ */
+export function isStrategyMarker(
+  rows: (string | number | null)[][],
+  hint: ClassifierStructureHint,
+  sessionId?: string,
+  sheetName?: string,
+): boolean {
+  const pattern = hint.section_marker_pattern;
+  if (!pattern) return false;
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern);
+  } catch {
+    return false;
+  }
+  const dataStart = typeof hint.data_starts_at_row === 'number' ? hint.data_starts_at_row : 0;
+  const markerRows: (string | number | null)[][] = [];
+  for (let i = dataStart; i < rows.length; i++) {
+    const r = rows[i];
+    if (!Array.isArray(r)) continue;
+    const firstNonEmpty = r.find(c => c != null && String(c).trim() !== '');
+    if (firstNonEmpty == null) continue;
+    if (re.test(String(firstNonEmpty).trim())) markerRows.push(r);
+  }
+  if (markerRows.length === 0) return false;
+  const strategyCount = markerRows.filter(r => isStrategyRow(r)).length;
+  const agree = strategyCount / markerRows.length;
+  if (agree >= 0.8) return true;
+  if (agree > 0) {
+    // Borderline — surveillance only; dispatch falls through to heuristic.
+    void logParserDiagnostic(sessionId, 'ssphase4c1', 'strategy-marker-borderline', {
+      agreementRatio: agree,
+      markerRowCount: markerRows.length,
+      strategyRowCount: strategyCount,
+      sectionMarkerPattern: pattern,
+    }, sheetName);
+  }
+  return false;
+}
 
 /** Safely parse a spreadsheet date cell (Excel serial, ISO string, locale string) into YYYY-MM-DD or undefined */
 export function parseSpreadsheetDate(v: unknown): string | undefined {
