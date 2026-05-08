@@ -201,22 +201,82 @@ function isLikelySectionHeader(row: (string | number | null)[] | undefined, avgC
   return text.length > 3 && text.length < 200 && avgCols > 2;
 }
 
-export function detectStructure(sheets: ParsedSheet[]): StructureDetection {
+export function detectStructure(
+  sheets: ParsedSheet[],
+  classifierHints?: Record<string, ClassifierStructureHint>,
+  sessionId?: string,
+): StructureDetection {
   const detections: SheetDetection[] = sheets.map(sheet => {
     const { rows } = sheet;
     const avgCols = rows.length > 0
       ? rows.reduce((s, r) => s + r.filter(c => c != null && String(c).trim() !== '').length, 0) / rows.length
       : 0;
 
-    // First pass: check if this sheet has a strategy pattern
-    const hasStrategy = rows.some(r => isStrategyRow(r));
+    const hint = classifierHints?.[sheet.name];
+    // Always compute the heuristic answer for diagnostic side-by-side.
+    const hasStrategyHeuristic = rows.some(r => isStrategyRow(r));
 
-    if (hasStrategy) {
-      return detectStrategyPattern(sheet, rows);
+    const useClassifier =
+      !!hint &&
+      hint.pattern === 'A' &&
+      typeof hint.header_row_index === 'number' &&
+      typeof hint.data_starts_at_row === 'number';
+
+    let detection: SheetDetection;
+    let path: 'classifier' | 'heuristic';
+    let dispatchedTo: 'strategy' | 'generic';
+    let reason: string;
+
+    if (useClassifier) {
+      path = 'classifier';
+      if (isStrategyMarker(rows, hint!, sessionId, sheet.name)) {
+        detection = detectStrategyPattern(sheet, rows);
+        dispatchedTo = 'strategy';
+        reason = 'classifier+strategy-marker-confirmed';
+      } else {
+        detection = detectGenericFromClassifier(sheet, rows, hint!);
+        dispatchedTo = 'generic';
+        reason = hint!.section_marker_pattern == null
+          ? 'classifier+null-marker'
+          : 'classifier+non-strategy-marker';
+      }
+    } else {
+      path = 'heuristic';
+      reason = !hint ? 'no-hint'
+        : hint.pattern !== 'A' ? 'pattern-not-A'
+        : typeof hint.header_row_index !== 'number' ? 'header-row-not-number'
+        : 'data-row-not-number';
+      if (hasStrategyHeuristic) {
+        detection = detectStrategyPattern(sheet, rows);
+        dispatchedTo = 'strategy';
+      } else {
+        detection = detectGenericPattern(sheet, rows, avgCols);
+        dispatchedTo = 'generic';
+      }
     }
 
-    // Fallback: generic detection (original logic)
-    return detectGenericPattern(sheet, rows, avgCols);
+    void logParserDiagnostic(sessionId, 'ssphase4c1', 'dispatch', {
+      path,
+      dispatched_to: dispatchedTo,
+      reason,
+      classifierPattern: hint?.pattern ?? null,
+      sectionMarkerPattern: hint?.section_marker_pattern ?? null,
+      headerRowIndex: hint?.header_row_index ?? null,
+      dataStartsAtRow: hint?.data_starts_at_row ?? null,
+      hasStrategyHeuristicResult: hasStrategyHeuristic,
+    }, sheet.name);
+    void logParserDiagnostic(sessionId, 'ssphase4c1', 'sections', {
+      path,
+      sectionCount: detection.sections.length,
+      totalDataRows: detection.totalDataRows,
+      sectionsPreview: detection.sections.slice(0, 5).map(s => ({
+        headerText: s.headerText,
+        dataRowCount: s.dataRowCount,
+        sectionType: s.sectionType,
+      })),
+    }, sheet.name);
+
+    return detection;
   });
 
   const hasStrategyPattern = detections.some(d => d.hasStrategyPattern);
