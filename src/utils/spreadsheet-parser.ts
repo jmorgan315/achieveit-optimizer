@@ -1,5 +1,66 @@
 import * as XLSX from 'xlsx';
 import { PlanItem, PlanLevel, PersonMapping } from '@/types/plan';
+import { logParserDiagnostic } from '@/utils/parserDiagnostics';
+
+/**
+ * Phase 4c.1 — classifier-driven structure detection hint.
+ * One per sheet, sourced from `processing_sessions.layout_classification`.
+ * Optional everywhere; absence falls through to the legacy heuristic path.
+ */
+export interface ClassifierStructureHint {
+  pattern?: string | null;
+  header_row_index?: number | null;
+  data_starts_at_row?: number | null;
+  section_marker_pattern?: string | null;
+  implied_levels?: string[];
+}
+
+/**
+ * Phase 4c.1 — classifier/heuristic agreement check on candidate strategy markers.
+ * Returns true iff classifier-selected marker rows also look like strategy rows
+ * to the legacy heuristic at >=80% agreement. Borderline (between 0% and 80%)
+ * fires a surveillance diagnostic but still falls through to heuristic path.
+ *
+ * Never throws — bad regex / empty markers yield false.
+ */
+export function isStrategyMarker(
+  rows: (string | number | null)[][],
+  hint: ClassifierStructureHint,
+  sessionId?: string,
+  sheetName?: string,
+): boolean {
+  const pattern = hint.section_marker_pattern;
+  if (!pattern) return false;
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern);
+  } catch {
+    return false;
+  }
+  const dataStart = typeof hint.data_starts_at_row === 'number' ? hint.data_starts_at_row : 0;
+  const markerRows: (string | number | null)[][] = [];
+  for (let i = dataStart; i < rows.length; i++) {
+    const r = rows[i];
+    if (!Array.isArray(r)) continue;
+    const firstNonEmpty = r.find(c => c != null && String(c).trim() !== '');
+    if (firstNonEmpty == null) continue;
+    if (re.test(String(firstNonEmpty).trim())) markerRows.push(r);
+  }
+  if (markerRows.length === 0) return false;
+  const strategyCount = markerRows.filter(r => isStrategyRow(r)).length;
+  const agree = strategyCount / markerRows.length;
+  if (agree >= 0.8) return true;
+  if (agree > 0) {
+    // Borderline — surveillance only; dispatch falls through to heuristic.
+    void logParserDiagnostic(sessionId, 'ssphase4c1', 'strategy-marker-borderline', {
+      agreementRatio: agree,
+      markerRowCount: markerRows.length,
+      strategyRowCount: strategyCount,
+      sectionMarkerPattern: pattern,
+    }, sheetName);
+  }
+  return false;
+}
 
 /** Safely parse a spreadsheet date cell (Excel serial, ISO string, locale string) into YYYY-MM-DD or undefined */
 export function parseSpreadsheetDate(v: unknown): string | undefined {
@@ -140,22 +201,82 @@ function isLikelySectionHeader(row: (string | number | null)[] | undefined, avgC
   return text.length > 3 && text.length < 200 && avgCols > 2;
 }
 
-export function detectStructure(sheets: ParsedSheet[]): StructureDetection {
+export function detectStructure(
+  sheets: ParsedSheet[],
+  classifierHints?: Record<string, ClassifierStructureHint>,
+  sessionId?: string,
+): StructureDetection {
   const detections: SheetDetection[] = sheets.map(sheet => {
     const { rows } = sheet;
     const avgCols = rows.length > 0
       ? rows.reduce((s, r) => s + r.filter(c => c != null && String(c).trim() !== '').length, 0) / rows.length
       : 0;
 
-    // First pass: check if this sheet has a strategy pattern
-    const hasStrategy = rows.some(r => isStrategyRow(r));
+    const hint = classifierHints?.[sheet.name];
+    // Always compute the heuristic answer for diagnostic side-by-side.
+    const hasStrategyHeuristic = rows.some(r => isStrategyRow(r));
 
-    if (hasStrategy) {
-      return detectStrategyPattern(sheet, rows);
+    const useClassifier =
+      !!hint &&
+      hint.pattern === 'A' &&
+      typeof hint.header_row_index === 'number' &&
+      typeof hint.data_starts_at_row === 'number';
+
+    let detection: SheetDetection;
+    let path: 'classifier' | 'heuristic';
+    let dispatchedTo: 'strategy' | 'generic';
+    let reason: string;
+
+    if (useClassifier) {
+      path = 'classifier';
+      if (isStrategyMarker(rows, hint!, sessionId, sheet.name)) {
+        detection = detectStrategyPattern(sheet, rows);
+        dispatchedTo = 'strategy';
+        reason = 'classifier+strategy-marker-confirmed';
+      } else {
+        detection = detectGenericFromClassifier(sheet, rows, hint!);
+        dispatchedTo = 'generic';
+        reason = hint!.section_marker_pattern == null
+          ? 'classifier+null-marker'
+          : 'classifier+non-strategy-marker';
+      }
+    } else {
+      path = 'heuristic';
+      reason = !hint ? 'no-hint'
+        : hint.pattern !== 'A' ? 'pattern-not-A'
+        : typeof hint.header_row_index !== 'number' ? 'header-row-not-number'
+        : 'data-row-not-number';
+      if (hasStrategyHeuristic) {
+        detection = detectStrategyPattern(sheet, rows);
+        dispatchedTo = 'strategy';
+      } else {
+        detection = detectGenericPattern(sheet, rows, avgCols);
+        dispatchedTo = 'generic';
+      }
     }
 
-    // Fallback: generic detection (original logic)
-    return detectGenericPattern(sheet, rows, avgCols);
+    void logParserDiagnostic(sessionId, 'ssphase4c1', 'dispatch', {
+      path,
+      dispatched_to: dispatchedTo,
+      reason,
+      classifierPattern: hint?.pattern ?? null,
+      sectionMarkerPattern: hint?.section_marker_pattern ?? null,
+      headerRowIndex: hint?.header_row_index ?? null,
+      dataStartsAtRow: hint?.data_starts_at_row ?? null,
+      hasStrategyHeuristicResult: hasStrategyHeuristic,
+    }, sheet.name);
+    void logParserDiagnostic(sessionId, 'ssphase4c1', 'sections', {
+      path,
+      sectionCount: detection.sections.length,
+      totalDataRows: detection.totalDataRows,
+      sectionsPreview: detection.sections.slice(0, 5).map(s => ({
+        headerText: s.headerText,
+        dataRowCount: s.dataRowCount,
+        sectionType: s.sectionType,
+      })),
+    }, sheet.name);
+
+    return detection;
   });
 
   const hasStrategyPattern = detections.some(d => d.hasStrategyPattern);
@@ -250,6 +371,100 @@ function detectStrategyPattern(sheet: ParsedSheet, rows: (string | number | null
 
   const totalDataRows = sections.reduce((s, sec) => s + sec.dataRowCount, 0);
   return { sheet, sections, allColumnHeaders, totalDataRows, hasStrategyPattern: true };
+}
+
+/**
+ * Phase 4c.1 — classifier-driven generic detection.
+ * Walks rows from `hint.data_starts_at_row` using `hint.section_marker_pattern`
+ * to delimit sections. If the pattern is null, the sheet is treated as a single
+ * region. Column headers come from `rows[hint.header_row_index]`.
+ */
+function detectGenericFromClassifier(
+  sheet: ParsedSheet,
+  rows: (string | number | null)[][],
+  hint: ClassifierStructureHint,
+): SheetDetection {
+  const headerRowIndex = hint.header_row_index as number;
+  const dataStartsAtRow = hint.data_starts_at_row as number;
+  const headerRow = rows[headerRowIndex];
+  const colHeaders = Array.isArray(headerRow)
+    ? headerRow.map(c => (c != null ? String(c).trim() : '')).filter(s => s.length > 0)
+    : [];
+  const allColumnHeaders: string[] = [];
+  colHeaders.forEach(h => { if (!allColumnHeaders.includes(h)) allColumnHeaders.push(h); });
+
+  let markerRe: RegExp | null = null;
+  if (hint.section_marker_pattern) {
+    try { markerRe = new RegExp(hint.section_marker_pattern); } catch { markerRe = null; }
+  }
+
+  // Last non-empty row index (inclusive bound).
+  let lastNonEmpty = rows.length - 1;
+  while (lastNonEmpty >= dataStartsAtRow) {
+    const r = rows[lastNonEmpty];
+    if (Array.isArray(r) && r.some(c => c != null && String(c).trim() !== '')) break;
+    lastNonEmpty--;
+  }
+
+  const sections: DetectedSection[] = [];
+
+  const isMarker = (r: (string | number | null)[] | undefined): boolean => {
+    if (!markerRe || !Array.isArray(r)) return false;
+    const first = r.find(c => c != null && String(c).trim() !== '');
+    if (first == null) return false;
+    return markerRe.test(String(first).trim());
+  };
+
+  if (!markerRe) {
+    // Single region.
+    sections.push({
+      headerText: '',
+      headerRowIndex: -1,
+      columnHeaders: colHeaders,
+      columnHeaderRowIndex: headerRowIndex,
+      dataRowStart: dataStartsAtRow,
+      dataRowEnd: lastNonEmpty + 1,
+      dataRowCount: Math.max(0, lastNonEmpty + 1 - dataStartsAtRow),
+      sectionType: 'generic',
+    });
+  } else {
+    // Find marker rows from dataStartsAtRow onward.
+    const markerIdxs: number[] = [];
+    for (let i = dataStartsAtRow; i <= lastNonEmpty; i++) {
+      if (isMarker(rows[i])) markerIdxs.push(i);
+    }
+    if (markerIdxs.length === 0) {
+      sections.push({
+        headerText: '',
+        headerRowIndex: -1,
+        columnHeaders: colHeaders,
+        columnHeaderRowIndex: headerRowIndex,
+        dataRowStart: dataStartsAtRow,
+        dataRowEnd: lastNonEmpty + 1,
+        dataRowCount: Math.max(0, lastNonEmpty + 1 - dataStartsAtRow),
+        sectionType: 'generic',
+      });
+    } else {
+      for (let m = 0; m < markerIdxs.length; m++) {
+        const start = markerIdxs[m];
+        const end = m + 1 < markerIdxs.length ? markerIdxs[m + 1] : lastNonEmpty + 1;
+        const headerCell = rows[start].find(c => c != null && String(c).trim() !== '');
+        sections.push({
+          headerText: headerCell != null ? String(headerCell).trim() : '',
+          headerRowIndex: start,
+          columnHeaders: colHeaders,
+          columnHeaderRowIndex: headerRowIndex,
+          dataRowStart: start + 1,
+          dataRowEnd: end,
+          dataRowCount: Math.max(0, end - (start + 1)),
+          sectionType: 'generic',
+        });
+      }
+    }
+  }
+
+  const totalDataRows = sections.reduce((s, sec) => s + sec.dataRowCount, 0);
+  return { sheet, sections, allColumnHeaders, totalDataRows, hasStrategyPattern: false };
 }
 
 function detectGenericPattern(sheet: ParsedSheet, rows: (string | number | null)[][], avgCols: number): SheetDetection {
