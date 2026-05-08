@@ -213,12 +213,12 @@ export function SpreadsheetImportStep({
           hints = {};
           for (const s of cls.sheets) {
             if (!s?.sheet_name) continue;
-            const st = s.structure || {};
+            const st = (s.structure || {}) as Partial<import('@/utils/parsers/parseHierarchicalColumns').SheetClassificationStructure> & { section_marker_pattern?: string | null };
             hints[s.sheet_name] = {
               pattern: s.pattern,
               header_row_index: st.header_row_index ?? null,
               data_starts_at_row: st.data_starts_at_row ?? null,
-              section_marker_pattern: (st as { section_marker_pattern?: string | null }).section_marker_pattern ?? null,
+              section_marker_pattern: st.section_marker_pattern ?? null,
               implied_levels: st.implied_levels,
             };
           }
