@@ -175,6 +175,20 @@ const layoutToolSchema = {
               section_marker_pattern: { type: ["string", "null"] },
             },
           },
+          column_hints: {
+            type: "array",
+            description: "Optional non-structural attribute columns the parser should consider mapping. Omit or [] for not_plan_content/empty/unknown/D sheets.",
+            items: {
+              type: "object",
+              properties: {
+                col_index: { type: "number" },
+                suggested_attribute: { type: "string" },
+                confidence: { type: "string", enum: ["high", "medium", "low"] },
+                reason: { type: "string" },
+              },
+              required: ["col_index", "suggested_attribute", "confidence"],
+            },
+          },
         },
         required: ["sheet_name", "pattern", "confidence", "reasoning"],
       },
