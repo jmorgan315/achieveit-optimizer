@@ -335,19 +335,21 @@ serve(async (req) => {
       const userMessage = buildUserMessage(orgName, documentHints, chunks[i], totalSheets, i, chunks.length);
       const result = await callClaude(ANTHROPIC_API_KEY, userMessage);
 
-      logApiCall({
-        session_id: sessionId,
-        edge_function: "classify-spreadsheet-layout",
-        step_label: "classify_layout",
-        model: MODEL,
-        request_payload: { chunkIndex: i, chunkCount: chunks.length, sheetNames: chunks[i].map(s => s.sheetName), orgName, documentHints },
-        response_payload: result.raw,
-        input_tokens: result.tokens.input_tokens,
-        output_tokens: result.tokens.output_tokens,
-        duration_ms: result.durationMs,
-        status: result.ok ? "success" : "error",
-        error_message: result.error,
-      });
+      if (!dryRun) {
+        logApiCall({
+          session_id: sessionId,
+          edge_function: "classify-spreadsheet-layout",
+          step_label: "classify_layout",
+          model: MODEL,
+          request_payload: { chunkIndex: i, chunkCount: chunks.length, sheetNames: chunks[i].map(s => s.sheetName), orgName, documentHints },
+          response_payload: result.raw,
+          input_tokens: result.tokens.input_tokens,
+          output_tokens: result.tokens.output_tokens,
+          duration_ms: result.durationMs,
+          status: result.ok ? "success" : "error",
+          error_message: result.error,
+        });
+      }
 
       totalIn += result.tokens.input_tokens || 0;
       totalOut += result.tokens.output_tokens || 0;
