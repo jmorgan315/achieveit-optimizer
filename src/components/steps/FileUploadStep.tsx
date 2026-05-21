@@ -924,8 +924,25 @@ export function FileUploadStep({
                     workbookPreview,
                   },
                 })
-                .then(({ error }) => {
-                  if (error) console.warn('[classify-layout] invoke error:', error);
+                .then(async ({ data, error }) => {
+                  if (error) {
+                    console.warn('[classify-layout] invoke error:', error);
+                    return;
+                  }
+                  // Stage A2: kick off non-structural column-hint extraction.
+                  // Fire-and-forget; failures must NOT block the pipeline.
+                  try {
+                    const { buildColumnHintInput } = await import('@/utils/columnHintInput');
+                    const layoutResult = data?.data ?? data;
+                    const hintInput = buildColumnHintInput(sessionId, layoutResult, workbookPreview);
+                    if (hintInput.sheets.length > 0) {
+                      supabase.functions
+                        .invoke('extract-column-hints', { body: hintInput })
+                        .catch(err => console.warn('[extract-column-hints] non-blocking failure', err));
+                    }
+                  } catch (hintErr) {
+                    console.warn('[extract-column-hints] input build failed:', hintErr);
+                  }
                 })
                 .catch(err => console.warn('[classify-layout] invoke threw:', err));
             } catch (clsErr) {
