@@ -274,7 +274,6 @@ serve(async (req) => {
     const orgName: string | undefined = body.orgName;
     const documentHints: string | undefined = body.documentHints;
     const workbookPreview: SheetPreview[] = body.workbookPreview;
-    const dryRun: boolean = body.dryRun === true;
 
     if (!sessionId || !Array.isArray(workbookPreview) || workbookPreview.length === 0) {
       return new Response(JSON.stringify({ success: false, error: "sessionId and workbookPreview required" }), {
