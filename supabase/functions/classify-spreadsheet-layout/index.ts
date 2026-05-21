@@ -93,18 +93,6 @@ A sheet structurally classified as "not_plan_content" does NOT belong in exclude
 
   3. ANTI-PATTERN GUARD — DO NOT GUESS FROM DATA SHAPE. The "level" field describes the user's intent, not the structural shape of the data. Do NOT pick a level (or column) just because that column happens to contain semicolon-delimited cells, numeric-only cells, or any other pattern that matches the rule. The data shape is irrelevant here; only the user's words in documentHints determine "level".
 
-=== COLUMN HINTS (per sheet, optional) ===
-
-For each sheet whose pattern is A, B, or C, OPTIONALLY emit a "column_hints" array describing non-structural attribute columns the downstream parser should consider mapping onto PlanItem fields. These are NOT the name/hierarchy columns — those are already captured by structure fields. Column hints surface columns like Owner / Assigned To, Due Date / Target Date, Status, Frequency, Measurement / KPI / Metric, Description / Notes, etc.
-
-Each entry:
-  - col_index: 0-based column index in the sheet's grid
-  - suggested_attribute: short snake_case identifier for the attribute. Use one of the canonical names when applicable: "owner" | "due_date" | "status" | "frequency" | "measurement" | "description" | "start_date" | "priority". For columns that don't match a canonical attribute but still look like structured plan metadata, emit a descriptive snake_case label (e.g. "fiscal_year", "department").
-  - confidence: one of the string literals "high" | "medium" | "low". Use "high" when the column header is unambiguous (e.g. "Owner", "Due Date"). Use "medium" when the header is suggestive but the data could fit multiple attributes. Use "low" when you're guessing from data shape with a weak header.
-  - reason: short (≤120 chars) human-readable justification — what header text and/or data pattern drove the suggestion.
-
-Omit column_hints entirely (or emit []) for sheets classified as not_plan_content, empty, unknown, or D. Never emit hints for the name/hierarchy columns already encoded in structure.name_column_index or structure.hierarchy_signal.
-
 Be precise. Respond ONLY via the report_layout tool.`;
 
 const layoutToolSchema = {
