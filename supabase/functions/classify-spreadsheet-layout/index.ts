@@ -452,11 +452,15 @@ serve(async (req) => {
       chunks: chunks.length,
     };
 
-    const { error: updErr } = await supabase
-      .from("processing_sessions")
-      .update({ layout_classification: merged, layout_classified_at: new Date().toISOString() })
-      .eq("id", sessionId);
-    if (updErr) console.error("[classify-layout] persist error:", updErr.message);
+    if (!dryRun) {
+      const { error: updErr } = await supabase
+        .from("processing_sessions")
+        .update({ layout_classification: merged, layout_classified_at: new Date().toISOString() })
+        .eq("id", sessionId);
+      if (updErr) console.error("[classify-layout] persist error:", updErr.message);
+    } else {
+      console.log(`[classify-layout] dryRun=true — skipping persistence for session=${sessionId}`);
+    }
 
     return new Response(JSON.stringify({ success: true, data: merged }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
