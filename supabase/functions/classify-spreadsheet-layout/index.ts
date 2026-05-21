@@ -274,7 +274,6 @@ serve(async (req) => {
     const orgName: string | undefined = body.orgName;
     const documentHints: string | undefined = body.documentHints;
     const workbookPreview: SheetPreview[] = body.workbookPreview;
-    const dryRun: boolean = body.dryRun === true;
 
     if (!sessionId || !Array.isArray(workbookPreview) || workbookPreview.length === 0) {
       return new Response(JSON.stringify({ success: false, error: "sessionId and workbookPreview required" }), {
@@ -309,21 +308,19 @@ serve(async (req) => {
       const userMessage = buildUserMessage(orgName, documentHints, chunks[i], totalSheets, i, chunks.length);
       const result = await callClaude(ANTHROPIC_API_KEY, userMessage);
 
-      if (!dryRun) {
-        logApiCall({
-          session_id: sessionId,
-          edge_function: "classify-spreadsheet-layout",
-          step_label: "classify_layout",
-          model: MODEL,
-          request_payload: { chunkIndex: i, chunkCount: chunks.length, sheetNames: chunks[i].map(s => s.sheetName), orgName, documentHints },
-          response_payload: result.raw,
-          input_tokens: result.tokens.input_tokens,
-          output_tokens: result.tokens.output_tokens,
-          duration_ms: result.durationMs,
-          status: result.ok ? "success" : "error",
-          error_message: result.error,
-        });
-      }
+      logApiCall({
+        session_id: sessionId,
+        edge_function: "classify-spreadsheet-layout",
+        step_label: "classify_layout",
+        model: MODEL,
+        request_payload: { chunkIndex: i, chunkCount: chunks.length, sheetNames: chunks[i].map(s => s.sheetName), orgName, documentHints },
+        response_payload: result.raw,
+        input_tokens: result.tokens.input_tokens,
+        output_tokens: result.tokens.output_tokens,
+        duration_ms: result.durationMs,
+        status: result.ok ? "success" : "error",
+        error_message: result.error,
+      });
 
       totalIn += result.tokens.input_tokens || 0;
       totalOut += result.tokens.output_tokens || 0;
@@ -428,15 +425,11 @@ serve(async (req) => {
       chunks: chunks.length,
     };
 
-    if (!dryRun) {
-      const { error: updErr } = await supabase
-        .from("processing_sessions")
-        .update({ layout_classification: merged, layout_classified_at: new Date().toISOString() })
-        .eq("id", sessionId);
-      if (updErr) console.error("[classify-layout] persist error:", updErr.message);
-    } else {
-      console.log(`[classify-layout] dryRun=true — skipping persistence for session=${sessionId}`);
-    }
+    const { error: updErr } = await supabase
+      .from("processing_sessions")
+      .update({ layout_classification: merged, layout_classified_at: new Date().toISOString() })
+      .eq("id", sessionId);
+    if (updErr) console.error("[classify-layout] persist error:", updErr.message);
 
     return new Response(JSON.stringify({ success: true, data: merged }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
