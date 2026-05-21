@@ -159,6 +159,7 @@ export type Database = {
       processing_sessions: {
         Row: {
           classification_result: Json | null
+          column_hints: Json | null
           created_at: string
           current_step: string
           document_hints: string | null
@@ -184,6 +185,7 @@ export type Database = {
         }
         Insert: {
           classification_result?: Json | null
+          column_hints?: Json | null
           created_at?: string
           current_step?: string
           document_hints?: string | null
@@ -209,6 +211,7 @@ export type Database = {
         }
         Update: {
           classification_result?: Json | null
+          column_hints?: Json | null
           created_at?: string
           current_step?: string
           document_hints?: string | null

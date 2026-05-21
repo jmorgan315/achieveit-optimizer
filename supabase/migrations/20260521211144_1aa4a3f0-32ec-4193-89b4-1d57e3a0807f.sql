@@ -1,0 +1,1 @@
+ALTER TABLE public.processing_sessions ADD COLUMN column_hints jsonb;
